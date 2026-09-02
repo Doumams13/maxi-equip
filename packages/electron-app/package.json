@@ -11,7 +11,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "test:sqlcipher": "node scripts/test-sqlcipher.cjs"
+    "test:sqlcipher": "electron scripts/test-sqlcipher.cjs --no-sandbox"
   },
   "dependencies": {
     "@maxi-equip/design-system": "*",

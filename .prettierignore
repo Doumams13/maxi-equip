@@ -1,0 +1,7 @@
+node_modules
+dist
+dist-main
+.next
+build
+*.sqlite
+package-lock.json

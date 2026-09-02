@@ -1,0 +1,19 @@
+{
+  "name": "@maxi-equip/domain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Règles métier partagées entre l'application Windows et l'API. Indépendant d'Electron, Next.js, SQLite et PostgreSQL — voir docs/architecture/PHASE0.md.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@maxi-equip/shared-types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3"
+  }
+}

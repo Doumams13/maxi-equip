@@ -1,0 +1,16 @@
+{
+  "name": "@maxi-equip/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Types TypeScript communs à l'application Windows, l'API et le site vitrine. Aucune logique, uniquement des formes de données.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@maxi-equip/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API serverless MAXI EQUIP — deux niveaux de confiance (application authentifiée / site public restreint). Voir Synthèse §5.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/local-dev-server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@maxi-equip/domain": "*",
+    "@maxi-equip/shared-types": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@maxi-equip/electron-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Application Windows MAXI EQUIP (SHOP). Electron + React + TypeScript, local-first avec SQLite chiffré (SQLCipher).",
+  "type": "module",
+  "main": "dist-main/main/index.cjs",
+  "scripts": {
+    "postinstall": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "test:sqlcipher": "node scripts/test-sqlcipher.cjs"
+  },
+  "dependencies": {
+    "@maxi-equip/design-system": "*",
+    "@maxi-equip/domain": "*",
+    "@maxi-equip/shared-types": "*",
+    "better-sqlite3-multiple-ciphers": "^11.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^31.0.0",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.3.3"
+  }
+}

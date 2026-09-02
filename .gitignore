@@ -1,0 +1,37 @@
+# Dépendances
+node_modules/
+
+# Builds
+dist/
+dist-main/
+.next/
+build/
+out/
+
+# Base de données locale et clés — ne doivent JAMAIS être commitées
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.key
+
+# Variables d'environnement — uniquement les .env.example sont commités
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Éditeurs / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+# Tests / couverture
+coverage/
+
+# TypeScript incrémental
+*.tsbuildinfo
+next-env.d.ts.bak

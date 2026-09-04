@@ -28,9 +28,6 @@ const maxiEquipApi = {
   logout: (): Promise<{ ok: boolean }> => ipcRenderer.invoke("auth:logout"),
   getSession: (): Promise<auth.SessionLocale | null> => ipcRenderer.invoke("auth:getSession"),
   getPermissions: (): Promise<auth.PermissionSet | null> => ipcRenderer.invoke("auth:getPermissions"),
-
-  lockWindowForLogin: (): Promise<void> => ipcRenderer.invoke("window:lockForLogin"),
-  unlockWindowForApp: (): Promise<void> => ipcRenderer.invoke("window:unlockForApp"),
 };
 
 export type MaxiEquipApi = typeof maxiEquipApi;

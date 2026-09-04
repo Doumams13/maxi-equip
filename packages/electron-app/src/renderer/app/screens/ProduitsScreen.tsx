@@ -45,6 +45,14 @@ function Miniature({ dataUrl, motif }: { dataUrl: string | null; motif: string }
  * motif (§1-§5 de la correction) et le comportement combobox de "Type" et
  * "Taille" (§8bis) : composant Combobox du Design System, suggestions
  * réelles + saisie libre, jamais une liste fermée (cahier des charges §4).
+ *
+ * CONVENTION IMPORTANTE (retour explicite, valable pour les prochains
+ * écrans/évolutions) : le "motif" d'un carreau est représenté par une
+ * PHOTO, pas par un texte. Le champ texte associé au produit reste utile
+ * pour la recherche/le tri interne, mais n'est jamais présenté comme
+ * "le motif" dans l'interface — la sélection de la photo fait partie
+ * intégrante du parcours de création d'un produit, jamais une étape
+ * séparée facultative que l'utilisateur pourrait oublier.
  */
 export function ProduitsScreen() {
   const { showSuccess, showError } = useToast();
@@ -53,7 +61,7 @@ export function ProduitsScreen() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ motif: "", type: "", taille: "", reference: "", prix: "", seuilAlerte: "10" });
-  const [imagesModalProduit, setImagesModalProduit] = useState<ProduitAvecMiniature | null>(null);
+  const [imagesModalProduit, setImagesModalProduit] = useState<{ id: string; motif: string } | null>(null);
 
   async function refresh() {
     const [list, sugg] = await Promise.all([window.maxiEquip.listProduits(), window.maxiEquip.getCatalogueSuggestions()]);
@@ -73,7 +81,7 @@ export function ProduitsScreen() {
     }
     setSaving(true);
     try {
-      await window.maxiEquip.createProduit({
+      const { id } = await window.maxiEquip.createProduit({
         motif: form.motif.trim(),
         type: form.type.trim(),
         taille: form.taille.trim(),
@@ -81,10 +89,15 @@ export function ProduitsScreen() {
         prix: Number(form.prix),
         seuilAlerte: Number(form.seuilAlerte) || 0,
       });
-      showSuccess("Produit ajouté", `"${form.motif}" a été ajouté au catalogue.`);
+      const motifSaisi = form.motif.trim();
       setForm({ motif: "", type: "", taille: "", reference: "", prix: "", seuilAlerte: "10" });
       setShowForm(false);
       await refresh();
+      showSuccess("Produit créé", "Choisissez maintenant la photo du carreau — c'est elle qui représente le motif.");
+      // Le motif est une PHOTO, pas un texte (retour explicite) : la sélection
+      // de l'image s'enchaîne directement après la création, plutôt que
+      // d'être une étape séparée que l'utilisateur pourrait oublier.
+      setImagesModalProduit({ id, motif: motifSaisi });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[produits] création impossible :", err);
@@ -106,9 +119,12 @@ export function ProduitsScreen() {
 
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
+          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: defaultTokens.colors.textSoft, background: defaultTokens.colors.accentSoft, padding: "8px 12px", borderRadius: defaultTokens.radius.sm }}>
+            Le <strong>motif</strong> d'un carreau est représenté par sa <strong>photo</strong>, pas par un texte — vous pourrez la choisir juste après avoir validé les informations ci-dessous.
+          </p>
           <form onSubmit={(e) => void handleCreate(e)} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <div>
-              <label style={labelStyle}>Motif</label>
+              <label style={labelStyle}>Nom du modèle (usage interne / recherche)</label>
               <input style={inputStyle} value={form.motif} onChange={(e) => setForm((f) => ({ ...f, motif: e.target.value }))} placeholder="Ex. Marbre Blanc" />
             </div>
             <div>
@@ -141,12 +157,9 @@ export function ProduitsScreen() {
               <label style={labelStyle}>Seuil d'alerte (cartons)</label>
               <input style={inputStyle} type="number" value={form.seuilAlerte} onChange={(e) => setForm((f) => ({ ...f, seuilAlerte: e.target.value }))} />
             </div>
-            <p style={{ gridColumn: "1 / -1", margin: 0, fontSize: 11.5, color: defaultTokens.colors.textFaint }}>
-              Les images du produit pourront être ajoutées après sa création, via le bouton dédié dans le tableau ci-dessous.
-            </p>
             <div style={{ gridColumn: "1 / -1" }}>
               <Button type="submit" loading={saving}>
-                Enregistrer le produit
+                Continuer — choisir la photo du motif
               </Button>
             </div>
           </form>

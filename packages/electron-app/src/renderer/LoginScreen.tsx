@@ -41,7 +41,8 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [motDePasse, setMotDePasse] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [hasError, setHasError] = useState(false);
+  const [identifiantHasError, setIdentifiantHasError] = useState(false);
+  const [motDePasseHasError, setMotDePasseHasError] = useState(false);
   const [focusedField, setFocusedField] = useState<"identifiant" | "motDePasse" | null>(null);
 
   const identifiantRef = useRef<HTMLInputElement>(null);
@@ -49,21 +50,22 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setHasError(false);
+    setIdentifiantHasError(false);
+    setMotDePasseHasError(false);
 
     // Validation des champs AVANT tout appel à l'authentification (§10) —
     // ne modifie pas la logique métier, empêche seulement un appel inutile.
     if (identifiant.trim().length === 0) {
       const { title, message } = FIELD_REQUIRED_MESSAGES.identifiant;
       showWarning(title, message);
-      setHasError(true);
+      setIdentifiantHasError(true);
       identifiantRef.current?.focus();
       return;
     }
     if (motDePasse.length === 0) {
       const { title, message } = FIELD_REQUIRED_MESSAGES.motDePasse;
       showWarning(title, message);
-      setHasError(true);
+      setMotDePasseHasError(true);
       motDePasseRef.current?.focus();
       return;
     }
@@ -80,7 +82,8 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         // jamais affiché tel quel.
         const { title, message } = mapAuthFailureReason(outcome.reason);
         showError(title, message);
-        setHasError(true);
+        setIdentifiantHasError(true);
+        setMotDePasseHasError(true);
       }
     } catch (err) {
       // Erreur technique inattendue (IPC/Electron/Node) — journalisée en
@@ -88,7 +91,6 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       // affichée telle quelle à l'utilisateur.
       const { title, message } = mapUnexpectedError(err);
       showError(title, message);
-      setHasError(true);
     } finally {
       setLoading(false);
     }
@@ -176,14 +178,14 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   value={identifiant}
                   onChange={(e) => {
                     setIdentifiant(e.target.value);
-                    setHasError(false);
+                    setIdentifiantHasError(false);
                   }}
                   onFocus={() => setFocusedField("identifiant")}
                   onBlur={() => setFocusedField(null)}
                   placeholder="Votre identifiant"
                   autoFocus
                   autoComplete="username"
-                  style={fieldStyle(hasError, focusedField === "identifiant")}
+                  style={fieldStyle(identifiantHasError, focusedField === "identifiant")}
                 />
               </div>
             </div>
@@ -208,13 +210,13 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   value={motDePasse}
                   onChange={(e) => {
                     setMotDePasse(e.target.value);
-                    setHasError(false);
+                    setMotDePasseHasError(false);
                   }}
                   onFocus={() => setFocusedField("motDePasse")}
                   onBlur={() => setFocusedField(null)}
                   placeholder="Votre mot de passe"
                   autoComplete="current-password"
-                  style={{ ...fieldStyle(hasError, focusedField === "motDePasse"), paddingRight: 40 }}
+                  style={{ ...fieldStyle(motDePasseHasError, focusedField === "motDePasse"), paddingRight: 40 }}
                 />
                 <button
                   type="button"

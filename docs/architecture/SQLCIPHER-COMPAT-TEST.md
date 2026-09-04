@@ -70,10 +70,24 @@ documentée ci-dessous.
 
 ## Ré-exécution sous Electron 28.3.3 (version verrouillée du projet)
 
-**Statut : ⏳ en attente d'exécution.**
+**Statut : ✅ effectuée et réussie**, le 3 septembre 2026, sur poste Windows 11 réel (MAXI EQUIP),
+via `npm run test:sqlcipher` (packages/electron-app/scripts/test-sqlcipher.cjs), avec confirmation
+explicite de la version (`electron.cmd --version` → `v28.3.3`) avant et après le test.
 
-Cette section sera complétée avec un résultat réel (date, environnement exact, sortie de
-`npm run test:sqlcipher`) dès que le test aura été rejoué explicitement sous Electron 28.3.3,
-conformément à la demande de consolidation de la Phase 0. Elle ne doit pas être renseignée par
-anticipation.
+Résultat obtenu :
+
+```
+RESULTS: {
+  "require": "OK",
+  "create_and_write": "OK",
+  "file_is_encrypted_on_disk": "OK",
+  "reopen_with_correct_key": "OK",
+  "reopen_with_wrong_key_rejected": "OK (lecture refusée : file is not a database)"
+}
+ALL_OK
+```
+
+Les cinq critères sont donc désormais vérifiés à l'identique sous les deux versions d'Electron
+utilisées au cours du projet (31.7.7 lors du test initial, 28.3.3 — version définitivement retenue
+— lors de cette ré-exécution). Aucun écart de comportement observé entre les deux versions.
 

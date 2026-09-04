@@ -35,7 +35,7 @@ function fieldStyle(hasError: boolean, focused: boolean): React.CSSProperties {
 }
 
 export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
-  const { showError, showWarning } = useToast();
+  const { showSuccess, showError, showWarning } = useToast();
 
   const [identifiant, setIdentifiant] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
@@ -75,6 +75,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       const outcome = await window.maxiEquip.login(identifiant.trim(), motDePasse);
       if (outcome.success) {
         setMotDePasse("");
+        showSuccess("Connexion réussie", `Bienvenue, ${outcome.session.nom}.`);
         onLoginSuccess();
       } else {
         // outcome.reason est un motif métier connu (retour normal du

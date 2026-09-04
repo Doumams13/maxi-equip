@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { Card, Button, Combobox, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Plus, ImageOff, Images, Search, Star, X, ImagePlus } from "lucide-react";
+import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2 } from "lucide-react";
 import type { ProduitAvecMiniature, StagedImage } from "../../../preload/index.js";
 import { ImagesModal } from "./ImagesModal.js";
 
@@ -57,12 +57,13 @@ function extraireDimensions(taille: string): { largeur: string; hauteur: string 
  * - images en prévisualisation réelle et immédiate dans le formulaire
  *   (mécanisme de "staging" — voir ImageService), pas une étape séparée.
  */
-export function ProduitsScreen() {
+export function ProduitsScreen({ session }: { session: { userId: string } }) {
   const { showSuccess, showWarning, showError } = useToast();
   const [produits, setProduits] = useState<ProduitAvecMiniature[]>([]);
   const [suggestions, setSuggestions] = useState<{ types: string[]; tailles: string[] }>({ types: [], tailles: [] });
   const [recherche, setRecherche] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ type: "", largeur: "", hauteur: "", reference: "", prix: "", seuilAlerte: "10" });
   const [stagedImages, setStagedImages] = useState<StagedImage[]>([]);
@@ -98,7 +99,38 @@ export function ProduitsScreen() {
       await window.maxiEquip.discardStagedImages(stagedImages.map((s) => s.stagingId));
     }
     resetForm();
+    setEditingId(null);
     setShowForm(false);
+  }
+
+  function handleStartEdit(p: ProduitAvecMiniature) {
+    const dims = extraireDimensions(p.taille) ?? { largeur: "", hauteur: "" };
+    setForm({
+      type: p.type,
+      largeur: dims.largeur,
+      hauteur: dims.hauteur,
+      reference: p.reference,
+      prix: String(p.prix),
+      seuilAlerte: String(p.seuilAlerte),
+    });
+    setEditingId(p.id);
+    setShowForm(true);
+  }
+
+  async function handleDelete(p: ProduitAvecMiniature) {
+    const confirme = window.confirm(
+      `Supprimer le produit "${p.reference}" ? Il n'apparaîtra plus dans le catalogue, mais son historique (ventes, mouvements déjà enregistrés) reste conservé.`
+    );
+    if (!confirme) return;
+    try {
+      await window.maxiEquip.deleteProduit(p.id, session.userId);
+      showSuccess("Produit supprimé", `"${p.reference}" a été retiré du catalogue.`);
+      await refresh();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[produits] suppression impossible :", err);
+      showError("Suppression impossible", "Une erreur inattendue s'est produite.");
+    }
   }
 
   async function handlePickImages() {
@@ -135,7 +167,7 @@ export function ProduitsScreen() {
     if (dims) setForm((f) => ({ ...f, largeur: dims.largeur, hauteur: dims.hauteur }));
   }
 
-  async function handleCreate(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.type.trim() || !form.largeur || !form.hauteur || !form.reference.trim() || !form.prix) {
       showWarning("Champs requis", "Merci de renseigner le type, la taille (largeur et hauteur), la référence et le prix.");
@@ -144,30 +176,46 @@ export function ProduitsScreen() {
     setSaving(true);
     try {
       const taille = `${form.largeur} × ${form.hauteur} cm`;
-      const { id } = await window.maxiEquip.createProduit({
-        type: form.type.trim(),
-        taille,
-        reference: form.reference.trim(),
-        prix: Number(form.prix),
-        seuilAlerte: Number(form.seuilAlerte) || 0,
-      });
 
-      if (stagedImages.length > 0) {
-        await window.maxiEquip.commitStagedImages(
-          id,
-          stagedImages.map((s) => s.stagingId),
-          principaleStagingId
-        );
+      if (editingId) {
+        await window.maxiEquip.updateProduit(editingId, {
+          type: form.type.trim(),
+          taille,
+          reference: form.reference.trim(),
+          prix: Number(form.prix),
+          seuilAlerte: Number(form.seuilAlerte) || 0,
+        });
+        showSuccess("Produit modifié", `Référence "${form.reference.trim()}" mise à jour.`);
+      } else {
+        const { id } = await window.maxiEquip.createProduit({
+          type: form.type.trim(),
+          taille,
+          reference: form.reference.trim(),
+          prix: Number(form.prix),
+          seuilAlerte: Number(form.seuilAlerte) || 0,
+        });
+
+        if (stagedImages.length > 0) {
+          await window.maxiEquip.commitStagedImages(
+            id,
+            stagedImages.map((s) => s.stagingId),
+            principaleStagingId
+          );
+        }
+        showSuccess("Produit créé", `Référence "${form.reference.trim()}" ajoutée au catalogue.`);
       }
 
-      showSuccess("Produit créé", `Référence "${form.reference.trim()}" ajoutée au catalogue.`);
       resetForm();
+      setEditingId(null);
       setShowForm(false);
       await refresh();
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[produits] création impossible :", err);
-      showError("Ajout impossible", "Une erreur inattendue s'est produite. Vérifiez que la référence n'est pas déjà utilisée.");
+      console.error("[produits] enregistrement impossible :", err);
+      showError(
+        editingId ? "Modification impossible" : "Ajout impossible",
+        "Une erreur inattendue s'est produite. Vérifiez que la référence n'est pas déjà utilisée."
+      );
     } finally {
       setSaving(false);
     }
@@ -177,7 +225,7 @@ export function ProduitsScreen() {
     <div style={{ padding: 28 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
         <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, margin: 0 }}>Produits</h1>
-        <Button onClick={() => (showForm ? void handleCloseForm() : setShowForm(true))}>
+        <Button onClick={() => (showForm ? void handleCloseForm() : (resetForm(), setEditingId(null), setShowForm(true)))}>
           {showForm ? <X size={16} /> : <Plus size={16} />}
           {showForm ? "Annuler" : "Nouveau produit"}
         </Button>
@@ -185,7 +233,10 @@ export function ProduitsScreen() {
 
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
-          <form onSubmit={(e) => void handleCreate(e)}>
+          <h2 style={{ margin: "0 0 14px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>
+            {editingId ? "Modifier le produit" : "Nouveau produit"}
+          </h2>
+          <form onSubmit={(e) => void handleSubmit(e)}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
               <div>
                 <label style={labelStyle}>Type</label>
@@ -248,6 +299,7 @@ export function ProduitsScreen() {
               </div>
             </div>
 
+            {!editingId && (
             <div style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, paddingTop: 14, marginBottom: 16 }}>
               <label style={labelStyle}>Photos du carreau (motif)</label>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
@@ -314,9 +366,15 @@ export function ProduitsScreen() {
                 {stagedImages.length > 0 ? "Ajouter d'autres photos" : "Choisir des photos"}
               </Button>
             </div>
+            )}
+            {editingId && (
+              <p style={{ fontSize: 11.5, color: defaultTokens.colors.textFaint, marginTop: -8, marginBottom: 16 }}>
+                Les photos se gèrent séparément, via le bouton « Images » de la liste ci-dessous.
+              </p>
+            )}
 
             <Button type="submit" loading={saving}>
-              Enregistrer le produit
+              {editingId ? "Enregistrer les modifications" : "Enregistrer le produit"}
             </Button>
           </form>
         </Card>
@@ -341,7 +399,7 @@ export function ProduitsScreen() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead>
               <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
-                {["Motif", "Référence", "Type", "Taille", "Prix", "Images"].map((h) => (
+                {["Motif", "Référence", "Type", "Taille", "Prix", "Images", ""].map((h) => (
                   <th key={h} style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>
                     {h}
                   </th>
@@ -362,6 +420,14 @@ export function ProduitsScreen() {
                     <Button variant="ghost" onClick={() => setImagesModalProduit({ id: p.id, motif: p.reference })}>
                       <Images size={15} />
                       {p.nombreImages}
+                    </Button>
+                  </td>
+                  <td style={{ padding: "8px 16px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <Button variant="ghost" onClick={() => handleStartEdit(p)} title="Modifier">
+                      <Pencil size={15} />
+                    </Button>
+                    <Button variant="ghost" onClick={() => void handleDelete(p)} title="Supprimer">
+                      <Trash2 size={15} color={defaultTokens.colors.danger} />
                     </Button>
                   </td>
                 </tr>

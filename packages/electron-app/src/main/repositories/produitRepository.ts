@@ -102,4 +102,32 @@ export class ProduitRepository {
       .run(id, input.motif, input.type, input.taille, input.tailleTri, input.reference, input.prix, input.seuilAlerte, now, now);
     return id;
   }
+
+  /** Modifie un produit existant. Ne touche jamais aux images (gérées séparément — ImageService). */
+  update(
+    id: string,
+    input: { type: string; taille: string; tailleTri: number; reference: string; prix: number; seuilAlerte: number }
+  ): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE produits
+         SET type = ?, taille = ?, taille_tri = ?, reference = ?, prix = ?, seuil_alerte = ?, updated_at = ?
+         WHERE id = ? AND deleted_at IS NULL`
+      )
+      .run(input.type, input.taille, input.tailleTri, input.reference, input.prix, input.seuilAlerte, now, id);
+  }
+
+  /**
+   * Suppression douce (Synthèse §9) — le produit n'est jamais détruit
+   * physiquement, seulement marqué et tracé. Disparaît du catalogue actif
+   * (list(), suggestions) sans perdre l'historique des ventes/mouvements
+   * qui le référencent déjà.
+   */
+  softDelete(id: string, deletedBy: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE produits SET deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?")
+      .run(now, deletedBy, now, id);
+  }
 }

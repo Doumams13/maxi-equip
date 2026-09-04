@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS images_produit (
   chemin_local TEXT NOT NULL,
   url_cloud   TEXT,
   ordre       INTEGER NOT NULL DEFAULT 0,
+  est_principale INTEGER NOT NULL DEFAULT 0 CHECK (est_principale IN (0, 1)),
   sync_status TEXT NOT NULL CHECK (sync_status IN ('pending', 'sent', 'confirmed', 'error')),
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL

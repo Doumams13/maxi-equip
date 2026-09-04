@@ -41,6 +41,17 @@ export interface VenteInput {
   lignes: VenteLigneInput[];
 }
 
+export interface ProduitAvecMiniature extends Produit {
+  imagePrincipaleDataUrl: string | null;
+}
+
+export interface ImageAffichable {
+  id: string;
+  estPrincipale: boolean;
+  ordre: number;
+  dataUrl: string | null;
+}
+
 const maxiEquipApi = {
   ping: (): Promise<{ ok: boolean; message: string; timestamp: string }> => ipcRenderer.invoke("app:ping"),
   dbHealthCheck: (): Promise<{ tableCount: number; tables: string[] }> =>
@@ -54,7 +65,7 @@ const maxiEquipApi = {
   getPermissions: (): Promise<auth.PermissionSet | null> => ipcRenderer.invoke("auth:getPermissions"),
 
   // --- Métier (Phase 2) ---
-  listProduits: (): Promise<Produit[]> => ipcRenderer.invoke("catalogue:list"),
+  listProduits: (): Promise<ProduitAvecMiniature[]> => ipcRenderer.invoke("catalogue:list"),
   getCatalogueSuggestions: (): Promise<{ types: string[]; tailles: string[] }> =>
     ipcRenderer.invoke("catalogue:suggestions"),
   createProduit: (input: {
@@ -85,6 +96,16 @@ const maxiEquipApi = {
     totalFactures: number;
     mouvementsRecents: Mouvement[];
   }> => ipcRenderer.invoke("dashboard:summary"),
+
+  // --- Images produit (correction Phase 2) ---
+  // Le Renderer ne reçoit jamais de chemin de fichier — uniquement des
+  // images déjà encodées (data URL), lues et converties côté Main (§12).
+  listImages: (produitId: string): Promise<ImageAffichable[]> => ipcRenderer.invoke("images:list", produitId),
+  pickAndAddImages: (produitId: string): Promise<{ success: boolean; added?: number; message?: string }> =>
+    ipcRenderer.invoke("images:pickAndAdd", produitId),
+  setImagePrincipale: (produitId: string, imageId: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke("images:setPrincipale", produitId, imageId),
+  removeImage: (imageId: string): Promise<{ success: boolean }> => ipcRenderer.invoke("images:remove", imageId),
 };
 
 export type MaxiEquipApi = typeof maxiEquipApi;

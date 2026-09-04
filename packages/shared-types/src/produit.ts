@@ -32,5 +32,7 @@ export interface ImageProduit extends MetierEntity {
   /** URL de stockage cloud, renseignée une fois synchronisée. */
   urlCloud: string | null;
   ordre: number;
+  /** true pour l'image utilisée comme miniature (liste produits, colonne "Motif") — une seule par produit. */
+  estPrincipale: boolean;
   syncStatus: SyncStatus;
 }

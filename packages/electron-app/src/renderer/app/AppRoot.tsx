@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { auth } from "@maxi-equip/domain";
+import { useToast } from "@maxi-equip/design-system";
 import { Shell, type NavItem, type ScreenId } from "./Shell.js";
 import { DashboardScreen } from "./screens/DashboardScreen.js";
 import { ProduitsScreen } from "./screens/ProduitsScreen.js";
@@ -23,6 +24,7 @@ export interface AppRootProps {
  * services/IPC (voir main/ipc/metier.ts), jamais uniquement ici.
  */
 export function AppRoot({ onLoggedOut }: AppRootProps) {
+  const { showSuccess } = useToast();
   const [session, setSession] = useState<Session | null>(null);
   const [permissions, setPermissions] = useState<auth.PermissionSet | null>(null);
   const [activeScreen, setActiveScreen] = useState<ScreenId>("dashboard");
@@ -39,6 +41,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
 
   async function handleLogout() {
     await window.maxiEquip.logout();
+    showSuccess("Déconnexion réussie", "Vous avez été déconnecté avec succès.");
     onLoggedOut();
   }
 

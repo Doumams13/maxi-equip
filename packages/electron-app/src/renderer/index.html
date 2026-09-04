@@ -9,24 +9,40 @@
     <title>MAXI EQUIP</title>
     <style>
       /*
-        Remise à zéro CSS minimale — cause réelle du débordement corrigée
-        ici (Phase 1, correction finale écran de connexion) : sans elle,
-        la marge par défaut du navigateur sur <body> (8px) fait déborder
-        tout élément dimensionné en 100vh/100vw, provoquant les barres de
-        défilement verticale ET horizontale. Ce n'est pas un cache-misère
-        (overflow:hidden seul n'aurait pas suffi ni été honnête) : la
-        marge est supprimée à la source, sur les bons éléments.
+        Remise à zéro CSS minimale (Phase 1, correction du débordement de
+        l'écran de connexion) : sans elle, la marge par défaut du
+        navigateur sur <body> (8px) fait déborder tout élément dimensionné
+        en 100vh/100vw. La marge est supprimée à la source.
+
+        IMPORTANT — évolution suite à un retour utilisateur : un premier
+        correctif mettait `overflow: hidden` sur html/body, ce qui
+        empêchait TOUT défilement dans l'application, pas seulement sur
+        l'écran de connexion. Or seul l'écran de connexion doit rester
+        sans défilement (son contenu est conçu pour toujours tenir) —
+        les autres écrans (tableau de bord, puis futurs écrans métier)
+        doivent, eux, pouvoir défiler normalement quand leur contenu
+        dépasse la fenêtre. Le défilement est donc désormais autorisé au
+        niveau de <body> (overflow-y: auto), et c'est l'écran de connexion
+        lui-même qui empêche son propre défilement localement (voir
+        LoginScreen.tsx : hauteur 100% + overflow hidden sur son propre
+        conteneur), pas une règle globale qui bloquerait tout le reste.
       */
-      html,
-      body {
+      html {
         margin: 0;
         padding: 0;
         height: 100%;
         width: 100%;
-        overflow: hidden;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        width: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
       }
       #root {
-        height: 100%;
+        min-height: 100%;
         width: 100%;
       }
       *,

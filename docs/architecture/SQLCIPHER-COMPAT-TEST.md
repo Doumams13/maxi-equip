@@ -1,6 +1,13 @@
 # Test de compatibilité SQLCipher / Electron — Phase 0
 
-Réalisé le 2 septembre 2026, dans l'environnement de développement (Node.js v22.22.2, Electron v31.7.7 linux x64).
+Réalisé initialement le 2 septembre 2026, dans l'environnement de développement (Node.js v22.22.2, Electron v31.7.7 linux x64).
+
+> **Mise à jour** : la version d'Electron verrouillée pour le projet (voir `package.json` racine,
+> champ `overrides`) est désormais **28.3.3**, retenue après le test initial ci-dessous pour
+> contourner un bug distinct rencontré sur poste Windows (`require('electron')` retournant un
+> chemin de fichier au lieu de l'API, sans lien avec SQLCipher). Le test isolé documenté ci-dessous
+> a été mené avec la version 31.7.7 ; sa ré-exécution sous 28.3.3 fait l'objet d'une section dédiée
+> plus bas dans ce document.
 
 ## Bibliothèque retenue
 
@@ -52,9 +59,21 @@ Cette étape est intégrée au script `postinstall` du package `electron-app` (v
 dans ce projet, à condition de conserver l'étape de reconstruction native (`electron-rebuild`)
 comme partie intégrante du processus d'installation — ce qui est désormais le cas.
 
-## Point de vigilance pour la suite
+## Point de vigilance pour la suite (partiellement levé)
 
-Ce test a été mené sur linux x64 (environnement de développement). Le poste SHOP cible est
-Windows — la reconstruction native devra être revérifiée sur Windows avant la mise en production
-(le mécanisme est identique, mais la vérification physique sur la plateforme cible reste à faire
-en Phase 2/7). Ce point est noté explicitement comme risque résiduel, pas comme un blocage.
+Ce test isolé a été mené sur linux x64 (environnement de développement). Le fonctionnement de
+l'application complète (pas seulement ce script isolé) a depuis été **vérifié avec succès sur un
+poste Windows 11 réel**, avec Electron 28.3.3 — voir capture d'écran de la Phase 0 et le compte
+rendu technique associé. Le risque « jamais testé sur la plateforme cible » est donc levé au niveau
+applicatif. Reste à consolider : la ré-exécution de ce script isolé précis sous Electron 28.3.3,
+documentée ci-dessous.
+
+## Ré-exécution sous Electron 28.3.3 (version verrouillée du projet)
+
+**Statut : ⏳ en attente d'exécution.**
+
+Cette section sera complétée avec un résultat réel (date, environnement exact, sortie de
+`npm run test:sqlcipher`) dès que le test aura été rejoué explicitement sous Electron 28.3.3,
+conformément à la demande de consolidation de la Phase 0. Elle ne doit pas être renseignée par
+anticipation.
+

@@ -19,6 +19,9 @@ import { FactureRepository } from "./repositories/factureRepository.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
+import { ImageProduitRepository } from "./repositories/imageProduitRepository.js";
+import { ImageService } from "./services/imageService.js";
+import { registerImageIpcHandlers } from "./ipc/images.js";
 
 // Le processus principal est construit en CommonJS (voir electron.vite.config.ts)
 // — __dirname est donc nativement disponible, pas besoin de la variante ESM
@@ -101,6 +104,7 @@ function applyContentSecurityPolicy(): void {
 app.whenReady().then(async () => {
   applyContentSecurityPolicy();
 
+  let mainWindow: BrowserWindow;
   try {
     const db = openDatabase();
     runMigrations(db);
@@ -126,6 +130,13 @@ app.whenReady().then(async () => {
     const stockService = new StockService(stockRepository, mouvementRepository);
     const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository);
 
+    // La fenêtre doit exister avant le service d'images (le sélecteur de
+    // fichiers natif s'ouvre attaché à une fenêtre — dialog.showOpenDialog).
+    mainWindow = createMainWindow();
+
+    const imageProduitRepository = new ImageProduitRepository(db);
+    const imageService = new ImageService(imageProduitRepository, mainWindow);
+
     bootstrapDefaultEmplacements(emplacementRepository);
     registerMetierIpcHandlers(
       produitRepository,
@@ -134,8 +145,10 @@ app.whenReady().then(async () => {
       mouvementRepository,
       factureRepository,
       stockService,
-      venteService
+      venteService,
+      imageService
     );
+    registerImageIpcHandlers(imageService);
   } catch (err) {
     // Ne jamais planter silencieusement (ex. coffre-fort sécurisé du système
     // indisponible — cf. docs/architecture/PHASE0.md). L'utilisateur doit
@@ -149,8 +162,6 @@ app.whenReady().then(async () => {
     app.exit(1);
     return;
   }
-
-  createMainWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

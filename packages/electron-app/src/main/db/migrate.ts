@@ -3,11 +3,25 @@ import type Database from "better-sqlite3-multiple-ciphers";
 import schemaSql from "./schema.sql?raw";
 
 /**
- * Applique le schéma initial. Phase 0 : une seule migration "de base",
- * idempotente (CREATE TABLE IF NOT EXISTS). Un vrai système de migrations
- * versionnées sera introduit en Phase 1 si des évolutions de schéma sont
- * nécessaires après la mise en service.
+ * Applique le schéma initial (idempotent — CREATE TABLE IF NOT EXISTS),
+ * puis les évolutions de schéma ultérieures, elles aussi idempotentes et
+ * jamais destructrices (§14 du prompt Phase 0 : "ne détruit aucune donnée
+ * existante").
  */
 export function runMigrations(db: Database.Database): void {
   db.exec(schemaSql);
+  addEstPrincipaleColumnIfMissing(db);
+}
+
+/**
+ * Correction Phase 2 (gestion des images produits) : ajoute la colonne
+ * `est_principale` à une base créée avant cette évolution — sans jamais
+ * recréer la table ni perdre les images déjà associées à des produits.
+ */
+function addEstPrincipaleColumnIfMissing(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(images_produit)").all() as { name: string }[];
+  const hasColumn = columns.some((c) => c.name === "est_principale");
+  if (!hasColumn) {
+    db.exec("ALTER TABLE images_produit ADD COLUMN est_principale INTEGER NOT NULL DEFAULT 0");
+  }
 }

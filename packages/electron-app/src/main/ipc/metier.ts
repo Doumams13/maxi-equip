@@ -6,6 +6,7 @@ import { MouvementRepository } from "../repositories/mouvementRepository.js";
 import { FactureRepository } from "../repositories/factureRepository.js";
 import { StockService } from "../services/stockService.js";
 import { VenteService, VenteValidationError, type VenteInput } from "../services/venteService.js";
+import { ImageService } from "../services/imageService.js";
 import { stock as domainStock } from "@maxi-equip/domain";
 
 /**
@@ -23,10 +24,15 @@ export function registerMetierIpcHandlers(
   mouvementRepository: MouvementRepository,
   factureRepository: FactureRepository,
   stockService: StockService,
-  venteService: VenteService
+  venteService: VenteService,
+  imageService: ImageService
 ): void {
   // --- Catalogue ---
-  ipcMain.handle("catalogue:list", () => produitRepository.list());
+  ipcMain.handle("catalogue:list", () => {
+    const produits = produitRepository.list();
+    const miniatures = imageService.getPrincipalesDataUrlsForProduits(produits.map((p) => p.id));
+    return produits.map((p) => ({ ...p, imagePrincipaleDataUrl: miniatures[p.id] ?? null }));
+  });
 
   ipcMain.handle("catalogue:suggestions", () => ({
     types: produitRepository.distinctTypes(),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, Button, Logo, defaultTokens } from "@maxi-equip/design-system";
+import { Card, Button, Logo, defaultTokens, useToast } from "@maxi-equip/design-system";
 import type { auth } from "@maxi-equip/domain";
 
 type Status = { ping: string; db: string };
@@ -18,6 +18,7 @@ export interface AuthenticatedDashboardProps {
  * que rien n'a régressé.
  */
 export function AuthenticatedDashboard({ onLoggedOut }: AuthenticatedDashboardProps) {
+  const { showSuccess } = useToast();
   const [session, setSession] = useState<Session | null>(null);
   const [permissions, setPermissions] = useState<Permissions | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
@@ -49,6 +50,7 @@ export function AuthenticatedDashboard({ onLoggedOut }: AuthenticatedDashboardPr
 
   async function handleLogout() {
     await window.maxiEquip.logout();
+    showSuccess("Déconnexion réussie", "Vous avez été déconnecté avec succès.");
     onLoggedOut();
   }
 

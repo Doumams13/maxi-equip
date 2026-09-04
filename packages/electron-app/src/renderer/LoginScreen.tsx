@@ -1,26 +1,22 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Card, Button, Logo, defaultTokens } from "@maxi-equip/design-system";
+import { Card, Button, Logo, defaultTokens, useToast } from "@maxi-equip/design-system";
 import { User, Lock, Eye, EyeOff, LogIn, Power } from "lucide-react";
 import { DecorativeBackground } from "./DecorativeBackground.js";
+import { mapAuthFailureReason, mapUnexpectedError, FIELD_REQUIRED_MESSAGES } from "./errorMessages.js";
 import logoUrl from "./assets/maxi-equip-logo.png";
 
 /**
- * Écran de connexion — Phase 1 (finalisation UI). Reproduit la maquette
- * officielle fournie par MAXI EQUIP. La logique d'authentification est
- * STRICTEMENT INCHANGÉE par rapport à la version précédente : seul
- * l'habillage visuel a été retravaillé (appel à window.maxiEquip.login,
- * gestion des mêmes messages d'erreur, mêmes états).
+ * Écran de connexion — Phase 1 (finalisation UI + notifications). Reproduit
+ * la maquette officielle fournie par MAXI EQUIP. La logique
+ * d'authentification est STRICTEMENT INCHANGÉE : seule la présentation du
+ * résultat change — les erreurs techniques ne sont plus jamais affichées
+ * directement, elles passent systématiquement par la couche de traduction
+ * (errorMessages.ts) puis par le système de notifications (Toast).
  */
 export interface LoginScreenProps {
   onLoginSuccess: () => void;
 }
-
-const REASON_MESSAGES: Record<string, string> = {
-  USER_NOT_FOUND: "Identifiant inconnu.",
-  USER_INACTIVE: "Ce compte est désactivé.",
-  WRONG_PASSWORD: "Mot de passe incorrect.",
-};
 
 function fieldStyle(hasError: boolean, focused: boolean): React.CSSProperties {
   return {
@@ -39,16 +35,39 @@ function fieldStyle(hasError: boolean, focused: boolean): React.CSSProperties {
 }
 
 export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
+  const { showError, showWarning } = useToast();
+
   const [identifiant, setIdentifiant] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
   const [focusedField, setFocusedField] = useState<"identifiant" | "motDePasse" | null>(null);
+
+  const identifiantRef = useRef<HTMLInputElement>(null);
+  const motDePasseRef = useRef<HTMLInputElement>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
+    setHasError(false);
+
+    // Validation des champs AVANT tout appel à l'authentification (§10) —
+    // ne modifie pas la logique métier, empêche seulement un appel inutile.
+    if (identifiant.trim().length === 0) {
+      const { title, message } = FIELD_REQUIRED_MESSAGES.identifiant;
+      showWarning(title, message);
+      setHasError(true);
+      identifiantRef.current?.focus();
+      return;
+    }
+    if (motDePasse.length === 0) {
+      const { title, message } = FIELD_REQUIRED_MESSAGES.motDePasse;
+      showWarning(title, message);
+      setHasError(true);
+      motDePasseRef.current?.focus();
+      return;
+    }
+
     setLoading(true);
     try {
       const outcome = await window.maxiEquip.login(identifiant.trim(), motDePasse);
@@ -56,10 +75,20 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         setMotDePasse("");
         onLoginSuccess();
       } else {
-        setError(REASON_MESSAGES[outcome.reason] ?? "Connexion refusée.");
+        // outcome.reason est un motif métier connu (retour normal du
+        // domaine, jamais une exception) — traduit en message utilisateur,
+        // jamais affiché tel quel.
+        const { title, message } = mapAuthFailureReason(outcome.reason);
+        showError(title, message);
+        setHasError(true);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Erreur technique inattendue (IPC/Electron/Node) — journalisée en
+      // détail dans la console développeur (mapUnexpectedError), jamais
+      // affichée telle quelle à l'utilisateur.
+      const { title, message } = mapUnexpectedError(err);
+      showError(title, message);
+      setHasError(true);
     } finally {
       setLoading(false);
     }
@@ -143,14 +172,18 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 />
                 <input
                   id="login-identifiant"
+                  ref={identifiantRef}
                   value={identifiant}
-                  onChange={(e) => setIdentifiant(e.target.value)}
+                  onChange={(e) => {
+                    setIdentifiant(e.target.value);
+                    setHasError(false);
+                  }}
                   onFocus={() => setFocusedField("identifiant")}
                   onBlur={() => setFocusedField(null)}
                   placeholder="Votre identifiant"
                   autoFocus
                   autoComplete="username"
-                  style={fieldStyle(!!error, focusedField === "identifiant")}
+                  style={fieldStyle(hasError, focusedField === "identifiant")}
                 />
               </div>
             </div>
@@ -170,14 +203,18 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 />
                 <input
                   id="login-mot-de-passe"
+                  ref={motDePasseRef}
                   type={showPassword ? "text" : "password"}
                   value={motDePasse}
-                  onChange={(e) => setMotDePasse(e.target.value)}
+                  onChange={(e) => {
+                    setMotDePasse(e.target.value);
+                    setHasError(false);
+                  }}
                   onFocus={() => setFocusedField("motDePasse")}
                   onBlur={() => setFocusedField(null)}
                   placeholder="Votre mot de passe"
                   autoComplete="current-password"
-                  style={{ ...fieldStyle(!!error, focusedField === "motDePasse"), paddingRight: 40 }}
+                  style={{ ...fieldStyle(hasError, focusedField === "motDePasse"), paddingRight: 40 }}
                 />
                 <button
                   type="button"
@@ -203,12 +240,6 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 </button>
               </div>
             </div>
-
-            {error && (
-              <p style={{ margin: 0, fontSize: 12.5, color: defaultTokens.colors.danger, textAlign: "center" }} role="alert">
-                {error}
-              </p>
-            )}
 
             <Button type="submit" loading={loading} style={{ width: "100%", marginTop: 4 }}>
               <LogIn size={16} />

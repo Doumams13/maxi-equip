@@ -4,6 +4,7 @@ import { closeDatabase, openDatabase } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { registerIpcHandlers } from "./ipc/index.js";
 import { registerAuthIpcHandlers } from "./ipc/auth.js";
+import { registerWindowIpcHandlers, LOGIN_WINDOW_SIZE } from "./ipc/window.js";
 import { getSecureWebPreferences, CONTENT_SECURITY_POLICY } from "./security/windowOptions.js";
 import { restrictNavigation } from "./security/restrictNavigation.js";
 import { Argon2idPasswordHasher } from "./auth/argon2Hasher.js";
@@ -25,8 +26,11 @@ function createMainWindow(): BrowserWindow {
   const preloadDir = join(__dirname, "../preload");
 
   const window = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: LOGIN_WINDOW_SIZE.width,
+    height: LOGIN_WINDOW_SIZE.height,
+    resizable: false,
+    maximizable: false,
+    center: true,
     show: false,
     webPreferences: getSecureWebPreferences(preloadDir),
   });
@@ -98,6 +102,8 @@ app.whenReady().then(async () => {
   }
 
   createMainWindow();
+  const [mainWindow] = BrowserWindow.getAllWindows();
+  if (mainWindow) registerWindowIpcHandlers(mainWindow);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

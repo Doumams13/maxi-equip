@@ -7,6 +7,11 @@ import { AuthenticatedDashboard } from "./AuthenticatedDashboard.js";
  * tant qu'aucune session n'est active, puis le tableau de bord minimal
  * une fois authentifié. Toujours pas les écrans métier définitifs
  * (prévus en Phase 2).
+ *
+ * La fenêtre est verrouillée (1366×768, non redimensionnable) tant que
+ * l'écran de connexion est affiché, et déverrouillée une fois authentifié
+ * — cette contrainte ne concerne que l'écran de connexion (finalisation
+ * UI Phase 1), pas les futurs écrans.
  */
 export function App() {
   const [checkingSession, setCheckingSession] = useState(true);
@@ -15,16 +20,32 @@ export function App() {
   useEffect(() => {
     void (async () => {
       const session = await window.maxiEquip.getSession();
-      setAuthenticated(session !== null);
+      const isAuthenticated = session !== null;
+      setAuthenticated(isAuthenticated);
+      if (isAuthenticated) {
+        await window.maxiEquip.unlockWindowForApp();
+      } else {
+        await window.maxiEquip.lockWindowForLogin();
+      }
       setCheckingSession(false);
     })();
   }, []);
 
+  async function handleLoginSuccess() {
+    await window.maxiEquip.unlockWindowForApp();
+    setAuthenticated(true);
+  }
+
+  async function handleLoggedOut() {
+    await window.maxiEquip.lockWindowForLogin();
+    setAuthenticated(false);
+  }
+
   if (checkingSession) return null;
 
   if (!authenticated) {
-    return <LoginScreen onLoginSuccess={() => setAuthenticated(true)} />;
+    return <LoginScreen onLoginSuccess={() => void handleLoginSuccess()} />;
   }
 
-  return <AuthenticatedDashboard onLoggedOut={() => setAuthenticated(false)} />;
+  return <AuthenticatedDashboard onLoggedOut={() => void handleLoggedOut()} />;
 }

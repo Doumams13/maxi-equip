@@ -52,9 +52,9 @@ function ChevronFilled({ style }: { style: React.CSSProperties }) {
 export function DecorativeBackground() {
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", zIndex: 0, pointerEvents: "none" }}>
-      <ChevronFilled style={{ left: "-6vw", bottom: "8vh" }} />
-      <Chevron style={{ left: "2vw", bottom: "-4vh" }} />
-      <Chevron style={{ right: "-8vw", top: "10vh" }} />
+      <ChevronFilled style={{ left: "-7vw", top: "5vh" }} />
+      <Chevron style={{ left: "3vw", top: "24vh" }} />
+      <Chevron style={{ right: "-8vw", top: "8vh" }} />
       <ChevronFilled style={{ right: "-4vw", bottom: "-6vh" }} />
     </div>
   );

@@ -7,6 +7,34 @@
       content="default-src 'self'; style-src 'self' 'unsafe-inline'"
     />
     <title>MAXI EQUIP</title>
+    <style>
+      /*
+        Remise à zéro CSS minimale — cause réelle du débordement corrigée
+        ici (Phase 1, correction finale écran de connexion) : sans elle,
+        la marge par défaut du navigateur sur <body> (8px) fait déborder
+        tout élément dimensionné en 100vh/100vw, provoquant les barres de
+        défilement verticale ET horizontale. Ce n'est pas un cache-misère
+        (overflow:hidden seul n'aurait pas suffi ni été honnête) : la
+        marge est supprimée à la source, sur les bons éléments.
+      */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
+      #root {
+        height: 100%;
+        width: 100%;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

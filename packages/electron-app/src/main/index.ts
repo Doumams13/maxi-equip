@@ -3,8 +3,14 @@ import { join } from "node:path";
 import { closeDatabase, openDatabase } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { registerIpcHandlers } from "./ipc/index.js";
+import { registerAuthIpcHandlers } from "./ipc/auth.js";
 import { getSecureWebPreferences, CONTENT_SECURITY_POLICY } from "./security/windowOptions.js";
 import { restrictNavigation } from "./security/restrictNavigation.js";
+import { Argon2idPasswordHasher } from "./auth/argon2Hasher.js";
+import { UtilisateurRepository } from "./auth/utilisateurRepository.js";
+import { SessionManager } from "./auth/sessionManager.js";
+import { AuthService } from "./auth/authService.js";
+import { bootstrapDefaultUsers } from "./auth/bootstrapUsers.js";
 
 // Le processus principal est construit en CommonJS (voir electron.vite.config.ts)
 // — __dirname est donc nativement disponible, pas besoin de la variante ESM
@@ -60,13 +66,23 @@ function applyContentSecurityPolicy(): void {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   applyContentSecurityPolicy();
 
   try {
     const db = openDatabase();
     runMigrations(db);
     registerIpcHandlers(db);
+
+    // Authentification (Phase 1) : dépôt SQLite + hasher Argon2id réel +
+    // session en mémoire, assemblés par le service d'authentification.
+    const utilisateurRepository = new UtilisateurRepository(db);
+    const hasher = new Argon2idPasswordHasher();
+    const sessionManager = new SessionManager();
+    const authService = new AuthService(utilisateurRepository, hasher, sessionManager);
+
+    await bootstrapDefaultUsers(utilisateurRepository, hasher);
+    registerAuthIpcHandlers(authService);
   } catch (err) {
     // Ne jamais planter silencieusement (ex. coffre-fort sécurisé du système
     // indisponible — cf. docs/architecture/PHASE0.md). L'utilisateur doit

@@ -11,13 +11,15 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "test:sqlcipher": "electron scripts/test-sqlcipher.cjs --no-sandbox"
+    "test:sqlcipher": "electron scripts/test-sqlcipher.cjs --no-sandbox",
+    "test:auth-bootstrap": "electron scripts/test-auth-bootstrap.cjs --no-sandbox"
   },
   "dependencies": {
     "@maxi-equip/design-system": "*",
     "@maxi-equip/domain": "*",
     "@maxi-equip/shared-types": "*",
     "better-sqlite3-multiple-ciphers": "^12.11.0",
+    "hash-wasm": "^4.11.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

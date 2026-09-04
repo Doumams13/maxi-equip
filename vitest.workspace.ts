@@ -10,4 +10,5 @@ export default defineWorkspace([
   "packages/domain",
   "packages/design-system",
   "packages/api",
+  "packages/electron-app",
 ]);

@@ -6,6 +6,35 @@ export interface EffectivePrice {
   originalPrice: number;
 }
 
+export class InvalidPromotionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidPromotionError";
+  }
+}
+
+/**
+ * Valide la structure d'une promotion avant qu'elle ne soit prise en
+ * compte. Cahier des charges §10 : une promotion a un prix promotionnel
+ * et une période de validité — ces deux éléments doivent être cohérents.
+ *
+ * Invalide si :
+ * - le prix promotionnel n'est pas un nombre strictement positif ;
+ * - la date de début n'est pas strictement antérieure à la date de fin.
+ */
+export function assertValidPromotion(promotion: Pick<Promotion, "prixPromotionnel" | "dateDebut" | "dateFin">): void {
+  if (!Number.isFinite(promotion.prixPromotionnel) || promotion.prixPromotionnel <= 0) {
+    throw new InvalidPromotionError(
+      `Le prix promotionnel doit être un nombre strictement positif (reçu : ${promotion.prixPromotionnel}).`
+    );
+  }
+  const start = new Date(promotion.dateDebut).getTime();
+  const end = new Date(promotion.dateFin).getTime();
+  if (!(start < end)) {
+    throw new InvalidPromotionError("La date de début d'une promotion doit être strictement antérieure à sa date de fin.");
+  }
+}
+
 /**
  * Calcule le prix effectif d'un produit à une date donnée.
  *
@@ -14,12 +43,6 @@ export interface EffectivePrice {
  * Le prix affiché ou appliqué à une vente est toujours RECALCULÉ à partir
  * du prix catalogue et d'une promotion active à la date donnée — jamais
  * stocké en double quelque part.
- *
- * Cette fonction est un exemple délibérément simple pour la Phase 0 :
- * elle prouve que la couche `domain` peut exprimer une règle métier sans
- * aucune dépendance à Electron, SQLite, PostgreSQL ou un framework web.
- * Les autres règles (fusion facture interne/externe, cohérence des
- * transferts, etc.) seront développées en Phase 1.
  *
  * @param produit Le produit dont on veut le prix effectif.
  * @param promotions Les promotions existantes pour CE produit (le tri/filtrage

@@ -14,7 +14,7 @@ import { ipcMain, type BrowserWindow } from "electron";
  * verrouiller/déverrouiller dynamiquement cette même fenêtre selon l'état
  * d'authentification, sans changer l'architecture à fenêtre unique.
  */
-export const LOGIN_WINDOW_SIZE = { width: 1366, height: 768 };
+export const LOGIN_WINDOW_SIZE = { width: 1280, height: 720 };
 
 export function registerWindowIpcHandlers(window: BrowserWindow): void {
   ipcMain.handle("window:lockForLogin", () => {

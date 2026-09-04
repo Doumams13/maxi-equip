@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
 import { LoginScreen } from "./LoginScreen.js";
-import { AuthenticatedDashboard } from "./AuthenticatedDashboard.js";
+import { AppRoot } from "./app/AppRoot.js";
 
 /**
- * Point d'entrée de l'interface — Phase 1. Affiche l'écran de connexion
- * tant qu'aucune session n'est active, puis le tableau de bord minimal
- * une fois authentifié. Toujours pas les écrans métier définitifs
- * (prévus en Phase 2).
+ * Point d'entrée de l'interface. Affiche l'écran de connexion tant
+ * qu'aucune session n'est active, puis l'application principale
+ * (navigation + tableau de bord + écrans métier — Phase 2) une fois
+ * authentifié.
  *
- * La fenêtre est une fenêtre Windows normale, librement redimensionnable
- * (redimensionnement, Snap, maximisation) — aucun verrouillage de taille,
- * y compris pendant l'écran de connexion.
+ * La fenêtre est une fenêtre Windows normale, librement redimensionnable.
  */
 export function App() {
   const [checkingSession, setCheckingSession] = useState(true);
@@ -30,5 +28,5 @@ export function App() {
     return <LoginScreen onLoginSuccess={() => setAuthenticated(true)} />;
   }
 
-  return <AuthenticatedDashboard onLoggedOut={() => setAuthenticated(false)} />;
+  return <AppRoot onLoggedOut={() => setAuthenticated(false)} />;
 }

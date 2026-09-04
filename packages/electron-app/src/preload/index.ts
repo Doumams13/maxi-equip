@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { auth } from "@maxi-equip/domain";
+import type { Produit, Emplacement, Facture, Mouvement } from "@maxi-equip/shared-types";
 
 /**
  * API exposée au Renderer — volontairement minimale et nommée
@@ -17,6 +18,29 @@ type LoginOutcome =
   | { success: true; session: auth.SessionLocale }
   | { success: false; reason: auth.AuthenticationFailureReason };
 
+type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "UNKNOWN";
+type StockOperationResult =
+  | { success: true; [key: string]: unknown }
+  | { success: false; reason: { code: StockErrorReason; message: string; available?: number; requested?: number } };
+
+export interface VenteLigneInput {
+  produitId: string;
+  quantite: number;
+  prixUnitaire: number;
+  fournisseurExterne?: string;
+  prixAchatExterne?: number;
+}
+export interface VenteInput {
+  emplacementId: string;
+  clientNom: string;
+  clientTelephone: string | null;
+  clientAdresse: string | null;
+  vendeurUtilisateurId: string;
+  vendeurCompteConnecteNom: string;
+  vendeurNomManuel: string | null;
+  lignes: VenteLigneInput[];
+}
+
 const maxiEquipApi = {
   ping: (): Promise<{ ok: boolean; message: string; timestamp: string }> => ipcRenderer.invoke("app:ping"),
   dbHealthCheck: (): Promise<{ tableCount: number; tables: string[] }> =>
@@ -28,6 +52,39 @@ const maxiEquipApi = {
   logout: (): Promise<{ ok: boolean }> => ipcRenderer.invoke("auth:logout"),
   getSession: (): Promise<auth.SessionLocale | null> => ipcRenderer.invoke("auth:getSession"),
   getPermissions: (): Promise<auth.PermissionSet | null> => ipcRenderer.invoke("auth:getPermissions"),
+
+  // --- Métier (Phase 2) ---
+  listProduits: (): Promise<Produit[]> => ipcRenderer.invoke("catalogue:list"),
+  getCatalogueSuggestions: (): Promise<{ types: string[]; tailles: string[] }> =>
+    ipcRenderer.invoke("catalogue:suggestions"),
+  createProduit: (input: {
+    motif: string;
+    type: string;
+    taille: string;
+    reference: string;
+    prix: number;
+    seuilAlerte: number;
+  }): Promise<{ id: string }> => ipcRenderer.invoke("catalogue:create", input),
+
+  listEmplacements: (): Promise<Emplacement[]> => ipcRenderer.invoke("emplacements:list"),
+
+  getStockByEmplacement: (emplacementId: string): Promise<{ produitId: string; quantite: number }[]> =>
+    ipcRenderer.invoke("stock:byEmplacement", emplacementId),
+  enregistrerEntree: (produitId: string, emplacementId: string, quantite: number): Promise<StockOperationResult> =>
+    ipcRenderer.invoke("stock:entree", produitId, emplacementId, quantite),
+
+  enregistrerVente: (input: VenteInput): Promise<StockOperationResult & { factureId?: string; numero?: string; total?: number }> =>
+    ipcRenderer.invoke("ventes:create", input),
+
+  listFactures: (): Promise<Facture[]> => ipcRenderer.invoke("factures:list"),
+  listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
+
+  getDashboardSummary: (): Promise<{
+    totalProduits: number;
+    produitsSousSeuil: number;
+    totalFactures: number;
+    mouvementsRecents: Mouvement[];
+  }> => ipcRenderer.invoke("dashboard:summary"),
 };
 
 export type MaxiEquipApi = typeof maxiEquipApi;

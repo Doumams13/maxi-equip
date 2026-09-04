@@ -11,6 +11,14 @@ import { UtilisateurRepository } from "./auth/utilisateurRepository.js";
 import { SessionManager } from "./auth/sessionManager.js";
 import { AuthService } from "./auth/authService.js";
 import { bootstrapDefaultUsers } from "./auth/bootstrapUsers.js";
+import { EmplacementRepository, bootstrapDefaultEmplacements } from "./repositories/emplacementRepository.js";
+import { ProduitRepository } from "./repositories/produitRepository.js";
+import { StockRepository } from "./repositories/stockRepository.js";
+import { MouvementRepository } from "./repositories/mouvementRepository.js";
+import { FactureRepository } from "./repositories/factureRepository.js";
+import { StockService } from "./services/stockService.js";
+import { VenteService } from "./services/venteService.js";
+import { registerMetierIpcHandlers } from "./ipc/metier.js";
 
 // Le processus principal est construit en CommonJS (voir electron.vite.config.ts)
 // — __dirname est donc nativement disponible, pas besoin de la variante ESM
@@ -107,6 +115,27 @@ app.whenReady().then(async () => {
 
     await bootstrapDefaultUsers(utilisateurRepository, hasher);
     registerAuthIpcHandlers(authService);
+
+    // Métier (Phase 2) : dépôts + services assemblant les règles du
+    // domaine (§19 : le domaine reste la seule source de vérité).
+    const emplacementRepository = new EmplacementRepository(db);
+    const produitRepository = new ProduitRepository(db);
+    const stockRepository = new StockRepository(db);
+    const mouvementRepository = new MouvementRepository(db);
+    const factureRepository = new FactureRepository(db);
+    const stockService = new StockService(stockRepository, mouvementRepository);
+    const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository);
+
+    bootstrapDefaultEmplacements(emplacementRepository);
+    registerMetierIpcHandlers(
+      produitRepository,
+      emplacementRepository,
+      stockRepository,
+      mouvementRepository,
+      factureRepository,
+      stockService,
+      venteService
+    );
   } catch (err) {
     // Ne jamais planter silencieusement (ex. coffre-fort sécurisé du système
     // indisponible — cf. docs/architecture/PHASE0.md). L'utilisateur doit

@@ -61,7 +61,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       case "dashboard":
         return <DashboardScreen />;
       case "produits":
-        return <ProduitsScreen />;
+        return <ProduitsScreen session={{ userId: session!.userId }} />;
       case "stock":
         return <StockScreen />;
       case "ventes":

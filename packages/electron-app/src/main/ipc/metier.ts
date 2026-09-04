@@ -60,6 +60,22 @@ export function registerMetierIpcHandlers(
     }
   );
 
+  ipcMain.handle(
+    "catalogue:update",
+    (_e, id: string, input: { type: string; taille: string; reference: string; prix: number; seuilAlerte: number }) => {
+      const tailleTri = parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
+      produitRepository.update(id, { ...input, tailleTri });
+      return { success: true };
+    }
+  );
+
+  ipcMain.handle("catalogue:delete", (_e, id: string, deletedBy: string) => {
+    // Suppression douce uniquement (Synthèse §9) — jamais de perte de
+    // données, le produit reste tracé et référencé par l'historique existant.
+    produitRepository.softDelete(id, deletedBy);
+    return { success: true };
+  });
+
   // --- Emplacements ---
   ipcMain.handle("emplacements:list", () => emplacementRepository.list());
 

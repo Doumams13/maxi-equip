@@ -43,6 +43,7 @@ export interface VenteInput {
 
 export interface ProduitAvecMiniature extends Produit {
   imagePrincipaleDataUrl: string | null;
+  nombreImages: number;
 }
 
 export interface ImageAffichable {
@@ -50,6 +51,11 @@ export interface ImageAffichable {
   estPrincipale: boolean;
   ordre: number;
   dataUrl: string | null;
+}
+
+export interface StagedImage {
+  stagingId: string;
+  dataUrl: string;
 }
 
 const maxiEquipApi = {
@@ -69,7 +75,7 @@ const maxiEquipApi = {
   getCatalogueSuggestions: (): Promise<{ types: string[]; tailles: string[] }> =>
     ipcRenderer.invoke("catalogue:suggestions"),
   createProduit: (input: {
-    motif: string;
+    motif?: string;
     type: string;
     taille: string;
     reference: string;
@@ -106,6 +112,15 @@ const maxiEquipApi = {
   setImagePrincipale: (produitId: string, imageId: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke("images:setPrincipale", produitId, imageId),
   removeImage: (imageId: string): Promise<{ success: boolean }> => ipcRenderer.invoke("images:remove", imageId),
+
+  // Mécanisme de "staging" — prévisualisation réelle avant même que le
+  // produit n'existe (formulaire de création, correction 2 §7/§8).
+  pickFilesToStaging: (): Promise<{ success: boolean; staged?: StagedImage[]; message?: string }> =>
+    ipcRenderer.invoke("images:pickFilesToStaging"),
+  commitStagedImages: (produitId: string, stagingIds: string[], principaleStagingId: string | null): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke("images:commitStaged", produitId, stagingIds, principaleStagingId),
+  discardStagedImages: (stagingIds: string[]): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke("images:discardStaged", stagingIds),
 };
 
 export type MaxiEquipApi = typeof maxiEquipApi;

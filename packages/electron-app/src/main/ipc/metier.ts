@@ -30,8 +30,14 @@ export function registerMetierIpcHandlers(
   // --- Catalogue ---
   ipcMain.handle("catalogue:list", () => {
     const produits = produitRepository.list();
-    const miniatures = imageService.getPrincipalesDataUrlsForProduits(produits.map((p) => p.id));
-    return produits.map((p) => ({ ...p, imagePrincipaleDataUrl: miniatures[p.id] ?? null }));
+    const produitIds = produits.map((p) => p.id);
+    const miniatures = imageService.getPrincipalesDataUrlsForProduits(produitIds);
+    const compteurs = imageService.countForProduits(produitIds);
+    return produits.map((p) => ({
+      ...p,
+      imagePrincipaleDataUrl: miniatures[p.id] ?? null,
+      nombreImages: compteurs[p.id] ?? 0,
+    }));
   });
 
   ipcMain.handle("catalogue:suggestions", () => ({
@@ -41,9 +47,16 @@ export function registerMetierIpcHandlers(
 
   ipcMain.handle(
     "catalogue:create",
-    (_e, input: { motif: string; type: string; taille: string; reference: string; prix: number; seuilAlerte: number }) => {
+    (_e, input: { motif?: string; type: string; taille: string; reference: string; prix: number; seuilAlerte: number }) => {
       const tailleTri = parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
-      return { id: produitRepository.create({ ...input, tailleTri }) };
+      // Le "motif" n'est plus un champ obligatoire saisi par l'utilisateur
+      // (correction Phase 2 §3 : "il n'y a pas de champ Nom du produit
+      // obligatoire — la référence est l'information d'identification").
+      // La colonne reste techniquement présente en base (usage interne
+      // futur, recherche, regroupement) ; à défaut de valeur fournie, elle
+      // est initialisée à la référence pour ne jamais laisser de valeur vide.
+      const motif = input.motif?.trim() || input.reference.trim();
+      return { id: produitRepository.create({ ...input, motif, tailleTri }) };
     }
   );
 

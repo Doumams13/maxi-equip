@@ -24,4 +24,26 @@ export function registerImageIpcHandlers(imageService: ImageService): void {
     imageService.remove(imageId);
     return { success: true };
   });
+
+  // --- Mécanisme de "staging" pour le formulaire de création (correction 2) ---
+  ipcMain.handle("images:pickFilesToStaging", async () => {
+    try {
+      const staged = await imageService.pickFilesToStaging();
+      return { success: true, staged };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[images] sélection impossible :", err);
+      return { success: false, message: "Une erreur inattendue s'est produite lors de la sélection des images." };
+    }
+  });
+
+  ipcMain.handle("images:commitStaged", (_e, produitId: string, stagingIds: string[], principaleStagingId: string | null) => {
+    imageService.commitStaged(produitId, stagingIds, principaleStagingId);
+    return { success: true };
+  });
+
+  ipcMain.handle("images:discardStaged", (_e, stagingIds: string[]) => {
+    imageService.discardStaged(stagingIds);
+    return { success: true };
+  });
 }

@@ -2,17 +2,19 @@
  * Tokens partagés entre l'application Windows, le site vitrine et la
  * génération des factures PDF (Synthèse §10, Corrections §8).
  *
- * IMPORTANT : la charte graphique officielle de MAXI EQUIP n'a pas encore
- * été fournie. Les valeurs ci-dessous reprennent l'identité provisoire
- * déjà développée dans la maquette. Elles sont regroupées dans un seul
- * objet exporté (`defaultTokens`) précisément pour pouvoir être
- * remplacées d'un bloc, sans toucher au reste du code, dès réception de
- * la charte définitive — voir `docs/architecture/PHASE0.md`.
+ * IDENTITÉ OFFICIELLE MAXI EQUIP — intégrée à partir de la Phase 1
+ * (finalisation UI). La palette ci-dessous est construite autour du vert
+ * de la charte officielle et du logo fourni par MAXI EQUIP
+ * (packages/electron-app/src/renderer/assets/maxi-equip-logo.png, utilisé
+ * tel quel, jamais modifié). Cette palette est désormais LA référence
+ * pour l'ensemble du logiciel — écran de connexion, tableau de bord, et
+ * tous les écrans à venir dans les phases suivantes (Corrections §8 :
+ * seuls les tokens sont partagés, jamais la disposition des écrans).
  *
- * Rappel de ce qui est partagé et de ce qui ne l'est pas (Corrections §8) :
- * couleurs, typographies, espacements, rayons et apparence des composants
- * de base SONT partagés. La disposition des écrans et les comportements
- * d'interaction restent propres à chaque surface (application vs site).
+ * Les noms de clés reprennent volontairement ceux déjà utilisés par les
+ * composants existants (Button, Card) — seules les VALEURS changent, pour
+ * ne jamais dupliquer le Design System (cf. consigne explicite Phase 1 :
+ * "ne crée pas un deuxième Design System").
  */
 
 export interface ColorTokens {
@@ -29,6 +31,7 @@ export interface ColorTokens {
   borderSoft: string;
   accent: string;
   accentHover: string;
+  accentActive: string;
   accentSoft: string;
   success: string;
   successSoft: string;
@@ -40,6 +43,8 @@ export interface ColorTokens {
   infoSoft: string;
   externe: string;
   externeSoft: string;
+  /** Vert décoratif utilisé pour les formes géométriques discrètes en arrière-plan (écran de connexion notamment). */
+  decorative: string;
 }
 
 export interface TypographyTokens {
@@ -63,32 +68,39 @@ export interface RadiusTokens {
   pill: number;
 }
 
+export interface ShadowTokens {
+  card: string;
+  focusRing: string;
+}
+
 export interface DesignTokens {
   colors: ColorTokens;
   typography: TypographyTokens;
   spacing: SpacingTokens;
   radius: RadiusTokens;
+  shadows: ShadowTokens;
 }
 
-/** Identité provisoire (issue de la maquette), remplacée dès réception de la charte officielle. */
+/** Identité officielle MAXI EQUIP (vert), construite à partir du logo fourni. */
 export const defaultTokens: DesignTokens = {
   colors: {
-    bg: "#EFEDE6",
+    bg: "#F6F8F6",
     surface: "#FFFFFF",
-    surfaceAlt: "#F7F5F0",
-    sidebar: "#20242A",
-    sidebarActive: "#2B313A",
-    sidebarBorder: "#31373F",
-    text: "#23262B",
-    textSoft: "#6B6E73",
-    textFaint: "#9A9C9F",
-    border: "#E2DFD6",
-    borderSoft: "#EBE8E0",
-    accent: "#B5673D",
-    accentHover: "#9C552F",
-    accentSoft: "#F3E3D8",
-    success: "#3F7D5C",
-    successSoft: "#E4EFE8",
+    surfaceAlt: "#F0F4F0",
+    sidebar: "#14231A",
+    sidebarActive: "#1C2E20",
+    sidebarBorder: "#22392A",
+    text: "#1B2A1D",
+    textSoft: "#5B6B5D",
+    textFaint: "#8E9C90",
+    border: "#E1E7E1",
+    borderSoft: "#EDF2ED",
+    accent: "#2E7D32",
+    accentHover: "#256B29",
+    accentActive: "#1E5723",
+    accentSoft: "#E3F1E3",
+    success: "#2E7D32",
+    successSoft: "#E3F1E3",
     warning: "#B8842A",
     warningSoft: "#F5EAD6",
     danger: "#B04438",
@@ -97,6 +109,7 @@ export const defaultTokens: DesignTokens = {
     infoSoft: "#E4EAF3",
     externe: "#7A5CA8",
     externeSoft: "#EAE3F3",
+    decorative: "#8BC34A",
   },
   typography: {
     display: "'Manrope', 'Inter', sans-serif",
@@ -105,4 +118,8 @@ export const defaultTokens: DesignTokens = {
   },
   spacing: { xs: 4, sm: 8, md: 16, lg: 24, xl: 40 },
   radius: { sm: 6, md: 10, lg: 16, pill: 999 },
+  shadows: {
+    card: "0 20px 45px -15px rgba(20, 40, 20, 0.22)",
+    focusRing: "0 0 0 3px rgba(46, 125, 50, 0.25)",
+  },
 };

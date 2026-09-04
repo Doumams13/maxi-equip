@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import type Database from "better-sqlite3-multiple-ciphers";
 
 /**
@@ -7,6 +7,11 @@ import type Database from "better-sqlite3-multiple-ciphers";
  * prouver que la chaîne complète fonctionne (Renderer → preload → IPC →
  * base de données chiffrée → retour). Les canaux métier réels (ventes,
  * stock, demandes...) seront ajoutés en Phase 2/3.
+ *
+ * Phase 1 (finalisation UI) : ajout de `app:quit`, nécessaire au bouton
+ * "Quitter l'application" de l'écran de connexion — action purement
+ * applicative (ferme le programme), sans aucun rapport avec
+ * l'authentification, le domaine ou la sécurité.
  */
 export function registerIpcHandlers(db: Database.Database): void {
   ipcMain.handle("app:ping", () => {
@@ -18,5 +23,9 @@ export function registerIpcHandlers(db: Database.Database): void {
       name: string;
     }[];
     return { tableCount: tables.length, tables: tables.map((t) => t.name) };
+  });
+
+  ipcMain.handle("app:quit", () => {
+    app.quit();
   });
 }

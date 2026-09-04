@@ -21,6 +21,7 @@ const maxiEquipApi = {
   ping: (): Promise<{ ok: boolean; message: string; timestamp: string }> => ipcRenderer.invoke("app:ping"),
   dbHealthCheck: (): Promise<{ tableCount: number; tables: string[] }> =>
     ipcRenderer.invoke("app:dbHealthCheck"),
+  quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
 
   login: (identifiant: string, motDePasse: string): Promise<LoginOutcome> =>
     ipcRenderer.invoke("auth:login", identifiant, motDePasse),

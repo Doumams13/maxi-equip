@@ -5,21 +5,30 @@ export interface LogoProps {
    * n'a pas fourni son logo officiel (Synthèse §13, Corrections §8). */
   logoUrl?: string | null;
   size?: number;
+  /** Largeur explicite, pour un logo non carré (le logo officiel MAXI EQUIP ne l'est pas). Prioritaire sur `size`. */
+  width?: number;
+  height?: number;
 }
 
 /**
  * Affiche le logo réel dès qu'il est disponible (`logoUrl`), ou un repère
- * visuel neutre en attendant — jamais un écran cassé ou vide.
+ * visuel neutre en attendant — jamais un écran cassé ou vide. Le logo
+ * n'est jamais recadré de façon à en déformer les proportions
+ * (`objectFit: contain`) — l'identité graphique officielle doit toujours
+ * apparaître exactement telle que fournie.
  */
-export function Logo({ logoUrl = null, size = 34 }: LogoProps) {
+export function Logo({ logoUrl = null, size = 34, width, height }: LogoProps) {
+  const w = width ?? size;
+  const h = height ?? size;
+
   if (logoUrl) {
     return (
       <img
         src={logoUrl}
         alt="Logo MAXI EQUIP"
-        width={size}
-        height={size}
-        style={{ borderRadius: defaultTokens.radius.sm, objectFit: "cover", flexShrink: 0 }}
+        width={w}
+        height={h}
+        style={{ objectFit: "contain", flexShrink: 0 }}
       />
     );
   }
@@ -28,8 +37,8 @@ export function Logo({ logoUrl = null, size = 34 }: LogoProps) {
     <div
       aria-label="Logo MAXI EQUIP (provisoire)"
       style={{
-        width: size,
-        height: size,
+        width: w,
+        height: h,
         borderRadius: defaultTokens.radius.sm,
         flexShrink: 0,
         background: `linear-gradient(135deg, ${defaultTokens.colors.accent}, ${defaultTokens.colors.accentHover})`,
@@ -37,7 +46,7 @@ export function Logo({ logoUrl = null, size = 34 }: LogoProps) {
         gridTemplateColumns: "1fr 1fr",
         gridTemplateRows: "1fr 1fr",
         gap: 2,
-        padding: size * 0.15,
+        padding: Math.min(w, h) * 0.15,
       }}
     >
       <div style={{ background: "rgba(255,255,255,0.9)", borderRadius: 2 }} />

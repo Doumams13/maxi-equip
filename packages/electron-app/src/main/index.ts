@@ -4,7 +4,6 @@ import { closeDatabase, openDatabase } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { registerIpcHandlers } from "./ipc/index.js";
 import { registerAuthIpcHandlers } from "./ipc/auth.js";
-import { registerWindowIpcHandlers, LOGIN_WINDOW_SIZE } from "./ipc/window.js";
 import { getSecureWebPreferences, CONTENT_SECURITY_POLICY } from "./security/windowOptions.js";
 import { restrictNavigation } from "./security/restrictNavigation.js";
 import { Argon2idPasswordHasher } from "./auth/argon2Hasher.js";
@@ -22,14 +21,35 @@ import { bootstrapDefaultUsers } from "./auth/bootstrapUsers.js";
 // production, le renderer est chargé depuis les fichiers empaquetés.
 const RENDERER_DEV_SERVER_URL = process.env["ELECTRON_RENDERER_URL"];
 
+/**
+ * Taille INITIALE par défaut de la fenêtre — pas une taille verrouillée.
+ * L'utilisateur peut librement redimensionner, maximiser, utiliser le
+ * Snap Windows, etc. (revirement explicite par rapport à une version
+ * précédente qui verrouillait la fenêtre pendant l'écran de connexion).
+ */
+const DEFAULT_WINDOW_SIZE = { width: 1280, height: 720 };
+
+/**
+ * Taille minimale — déterminée à partir du contenu réel de l'écran de
+ * connexion (packages/electron-app/src/renderer/LoginScreen.tsx), pas
+ * choisie arbitrairement : la carte de connexion a une largeur maximale
+ * de 420px, entourée d'un espacement de 24px de chaque côté (468px de
+ * large minimum), et son contenu vertical (logo, titre, deux champs,
+ * bouton, séparateur, bouton secondaire, marges de la carte) nécessite
+ * environ 600px de hauteur avant d'ajouter l'espacement extérieur. Une
+ * marge de sécurité est ajoutée pour éviter tout débordement au pixel
+ * près sur différents systèmes de mise à l'échelle Windows.
+ */
+const MIN_WINDOW_SIZE = { width: 520, height: 680 };
+
 function createMainWindow(): BrowserWindow {
   const preloadDir = join(__dirname, "../preload");
 
   const window = new BrowserWindow({
-    width: LOGIN_WINDOW_SIZE.width,
-    height: LOGIN_WINDOW_SIZE.height,
-    resizable: false,
-    maximizable: false,
+    width: DEFAULT_WINDOW_SIZE.width,
+    height: DEFAULT_WINDOW_SIZE.height,
+    minWidth: MIN_WINDOW_SIZE.width,
+    minHeight: MIN_WINDOW_SIZE.height,
     center: true,
     show: false,
     webPreferences: getSecureWebPreferences(preloadDir),
@@ -102,8 +122,6 @@ app.whenReady().then(async () => {
   }
 
   createMainWindow();
-  const [mainWindow] = BrowserWindow.getAllWindows();
-  if (mainWindow) registerWindowIpcHandlers(mainWindow);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

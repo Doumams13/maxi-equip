@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil, CheckCircle2, X } from "lucide-react";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
 
 interface LigneVenteForm {
@@ -13,6 +13,107 @@ interface LigneVenteForm {
 
 function ligneVide(): LigneVenteForm {
   return { produitId: "", quantite: "1", prixUnitaire: "", fournisseurExterne: "", prixAchatExterne: "" };
+}
+
+interface LigneRecap {
+  label: string;
+  quantite: number;
+  prixUnitaire: number;
+}
+
+/**
+ * Écran de vérification avant confirmation — reproduit SaleConfirmModal de
+ * la maquette originale (App.jsx ligne 2015, titre "Vérification de la
+ * vente") : explicitement prévu par le cahier des charges Phase 2
+ * ("sortie/vente avec écran de vérification"), absent des versions
+ * précédentes de cet écran. Deux issues possibles : « Modifier » (retour
+ * au formulaire, rien n'est enregistré) ou « Confirmer et générer la
+ * facture » (déclenche réellement enregistrerVente).
+ */
+function SaleConfirmModal({
+  clientNom,
+  vendeur,
+  lignes,
+  total,
+  onModifier,
+  onConfirmer,
+  confirming,
+}: {
+  clientNom: string;
+  vendeur: string;
+  lignes: LigneRecap[];
+  total: number;
+  onModifier: () => void;
+  onConfirmer: () => void;
+  confirming: boolean;
+}) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+      <Card elevated style={{ width: 560, boxSizing: "border-box" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontFamily: defaultTokens.typography.display, fontSize: 17 }}>Vérification de la vente</h2>
+          <button onClick={onModifier} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }} aria-label="Fermer">
+            <X size={18} color={defaultTokens.colors.textFaint} />
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14, fontSize: 13.5 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: defaultTokens.colors.textSoft }}>Client</span>
+            <span style={{ fontWeight: 700 }}>{clientNom}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: defaultTokens.colors.textSoft }}>Vendeur</span>
+            <span style={{ fontWeight: 700 }}>{vendeur}</span>
+          </div>
+        </div>
+
+        <div style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.md, overflow: "hidden", marginBottom: 16 }}>
+          {lignes.map((l, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: "10px 14px",
+                fontSize: 13,
+                borderTop: i > 0 ? `1px solid ${defaultTokens.colors.borderSoft}` : "none",
+              }}
+            >
+              <span>{l.label}</span>
+              <span style={{ color: defaultTokens.colors.textSoft }}>
+                {l.quantite} × {l.prixUnitaire.toLocaleString("fr-FR")} FCFA = {(l.quantite * l.prixUnitaire).toLocaleString("fr-FR")} FCFA
+              </span>
+            </div>
+          ))}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "10px 14px",
+              fontWeight: 800,
+              fontFamily: defaultTokens.typography.display,
+              background: defaultTokens.colors.surfaceAlt,
+            }}
+          >
+            <span>Total</span>
+            <span>{total.toLocaleString("fr-FR")} FCFA</span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button variant="secondary" onClick={onModifier} style={{ flex: 1 }}>
+            <Pencil size={15} />
+            Modifier
+          </Button>
+          <Button onClick={onConfirmer} loading={confirming} style={{ flex: 1 }}>
+            <CheckCircle2 size={15} />
+            Confirmer et générer la facture
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
 }
 
 const inputStyle: React.CSSProperties = {
@@ -46,6 +147,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
   const [vendeurNomManuel, setVendeurNomManuel] = useState("");
   const [lignes, setLignes] = useState<LigneVenteForm[]>([ligneVide()]);
   const [saving, setSaving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -77,7 +179,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
 
   const total = lignes.reduce((sum, l) => sum + (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0), 0);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleOuvrirVerification(e: React.FormEvent) {
     e.preventDefault();
     if (!shop) {
       showError("Point de vente introuvable", "Aucun emplacement de type SHOP n'est configuré.");
@@ -92,6 +194,12 @@ export function VentesScreen({ session }: VentesScreenProps) {
       showWarning("Ligne requise", "Ajoutez au moins un produit à la vente.");
       return;
     }
+    setShowConfirm(true);
+  }
+
+  async function handleConfirmerVente() {
+    if (!shop) return;
+    const lignesValides = lignes.filter((l) => l.produitId && Number(l.quantite) > 0);
 
     setSaving(true);
     try {
@@ -118,11 +226,14 @@ export function VentesScreen({ session }: VentesScreenProps) {
         setClientTelephone("");
         setVendeurNomManuel("");
         setLignes([ligneVide()]);
+        setShowConfirm(false);
         if (shop) {
           const stock = await window.maxiEquip.getStockByEmplacement(shop.id);
           setStockShop(Object.fromEntries(stock.map((s) => [s.produitId, s.quantite])));
         }
       } else {
+        // On garde la modale ouverte : l'utilisateur voit l'erreur et peut
+        // revenir modifier sans perdre sa saisie.
         showError("Opération impossible", result.reason.message);
       }
     } catch (err) {
@@ -138,7 +249,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Sortie de stock</h1>
 
-      <form onSubmit={(e) => void handleSubmit(e)}>
+      <form onSubmit={(e) => void handleOuvrirVerification(e)}>
         <Card style={{ marginBottom: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <div>
@@ -225,11 +336,27 @@ export function VentesScreen({ session }: VentesScreenProps) {
           <div style={{ fontSize: 16, fontWeight: 800, fontFamily: defaultTokens.typography.display }}>
             Total : {total.toLocaleString("fr-FR")} FCFA
           </div>
-          <Button type="submit" loading={saving}>
-            Enregistrer la vente
-          </Button>
+          <Button type="submit">Vérifier la vente</Button>
         </Card>
       </form>
+
+      {showConfirm && (
+        <SaleConfirmModal
+          clientNom={clientNom.trim()}
+          vendeur={vendeurNomManuel.trim() || session.nom}
+          lignes={lignes
+            .filter((l) => l.produitId && Number(l.quantite) > 0)
+            .map((l) => ({
+              label: produits.find((p) => p.id === l.produitId)?.reference ?? "",
+              quantite: Number(l.quantite),
+              prixUnitaire: Number(l.prixUnitaire) || 0,
+            }))}
+          total={total}
+          onModifier={() => setShowConfirm(false)}
+          onConfirmer={() => void handleConfirmerVente()}
+          confirming={saving}
+        />
+      )}
     </div>
   );
 }

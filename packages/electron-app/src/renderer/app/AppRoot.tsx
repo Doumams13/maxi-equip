@@ -61,7 +61,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   function renderScreen() {
     switch (activeScreen) {
       case "dashboard":
-        return <DashboardScreen />;
+        return <DashboardScreen session={{ userId: session!.userId, nom: session!.nom, role: session!.role }} />;
       case "produits":
         return <ProduitsScreen session={{ userId: session!.userId }} />;
       case "stock":

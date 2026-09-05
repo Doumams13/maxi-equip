@@ -27,6 +27,16 @@ export class StockRepository {
       .all(emplacementId) as { produitId: string; quantite: number }[];
   }
 
+  /** Stock total (tous emplacements confondus) pour plusieurs produits — colonne "Stock" de la maquette (CarreauxPage). */
+  getTotalsForProduits(produitIds: string[]): Map<string, number> {
+    if (produitIds.length === 0) return new Map();
+    const placeholders = produitIds.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(`SELECT produit_id as produitId, SUM(quantite) as total FROM stocks WHERE produit_id IN (${placeholders}) GROUP BY produit_id`)
+      .all(...produitIds) as { produitId: string; total: number }[];
+    return new Map(rows.map((r) => [r.produitId, r.total]));
+  }
+
   /** Applique un delta (positif ou négatif) — jamais une valeur absolue (Corrections §4). */
   applyDelta(delta: domainStock.StockDelta & { produitId: string }): void {
     const existing = this.db

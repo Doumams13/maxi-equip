@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, defaultTokens } from "@maxi-equip/design-system";
 import type { Mouvement } from "@maxi-equip/shared-types";
 
-type Periode = "jour" | "semaine" | "mois" | "tout";
+type Periode = "jour" | "semaine" | "mois" | "personnalise" | "tout";
 
 const MOUVEMENT_LABELS: Record<string, string> = { entree: "Entrée", sortie: "Sortie", transfert: "Transfert" };
 const MOUVEMENT_COLORS: Record<string, string> = {
@@ -23,38 +23,56 @@ function debutPeriode(periode: Periode): Date | null {
   return null;
 }
 
+const inputStyle: React.CSSProperties = {
+  padding: "7px 10px",
+  borderRadius: defaultTokens.radius.sm,
+  border: `1px solid ${defaultTokens.colors.border}`,
+  fontFamily: defaultTokens.typography.body,
+  fontSize: 12.5,
+};
+
 /**
- * Historique — Phase 2 §13. Filtre de période appliqué côté client pour
- * l'instant (le volume de données reste faible en Phase 2) — la structure
- * (type Periode, calcul de la borne de date) est directement compatible
- * avec un filtrage côté serveur/IPC lorsque le volume le justifiera,
- * sans réécriture. Filtre "personnalisé" volontairement absent : pas
- * encore supporté par le domaine/la base à ce stade (§13 : "ne développe
- * pas de logique qui n'est pas encore supportée").
+ * Historique — Phase 2 §13, complété pour inclure le filtre "période
+ * personnalisée" prévu par le cahier des charges et présent dans la
+ * maquette originale (PeriodFilter, App.jsx ligne 475) — absent des
+ * versions précédentes de cet écran, corrigé ici. Filtrage toujours
+ * appliqué côté client (volume raisonnable en Phase 2), structure
+ * compatible avec un filtrage IPC ultérieur sans réécriture.
  */
 export function HistoriqueScreen() {
   const [mouvements, setMouvements] = useState<Mouvement[]>([]);
   const [periode, setPeriode] = useState<Periode>("tout");
+  const [dateDebut, setDateDebut] = useState("");
+  const [dateFin, setDateFin] = useState("");
 
   useEffect(() => {
     void window.maxiEquip.listHistorique().then(setMouvements);
   }, []);
 
   const filtres = useMemo(() => {
+    if (periode === "personnalise") {
+      return mouvements.filter((m) => {
+        const d = new Date(m.date);
+        if (dateDebut && d < new Date(dateDebut)) return false;
+        if (dateFin && d > new Date(new Date(dateFin).setHours(23, 59, 59, 999))) return false;
+        return true;
+      });
+    }
     const debut = debutPeriode(periode);
     if (!debut) return mouvements;
     return mouvements.filter((m) => new Date(m.date) >= debut);
-  }, [mouvements, periode]);
+  }, [mouvements, periode, dateDebut, dateFin]);
 
   return (
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Historique</h1>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
         {([
           ["jour", "Aujourd'hui"],
           ["semaine", "7 derniers jours"],
           ["mois", "Ce mois"],
+          ["personnalise", "Période personnalisée"],
           ["tout", "Tout"],
         ] as [Periode, string][]).map(([value, label]) => (
           <button
@@ -74,6 +92,14 @@ export function HistoriqueScreen() {
             {label}
           </button>
         ))}
+
+        {periode === "personnalise" && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="date" style={inputStyle} value={dateDebut} onChange={(e) => setDateDebut(e.target.value)} />
+            <span style={{ color: defaultTokens.colors.textFaint, fontSize: 12 }}>à</span>
+            <input type="date" style={inputStyle} value={dateFin} onChange={(e) => setDateFin(e.target.value)} />
+          </div>
+        )}
       </div>
 
       <Card padding={0}>

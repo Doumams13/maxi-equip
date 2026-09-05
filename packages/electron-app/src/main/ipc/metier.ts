@@ -33,10 +33,12 @@ export function registerMetierIpcHandlers(
     const produitIds = produits.map((p) => p.id);
     const miniatures = imageService.getPrincipalesDataUrlsForProduits(produitIds);
     const compteurs = imageService.countForProduits(produitIds);
+    const stockTotaux = stockRepository.getTotalsForProduits(produitIds);
     return produits.map((p) => ({
       ...p,
       imagePrincipaleDataUrl: miniatures[p.id] ?? null,
       nombreImages: compteurs[p.id] ?? 0,
+      stockTotal: stockTotaux.get(p.id) ?? 0,
     }));
   });
 
@@ -133,12 +135,33 @@ export function registerMetierIpcHandlers(
   ipcMain.handle("historique:list", () => mouvementRepository.list());
 
   // --- Dashboard ---
-  ipcMain.handle("dashboard:summary", () => ({
-    totalProduits: produitRepository.count(),
-    produitsSousSeuil: produitRepository.countBelowThreshold(),
-    totalFactures: factureRepository.count(),
-    mouvementsRecents: mouvementRepository.listRecent(5),
-  }));
+  ipcMain.handle("dashboard:summary", (_e, userId: string) => {
+    const emplacements = emplacementRepository.list();
+    const shop = emplacements.find((e) => e.estPointDeVente) ?? null;
+    const factures = factureRepository.list(200); // fenêtre raisonnable pour les agrégats "aujourd'hui" en Phase 2
+    const aujourdhui = new Date().toDateString();
+    const facturesAujourdhui = factures.filter((f) => new Date(f.date).toDateString() === aujourdhui);
+
+    const stockParEmplacement = shop ? stockRepository.listByEmplacement(shop.id) : [];
+    const stockShop = stockParEmplacement.reduce((s, r) => s + r.quantite, 0);
+    const stockTousDepots = emplacements.reduce((s, e) => s + stockRepository.listByEmplacement(e.id).reduce((a, r) => a + r.quantite, 0), 0);
+
+    return {
+      // Communs
+      mouvementsRecents: mouvementRepository.listRecent(5),
+      // Administrateur — vue globale
+      stockTousDepots,
+      caTotal: factures.reduce((s, f) => s + f.total, 0),
+      produitsSousSeuilGlobal: produitRepository.countBelowThreshold(),
+      totalFactures: factureRepository.count(),
+      totalProduits: produitRepository.count(),
+      // Gérant — vue SHOP
+      stockShop,
+      ventesShopAujourdhui: facturesAujourdhui.reduce((s, f) => s + f.total, 0),
+      mesVentesAujourdhui: facturesAujourdhui.filter((f) => f.vendeurUtilisateurId === userId).reduce((s, f) => s + f.total, 0),
+      mesFacturesAujourdhuiCount: facturesAujourdhui.filter((f) => f.vendeurUtilisateurId === userId).length,
+    };
+  });
 }
 
 type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "UNKNOWN";

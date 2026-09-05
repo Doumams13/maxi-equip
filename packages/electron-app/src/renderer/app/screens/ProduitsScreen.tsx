@@ -232,7 +232,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
   return (
     <div style={{ padding: 28 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, margin: 0 }}>Produits</h1>
+        <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, margin: 0 }}>Carreaux</h1>
         <Button onClick={() => (showForm ? void handleCloseForm() : (resetForm(), setEditingId(null), setFormInstanceKey((k) => k + 1), setShowForm(true)))}>
           {showForm ? <X size={16} /> : <Plus size={16} />}
           {showForm ? "Annuler" : "Nouveau produit"}

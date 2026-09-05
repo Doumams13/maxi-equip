@@ -107,6 +107,15 @@ export function registerMetierIpcHandlers(
     }
   });
 
+  ipcMain.handle("stock:transfert", (_e, produitId: string, sourceId: string, destinationId: string, quantite: number) => {
+    try {
+      stockService.enregistrerTransfert(produitId, sourceId, destinationId, quantite);
+      return { success: true };
+    } catch (err) {
+      return { success: false, reason: mapStockError(err) };
+    }
+  });
+
   // --- Ventes ---
   ipcMain.handle("ventes:create", (_e, input: VenteInput) => {
     try {

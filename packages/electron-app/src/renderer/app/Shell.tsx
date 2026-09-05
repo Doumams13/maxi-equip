@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Package,
   Boxes,
+  ArrowLeftRight,
   ShoppingCart,
   Receipt,
   History,
@@ -12,7 +13,7 @@ import {
 } from "lucide-react";
 import logoUrl from "../assets/maxi-equip-logo.png";
 
-export type ScreenId = "dashboard" | "produits" | "stock" | "ventes" | "factures" | "historique";
+export type ScreenId = "dashboard" | "produits" | "stock" | "transferts" | "ventes" | "factures" | "historique";
 
 export interface NavItem {
   id: ScreenId;
@@ -34,6 +35,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
   dashboard: LayoutDashboard,
   produits: Package,
   stock: Boxes,
+  transferts: ArrowLeftRight,
   ventes: ShoppingCart,
   factures: Receipt,
   historique: History,

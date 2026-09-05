@@ -17,7 +17,7 @@ export function FacturesScreen() {
 
   return (
     <div style={{ padding: 28 }}>
-      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Facturation</h1>
+      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Factures</h1>
 
       {factures.length === 0 ? (
         <Card>

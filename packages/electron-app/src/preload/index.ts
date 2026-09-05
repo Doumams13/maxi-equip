@@ -97,6 +97,12 @@ const maxiEquipApi = {
     ipcRenderer.invoke("stock:byEmplacement", emplacementId),
   enregistrerEntree: (produitId: string, emplacementId: string, quantite: number): Promise<StockOperationResult> =>
     ipcRenderer.invoke("stock:entree", produitId, emplacementId, quantite),
+  enregistrerTransfert: (
+    produitId: string,
+    sourceId: string,
+    destinationId: string,
+    quantite: number
+  ): Promise<StockOperationResult> => ipcRenderer.invoke("stock:transfert", produitId, sourceId, destinationId, quantite),
 
   enregistrerVente: (input: VenteInput): Promise<StockOperationResult & { factureId?: string; numero?: string; total?: number }> =>
     ipcRenderer.invoke("ventes:create", input),

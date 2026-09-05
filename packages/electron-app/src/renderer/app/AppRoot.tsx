@@ -5,6 +5,7 @@ import { Shell, type NavItem, type ScreenId } from "./Shell.js";
 import { DashboardScreen } from "./screens/DashboardScreen.js";
 import { ProduitsScreen } from "./screens/ProduitsScreen.js";
 import { StockScreen } from "./screens/StockScreen.js";
+import { TransfertsScreen } from "./screens/TransfertsScreen.js";
 import { VentesScreen } from "./screens/VentesScreen.js";
 import { FacturesScreen } from "./screens/FacturesScreen.js";
 import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
@@ -49,10 +50,11 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
 
   const navItems: NavItem[] = [
     { id: "dashboard", label: "Tableau de bord", autorise: permissions.canAccessOperationalDashboard },
-    { id: "produits", label: "Produits", autorise: permissions.canOperateStock },
-    { id: "stock", label: "Stock", autorise: permissions.canOperateStock },
-    { id: "ventes", label: "Ventes", autorise: permissions.canOperateSales },
-    { id: "factures", label: "Facturation", autorise: permissions.canAccessHistory },
+    { id: "produits", label: "Carreaux", autorise: permissions.canOperateStock },
+    { id: "stock", label: "Entrée de stock", autorise: permissions.canOperateStock },
+    { id: "transferts", label: "Transferts", autorise: permissions.canOperateStock },
+    { id: "ventes", label: "Sortie de stock", autorise: permissions.canOperateSales },
+    { id: "factures", label: "Factures", autorise: permissions.canAccessHistory },
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
   ];
 
@@ -64,6 +66,8 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
         return <ProduitsScreen session={{ userId: session!.userId }} />;
       case "stock":
         return <StockScreen />;
+      case "transferts":
+        return <TransfertsScreen />;
       case "ventes":
         return <VentesScreen session={{ userId: session!.userId, nom: session!.nom }} />;
       case "factures":

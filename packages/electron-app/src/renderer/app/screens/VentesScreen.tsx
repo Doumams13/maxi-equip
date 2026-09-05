@@ -140,8 +140,9 @@ export interface VentesScreenProps {
 export function VentesScreen({ session }: VentesScreenProps) {
   const { showSuccess, showWarning, showError } = useToast();
   const [produits, setProduits] = useState<Produit[]>([]);
-  const [shop, setShop] = useState<Emplacement | null>(null);
-  const [stockShop, setStockShop] = useState<Record<string, number>>({});
+  const [depots, setDepots] = useState<Emplacement[]>([]);
+  const [depotSourceId, setDepotSourceId] = useState<string>("");
+  const [stockDepot, setStockDepot] = useState<Record<string, number>>({});
   const [clientNom, setClientNom] = useState("");
   const [clientTelephone, setClientTelephone] = useState("");
   const [vendeurNomManuel, setVendeurNomManuel] = useState("");
@@ -149,18 +150,32 @@ export function VentesScreen({ session }: VentesScreenProps) {
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  async function chargerStock(id: string) {
+    const stock = await window.maxiEquip.getStockByEmplacement(id);
+    setStockDepot(Object.fromEntries(stock.map((s) => [s.produitId, s.quantite])));
+  }
+
   useEffect(() => {
     void (async () => {
       const [prods, emps] = await Promise.all([window.maxiEquip.listProduits(), window.maxiEquip.listEmplacements()]);
       setProduits(prods);
-      const pointDeVente = emps.find((e) => e.estPointDeVente) ?? null;
-      setShop(pointDeVente);
-      if (pointDeVente) {
-        const stock = await window.maxiEquip.getStockByEmplacement(pointDeVente.id);
-        setStockShop(Object.fromEntries(stock.map((s) => [s.produitId, s.quantite])));
+      // Décision métier : SHOP n'a pas de stock, uniquement point de vente
+      // (§3). Les seuls dépôts réels pour une sortie/vente sont Akébé et
+      // Akanda — le vendeur choisit explicitement lequel, même principe
+      // que pour une entrée ou un transfert.
+      const seulsDepots = emps.filter((e) => !e.estPointDeVente);
+      setDepots(seulsDepots);
+      const premier = seulsDepots[0];
+      if (premier) {
+        setDepotSourceId(premier.id);
+        await chargerStock(premier.id);
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (depotSourceId) void chargerStock(depotSourceId);
+  }, [depotSourceId]);
 
   function updateLigne(index: number, patch: Partial<LigneVenteForm>) {
     setLignes((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
@@ -173,7 +188,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
 
   function ligneNeedsExterne(ligne: LigneVenteForm): boolean {
     if (!ligne.produitId || !ligne.quantite) return false;
-    const disponible = stockShop[ligne.produitId] ?? 0;
+    const disponible = stockDepot[ligne.produitId] ?? 0;
     return Number(ligne.quantite) > disponible;
   }
 
@@ -181,8 +196,8 @@ export function VentesScreen({ session }: VentesScreenProps) {
 
   async function handleOuvrirVerification(e: React.FormEvent) {
     e.preventDefault();
-    if (!shop) {
-      showError("Point de vente introuvable", "Aucun emplacement de type SHOP n'est configuré.");
+    if (!depotSourceId) {
+      showError("Dépôt introuvable", "Aucun dépôt (Akébé/Akanda) n'est configuré.");
       return;
     }
     if (!clientNom.trim()) {
@@ -198,13 +213,13 @@ export function VentesScreen({ session }: VentesScreenProps) {
   }
 
   async function handleConfirmerVente() {
-    if (!shop) return;
+    if (!depotSourceId) return;
     const lignesValides = lignes.filter((l) => l.produitId && Number(l.quantite) > 0);
 
     setSaving(true);
     try {
       const result = await window.maxiEquip.enregistrerVente({
-        emplacementId: shop.id,
+        emplacementId: depotSourceId,
         clientNom: clientNom.trim(),
         clientTelephone: clientTelephone.trim() || null,
         clientAdresse: null,
@@ -227,10 +242,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
         setVendeurNomManuel("");
         setLignes([ligneVide()]);
         setShowConfirm(false);
-        if (shop) {
-          const stock = await window.maxiEquip.getStockByEmplacement(shop.id);
-          setStockShop(Object.fromEntries(stock.map((s) => [s.produitId, s.quantite])));
-        }
+        await chargerStock(depotSourceId);
       } else {
         // On garde la modale ouverte : l'utilisateur voit l'erreur et peut
         // revenir modifier sans perdre sa saisie.
@@ -251,7 +263,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
 
       <form onSubmit={(e) => void handleOuvrirVerification(e)}>
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Client</label>
               <input style={inputStyle} value={clientNom} onChange={(e) => setClientNom(e.target.value)} placeholder="Nom du client" />
@@ -259,6 +271,16 @@ export function VentesScreen({ session }: VentesScreenProps) {
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Téléphone (facultatif)</label>
               <input style={inputStyle} value={clientTelephone} onChange={(e) => setClientTelephone(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Dépôt source</label>
+              <select style={inputStyle} value={depotSourceId} onChange={(e) => setDepotSourceId(e.target.value)}>
+                {depots.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.nom}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
@@ -274,7 +296,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {lignes.map((ligne, index) => {
               const needsExterne = ligneNeedsExterne(ligne);
-              const disponible = stockShop[ligne.produitId] ?? 0;
+              const disponible = stockDepot[ligne.produitId] ?? 0;
               return (
                 <div key={index} style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.md, padding: 12 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
@@ -290,7 +312,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
                       </select>
                       {ligne.produitId && (
                         <p style={{ fontSize: 11, color: defaultTokens.colors.textFaint, margin: "4px 0 0" }}>
-                          Stock SHOP disponible : {disponible}
+                          Stock disponible : {disponible}
                         </p>
                       )}
                     </div>

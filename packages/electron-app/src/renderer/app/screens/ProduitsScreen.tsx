@@ -1,8 +1,48 @@
 import { useMemo, useState, useEffect } from "react";
 import { Card, Button, Combobox, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle } from "lucide-react";
+import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle, ArrowUp, ArrowDown, ChevronsUpDown } from "lucide-react";
 import type { ProduitAvecMiniature, StagedImage } from "../../../preload/index.js";
 import { ImagesModal } from "./ImagesModal.js";
+
+type ColonneTriable = "type" | "taille" | "reference" | "prix" | "stockTotal";
+type Direction = "asc" | "desc";
+
+/** En-tête de colonne cliquable pour trier — §8/§9 de la correction. */
+function EnteteTriable({
+  label,
+  colonne,
+  tri,
+  onTrier,
+}: {
+  label: string;
+  colonne: ColonneTriable;
+  tri: { colonne: ColonneTriable | null; direction: Direction };
+  onTrier: (colonne: ColonneTriable) => void;
+}) {
+  const actif = tri.colonne === colonne;
+  const Icone = actif ? (tri.direction === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown;
+  return (
+    <button
+      onClick={() => onTrier(colonne)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        padding: 0,
+        font: "inherit",
+        fontWeight: 700,
+        color: actif ? defaultTokens.colors.accent : defaultTokens.colors.textSoft,
+        fontSize: 12,
+      }}
+    >
+      {label}
+      <Icone size={12} />
+    </button>
+  );
+}
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -92,6 +132,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
   const [produits, setProduits] = useState<ProduitAvecMiniature[]>([]);
   const [suggestions, setSuggestions] = useState<{ types: string[]; tailles: string[] }>({ types: [], tailles: [] });
   const [recherche, setRecherche] = useState("");
+  const [tri, setTri] = useState<{ colonne: ColonneTriable | null; direction: Direction }>({ colonne: null, direction: "asc" });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -118,6 +159,44 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
     // Recherche pensée autour de la référence (§4/§24), sans exclure une correspondance sur le type par confort.
     return produits.filter((p) => p.reference.toLowerCase().includes(q) || p.type.toLowerCase().includes(q));
   }, [produits, recherche]);
+
+  /**
+   * Tri appliqué RÉELLEMENT aux données affichées (pas seulement visuel —
+   * demande explicite §8). La taille est triée sur sa valeur numérique
+   * (largeur, déjà stockée séparément — §12/§15 des corrections
+   * précédentes), jamais sur la chaîne affichée : "100 × 100 cm" ne doit
+   * jamais se retrouver avant "60 × 60 cm" à cause d'un tri alphabétique.
+   */
+  const produitsTries = useMemo(() => {
+    if (!tri.colonne) return produitsFiltres;
+    const sens = tri.direction === "asc" ? 1 : -1;
+    const copie = [...produitsFiltres];
+    copie.sort((a, b) => {
+      switch (tri.colonne) {
+        case "type":
+          return sens * a.type.localeCompare(b.type, "fr");
+        case "reference":
+          return sens * a.reference.localeCompare(b.reference, "fr");
+        case "taille":
+          return sens * ((a.largeur ?? a.tailleTri) - (b.largeur ?? b.tailleTri));
+        case "prix":
+          return sens * (a.prix - b.prix);
+        case "stockTotal":
+          return sens * (a.stockTotal - b.stockTotal);
+        default:
+          return 0;
+      }
+    });
+    return copie;
+  }, [produitsFiltres, tri]);
+
+  function handleTrier(colonne: ColonneTriable) {
+    setTri((prev) => {
+      if (prev.colonne !== colonne) return { colonne, direction: "asc" };
+      if (prev.direction === "asc") return { colonne, direction: "desc" };
+      return { colonne: null, direction: "asc" }; // 3e clic : retour à l'ordre par défaut
+    });
+  }
 
   function resetForm() {
     setForm({ type: "", largeur: "", hauteur: "", reference: "", prix: "", seuilAlerte: "10" });
@@ -437,15 +516,29 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead>
               <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
-                {["Carreau", "Type", "Taille", "Référence", "Prix / carton", "Stock", "État", "Images", ""].map((h) => (
-                  <th key={h} style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>
-                    {h}
-                  </th>
-                ))}
+                <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Carreau</th>
+                <th style={{ padding: "10px 16px" }}>
+                  <EnteteTriable label="Type" colonne="type" tri={tri} onTrier={handleTrier} />
+                </th>
+                <th style={{ padding: "10px 16px" }}>
+                  <EnteteTriable label="Taille" colonne="taille" tri={tri} onTrier={handleTrier} />
+                </th>
+                <th style={{ padding: "10px 16px" }}>
+                  <EnteteTriable label="Référence" colonne="reference" tri={tri} onTrier={handleTrier} />
+                </th>
+                <th style={{ padding: "10px 16px" }}>
+                  <EnteteTriable label="Prix / carton" colonne="prix" tri={tri} onTrier={handleTrier} />
+                </th>
+                <th style={{ padding: "10px 16px" }}>
+                  <EnteteTriable label="Stock" colonne="stockTotal" tri={tri} onTrier={handleTrier} />
+                </th>
+                <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>État</th>
+                <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Images</th>
+                <th style={{ padding: "10px 16px" }}></th>
               </tr>
             </thead>
             <tbody>
-              {produitsFiltres.map((p) => (
+              {produitsTries.map((p) => (
                 <tr key={p.id} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
                   <td style={{ padding: "8px 16px" }}>
                     <Miniature dataUrl={p.imagePrincipaleDataUrl} />

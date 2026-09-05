@@ -10,8 +10,8 @@ interface Summary {
   produitsSousSeuilGlobal: number;
   totalFactures: number;
   totalProduits: number;
-  stockShop: number;
-  ventesShopAujourdhui: number;
+  stockDepots: number;
+  ventesAujourdhui: number;
   mesVentesAujourdhui: number;
   mesFacturesAujourdhuiCount: number;
 }
@@ -89,7 +89,8 @@ const NOTE_PHASES_SUIVANTES = (
  * du tableau de bord Gérant. Reproduit DashboardAdmin de la maquette
  * originale (App.jsx ligne 1264) : stock tous dépôts confondus, chiffre
  * d'affaires total, alertes de stock globales — jamais les mêmes
- * indicateurs qu'un Gérant, qui ne voit que l'activité du SHOP.
+ * indicateurs qu'un Gérant, qui ne voit que l'activité opérationnelle
+ * (dépôts Akébé/Akanda — SHOP n'a pas de stock, correction Phase 2 §3).
  */
 function DashboardAdmin({ summary }: { summary: Summary }) {
   return (
@@ -100,7 +101,7 @@ function DashboardAdmin({ summary }: { summary: Summary }) {
       <p style={{ marginTop: -8, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Vue globale de l'entreprise MAXI EQUIP</p>
 
       <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-        <KpiCard icon={Boxes} label="Stock total (SHOP + dépôts)" value={summary.stockTousDepots.toLocaleString("fr-FR")} tone="accent" />
+        <KpiCard icon={Boxes} label="Stock total (Akébé + Akanda)" value={summary.stockTousDepots.toLocaleString("fr-FR")} tone="accent" />
         <KpiCard icon={DollarSign} label="Chiffre d'affaires total" value={`${summary.caTotal.toLocaleString("fr-FR")} FCFA`} tone="success" />
         <KpiCard icon={AlertTriangle} label="Alertes de stock (global)" value={summary.produitsSousSeuilGlobal} tone="warning" />
         <KpiCard icon={Receipt} label="Factures émises" value={summary.totalFactures} tone="info" />
@@ -113,7 +114,8 @@ function DashboardAdmin({ summary }: { summary: Summary }) {
 }
 
 /**
- * Tableau de bord Gérant — activité du SHOP uniquement, avec ses propres
+ * Tableau de bord Gérant — activité opérationnelle (dépôts, ventes),
+ * avec ses propres
  * ventes du jour mises en avant. Reproduit DashboardVendeur de la
  * maquette originale (App.jsx ligne 1188).
  */
@@ -121,11 +123,11 @@ function DashboardVendeur({ nom, summary }: { nom: string; summary: Summary }) {
   return (
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Tableau de bord</h1>
-      <p style={{ marginTop: -8, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Bienvenue {nom} — activité du SHOP</p>
+      <p style={{ marginTop: -8, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Bienvenue {nom} — activité MAXI EQUIP</p>
 
       <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-        <KpiCard icon={Boxes} label="Cartons en stock (SHOP)" value={summary.stockShop.toLocaleString("fr-FR")} tone="accent" />
-        <KpiCard icon={DollarSign} label="Ventes du SHOP aujourd'hui" value={`${summary.ventesShopAujourdhui.toLocaleString("fr-FR")} FCFA`} tone="success" />
+        <KpiCard icon={Boxes} label="Cartons en stock (Akébé + Akanda)" value={summary.stockDepots.toLocaleString("fr-FR")} tone="accent" />
+        <KpiCard icon={DollarSign} label="Ventes du jour" value={`${summary.ventesAujourdhui.toLocaleString("fr-FR")} FCFA`} tone="success" />
         <KpiCard icon={Receipt} label="Mes ventes aujourd'hui" value={`${summary.mesVentesAujourdhui.toLocaleString("fr-FR")} FCFA`} tone="info" />
       </div>
 

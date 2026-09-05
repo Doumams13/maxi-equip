@@ -137,27 +137,29 @@ export function registerMetierIpcHandlers(
   // --- Dashboard ---
   ipcMain.handle("dashboard:summary", (_e, userId: string) => {
     const emplacements = emplacementRepository.list();
-    const shop = emplacements.find((e) => e.estPointDeVente) ?? null;
+    // Décision métier : SHOP n'a pas de stock, uniquement point de vente
+    // (correction Phase 2 §3/§7) — tous les indicateurs de stock du
+    // dashboard portent donc exclusivement sur les dépôts (Akébé/Akanda),
+    // jamais sur SHOP.
+    const depots = emplacements.filter((e) => !e.estPointDeVente);
     const factures = factureRepository.list(200); // fenêtre raisonnable pour les agrégats "aujourd'hui" en Phase 2
     const aujourdhui = new Date().toDateString();
     const facturesAujourdhui = factures.filter((f) => new Date(f.date).toDateString() === aujourdhui);
 
-    const stockParEmplacement = shop ? stockRepository.listByEmplacement(shop.id) : [];
-    const stockShop = stockParEmplacement.reduce((s, r) => s + r.quantite, 0);
-    const stockTousDepots = emplacements.reduce((s, e) => s + stockRepository.listByEmplacement(e.id).reduce((a, r) => a + r.quantite, 0), 0);
+    const stockDepots = depots.reduce((s, e) => s + stockRepository.listByEmplacement(e.id).reduce((a, r) => a + r.quantite, 0), 0);
 
     return {
       // Communs
       mouvementsRecents: mouvementRepository.listRecent(5),
       // Administrateur — vue globale
-      stockTousDepots,
+      stockTousDepots: stockDepots,
       caTotal: factures.reduce((s, f) => s + f.total, 0),
       produitsSousSeuilGlobal: produitRepository.countBelowThreshold(),
       totalFactures: factureRepository.count(),
       totalProduits: produitRepository.count(),
-      // Gérant — vue SHOP
-      stockShop,
-      ventesShopAujourdhui: facturesAujourdhui.reduce((s, f) => s + f.total, 0),
+      // Gérant — vue opérationnelle (dépôts, pas de "stock SHOP")
+      stockDepots,
+      ventesAujourdhui: facturesAujourdhui.reduce((s, f) => s + f.total, 0),
       mesVentesAujourdhui: facturesAujourdhui.filter((f) => f.vendeurUtilisateurId === userId).reduce((s, f) => s + f.total, 0),
       mesFacturesAujourdhuiCount: facturesAujourdhui.filter((f) => f.vendeurUtilisateurId === userId).length,
     };

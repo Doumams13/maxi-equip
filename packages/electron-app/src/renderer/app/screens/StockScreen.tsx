@@ -3,9 +3,12 @@ import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
 
 /**
- * Écran stock — Phase 2 §10. Aucune règle métier ici : la vérification de
- * disponibilité et le calcul du delta viennent de packages/domain, via le
- * canal IPC stock:entree (§19 — le domaine reste la seule source de vérité).
+ * Écran Entrée de stock — Phase 2 §10, corrigé pour la décision métier
+ * "SHOP n'a pas de stock" (§3) : SHOP est uniquement le point de vente,
+ * les seuls emplacements de stockage réels sont Akébé et Akanda. SHOP est
+ * donc explicitement exclu des emplacements proposés ici. Aucune règle
+ * métier ici par ailleurs : la vérification de disponibilité et le calcul
+ * du delta viennent de packages/domain, via le canal IPC stock:entree.
  */
 export function StockScreen() {
   const { showSuccess, showWarning, showError } = useToast();
@@ -17,6 +20,8 @@ export function StockScreen() {
   const [entreeQuantite, setEntreeQuantite] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const depots = emplacements.filter((e) => !e.estPointDeVente);
+
   async function refresh(currentEmplacementId: string) {
     const stock = await window.maxiEquip.getStockByEmplacement(currentEmplacementId);
     setQuantites(Object.fromEntries(stock.map((s) => [s.produitId, s.quantite])));
@@ -27,10 +32,10 @@ export function StockScreen() {
       const [emps, prods] = await Promise.all([window.maxiEquip.listEmplacements(), window.maxiEquip.listProduits()]);
       setEmplacements(emps);
       setProduits(prods);
-      const first = emps[0];
-      if (first) {
-        setEmplacementId(first.id);
-        await refresh(first.id);
+      const premierDepot = emps.find((e) => !e.estPointDeVente);
+      if (premierDepot) {
+        setEmplacementId(premierDepot.id);
+        await refresh(premierDepot.id);
       }
     })();
   }, []);
@@ -83,7 +88,7 @@ export function StockScreen() {
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Entrée de stock</h1>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-        {emplacements.map((e) => (
+        {depots.map((e) => (
           <button
             key={e.id}
             onClick={() => setEmplacementId(e.id)}
@@ -98,7 +103,7 @@ export function StockScreen() {
               cursor: "pointer",
             }}
           >
-            {e.nom} {e.estPointDeVente ? "(point de vente)" : "(dépôt)"}
+            {e.nom}
           </button>
         ))}
       </div>

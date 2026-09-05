@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { Card, Button, Combobox, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2 } from "lucide-react";
+import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle } from "lucide-react";
 import type { ProduitAvecMiniature, StagedImage } from "../../../preload/index.js";
 import { ImagesModal } from "./ImagesModal.js";
 
@@ -47,15 +47,45 @@ function extraireDimensions(taille: string): { largeur: string; hauteur: string 
   return { largeur: match[1]!.replace(",", "."), hauteur: match[2]!.replace(",", ".") };
 }
 
+/** Statut de stock — reproduit exactement getStockStatus() de la maquette originale (App.jsx §229). */
+function StatutStock({ quantite, seuil }: { quantite: number; seuil: number }) {
+  const statut =
+    quantite <= 0
+      ? { label: "Rupture", color: defaultTokens.colors.danger, bg: defaultTokens.colors.dangerSoft }
+      : quantite <= seuil
+        ? { label: "Stock faible", color: defaultTokens.colors.warning, bg: defaultTokens.colors.warningSoft }
+        : { label: "Stock normal", color: defaultTokens.colors.success, bg: defaultTokens.colors.successSoft };
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 10px",
+        borderRadius: defaultTokens.radius.pill,
+        fontSize: 12,
+        fontWeight: 700,
+        color: statut.color,
+        background: statut.bg,
+      }}
+    >
+      <Circle size={7} fill={statut.color} color={statut.color} />
+      {statut.label}
+    </span>
+  );
+}
+
 /**
- * Écran produits — corrigé une seconde fois (§1-§27) :
- * - ordre des colonnes : Motif | Référence | Type | Taille | Prix | Images ;
- * - "Motif" = miniature uniquement, jamais un nom affiché ;
- * - aucun champ "nom du produit" obligatoire — la référence identifie le produit ;
- * - recherche par référence ;
- * - taille saisie en largeur × hauteur (cm), jamais un champ texte libre unique ;
- * - images en prévisualisation réelle et immédiate dans le formulaire
- *   (mécanisme de "staging" — voir ImageService), pas une étape séparée.
+ * Écran Carreaux — Phase 2, aligné sur la maquette originale validée
+ * (CarreauxPage, ligne 1581 de App.jsx) pour l'ordre des colonnes :
+ * Carreau (image) | Type | Taille | Référence | Prix | Stock | État.
+ * Motif reste une image, jamais un nom affiché — cohérent avec les
+ * corrections précédentes ; seul l'ORDRE des colonnes suit ici la
+ * maquette plutôt que les corrections, décision explicite prise avec
+ * l'utilisateur (les deux références se contredisaient sur ce point).
+ * Aucun champ "nom du produit" obligatoire — la référence identifie le
+ * produit ; taille saisie en largeur × hauteur (cm) ; images en
+ * prévisualisation réelle et immédiate (mécanisme de "staging").
  */
 export function ProduitsScreen({ session }: { session: { userId: string } }) {
   const { showSuccess, showWarning, showError } = useToast();
@@ -407,7 +437,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead>
               <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
-                {["Motif", "Référence", "Type", "Taille", "Prix", "Images", ""].map((h) => (
+                {["Carreau", "Type", "Taille", "Référence", "Prix / carton", "Stock", "État", "Images", ""].map((h) => (
                   <th key={h} style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>
                     {h}
                   </th>
@@ -420,10 +450,14 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
                   <td style={{ padding: "8px 16px" }}>
                     <Miniature dataUrl={p.imagePrincipaleDataUrl} />
                   </td>
-                  <td style={{ padding: "8px 16px", fontWeight: 700 }}>{p.reference}</td>
                   <td style={{ padding: "8px 16px" }}>{p.type}</td>
                   <td style={{ padding: "8px 16px", fontWeight: 700 }}>{p.taille}</td>
+                  <td style={{ padding: "8px 16px", color: defaultTokens.colors.textSoft, fontFamily: defaultTokens.typography.mono, fontSize: 12.5 }}>{p.reference}</td>
                   <td style={{ padding: "8px 16px" }}>{p.prix.toLocaleString("fr-FR")} FCFA</td>
+                  <td style={{ padding: "8px 16px", fontWeight: 700, textAlign: "right" }}>{p.stockTotal} ct.</td>
+                  <td style={{ padding: "8px 16px" }}>
+                    <StatutStock quantite={p.stockTotal} seuil={p.seuilAlerte} />
+                  </td>
                   <td style={{ padding: "8px 16px" }}>
                     <Button variant="ghost" onClick={() => setImagesModalProduit({ id: p.id, motif: p.reference })}>
                       <Images size={15} />

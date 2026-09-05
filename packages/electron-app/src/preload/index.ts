@@ -44,6 +44,7 @@ export interface VenteInput {
 export interface ProduitAvecMiniature extends Produit {
   imagePrincipaleDataUrl: string | null;
   nombreImages: number;
+  stockTotal: number;
 }
 
 export interface ImageAffichable {
@@ -110,12 +111,18 @@ const maxiEquipApi = {
   listFactures: (): Promise<Facture[]> => ipcRenderer.invoke("factures:list"),
   listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
 
-  getDashboardSummary: (): Promise<{
-    totalProduits: number;
-    produitsSousSeuil: number;
-    totalFactures: number;
+  getDashboardSummary: (userId: string): Promise<{
     mouvementsRecents: Mouvement[];
-  }> => ipcRenderer.invoke("dashboard:summary"),
+    stockTousDepots: number;
+    caTotal: number;
+    produitsSousSeuilGlobal: number;
+    totalFactures: number;
+    totalProduits: number;
+    stockShop: number;
+    ventesShopAujourdhui: number;
+    mesVentesAujourdhui: number;
+    mesFacturesAujourdhuiCount: number;
+  }> => ipcRenderer.invoke("dashboard:summary", userId),
 
   // --- Images produit (correction Phase 2) ---
   // Le Renderer ne reçoit jamais de chemin de fichier — uniquement des

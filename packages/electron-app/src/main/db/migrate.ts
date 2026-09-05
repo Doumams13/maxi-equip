@@ -11,6 +11,8 @@ import schemaSql from "./schema.sql?raw";
 export function runMigrations(db: Database.Database): void {
   db.exec(schemaSql);
   addEstPrincipaleColumnIfMissing(db);
+  fixReferenceUniqueConstraint(db);
+  addLargeurHauteurColumnsIfMissing(db);
 }
 
 /**
@@ -23,5 +25,81 @@ function addEstPrincipaleColumnIfMissing(db: Database.Database): void {
   const hasColumn = columns.some((c) => c.name === "est_principale");
   if (!hasColumn) {
     db.exec("ALTER TABLE images_produit ADD COLUMN est_principale INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
+/**
+ * Corrige un bug réel signalé lors des tests (3ᵉ correction Phase 2 §5) :
+ * la table `produits`, sur les bases créées avant cette correction,
+ * portait une contrainte UNIQUE au niveau de la colonne `reference`,
+ * appliquée à TOUTES les lignes — y compris celles supprimées (soft
+ * delete). Résultat : la référence d'un produit supprimé restait bloquée
+ * indéfiniment, empêchant sa réutilisation par un nouveau produit.
+ *
+ * SQLite ne permet pas de retirer une contrainte de colonne par un simple
+ * ALTER TABLE — la table doit être recréée. Ceci est fait ici de façon
+ * sûre (toutes les données existantes sont copiées, aucune perte),
+ * uniquement si l'ancienne contrainte est détectée, jamais sinon
+ * (idempotent).
+ */
+function fixReferenceUniqueConstraint(db: Database.Database): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'produits'").get() as
+    | { sql: string }
+    | undefined;
+  if (!row || !/reference\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(row.sql)) {
+    return; // Déjà corrigé (nouvelle base) ou table absente — rien à faire.
+  }
+
+  const migrer = db.transaction(() => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.exec(`
+      CREATE TABLE produits_nouveau (
+        id            TEXT PRIMARY KEY,
+        motif         TEXT NOT NULL,
+        type          TEXT NOT NULL,
+        taille        TEXT NOT NULL,
+        taille_tri    REAL NOT NULL,
+        largeur       REAL,
+        hauteur       REAL,
+        reference     TEXT NOT NULL,
+        prix          INTEGER NOT NULL,
+        seuil_alerte  INTEGER NOT NULL DEFAULT 0,
+        deleted_at    TEXT,
+        deleted_by    TEXT,
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+      );
+    `);
+    db.exec(`
+      INSERT INTO produits_nouveau
+        (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at)
+      SELECT id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at
+      FROM produits;
+    `);
+    db.exec("DROP TABLE produits;");
+    db.exec("ALTER TABLE produits_nouveau RENAME TO produits;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_produits_taille_tri ON produits (taille_tri);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_produits_updated_at ON produits (updated_at);");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_produits_reference_actif ON produits (reference) WHERE deleted_at IS NULL;");
+    db.exec("PRAGMA foreign_keys = ON");
+  });
+  migrer();
+}
+
+/**
+ * Ajoute les colonnes `largeur`/`hauteur` (3ᵉ correction Phase 2 §14/15) —
+ * la taille reste également stockée sous forme de texte affichable
+ * (`taille`) et de valeur de tri (`taille_tri`), inchangées, pour ne rien
+ * casser de l'existant (tri, suggestions). Les deux nouvelles colonnes
+ * sont nullables : les produits déjà créés avant cette évolution ne sont
+ * pas rétroactivement modifiés, seuls les nouveaux/modifiés les renseignent.
+ */
+function addLargeurHauteurColumnsIfMissing(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(produits)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "largeur")) {
+    db.exec("ALTER TABLE produits ADD COLUMN largeur REAL");
+  }
+  if (!columns.some((c) => c.name === "hauteur")) {
+    db.exec("ALTER TABLE produits ADD COLUMN hauteur REAL");
   }
 }

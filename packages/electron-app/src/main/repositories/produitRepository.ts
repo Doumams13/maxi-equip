@@ -8,6 +8,8 @@ interface ProduitRow {
   type: string;
   taille: string;
   taille_tri: number;
+  largeur: number | null;
+  hauteur: number | null;
   reference: string;
   prix: number;
   seuil_alerte: number;
@@ -24,6 +26,8 @@ function rowToProduit(row: ProduitRow): Produit {
     type: row.type,
     taille: row.taille,
     tailleTri: row.taille_tri,
+    largeur: row.largeur,
+    hauteur: row.hauteur,
     reference: row.reference,
     prix: row.prix,
     seuilAlerte: row.seuil_alerte,
@@ -88,6 +92,8 @@ export class ProduitRepository {
     type: string;
     taille: string;
     tailleTri: number;
+    largeur?: number | null;
+    hauteur?: number | null;
     reference: string;
     prix: number;
     seuilAlerte: number;
@@ -96,26 +102,59 @@ export class ProduitRepository {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO produits (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO produits (id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, seuil_alerte, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(id, input.motif, input.type, input.taille, input.tailleTri, input.reference, input.prix, input.seuilAlerte, now, now);
+      .run(
+        id,
+        input.motif,
+        input.type,
+        input.taille,
+        input.tailleTri,
+        input.largeur ?? null,
+        input.hauteur ?? null,
+        input.reference,
+        input.prix,
+        input.seuilAlerte,
+        now,
+        now
+      );
     return id;
   }
 
   /** Modifie un produit existant. Ne touche jamais aux images (gérées séparément — ImageService). */
   update(
     id: string,
-    input: { type: string; taille: string; tailleTri: number; reference: string; prix: number; seuilAlerte: number }
+    input: {
+      type: string;
+      taille: string;
+      tailleTri: number;
+      largeur?: number | null;
+      hauteur?: number | null;
+      reference: string;
+      prix: number;
+      seuilAlerte: number;
+    }
   ): void {
     const now = new Date().toISOString();
     this.db
       .prepare(
         `UPDATE produits
-         SET type = ?, taille = ?, taille_tri = ?, reference = ?, prix = ?, seuil_alerte = ?, updated_at = ?
+         SET type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, seuil_alerte = ?, updated_at = ?
          WHERE id = ? AND deleted_at IS NULL`
       )
-      .run(input.type, input.taille, input.tailleTri, input.reference, input.prix, input.seuilAlerte, now, id);
+      .run(
+        input.type,
+        input.taille,
+        input.tailleTri,
+        input.largeur ?? null,
+        input.hauteur ?? null,
+        input.reference,
+        input.prix,
+        input.seuilAlerte,
+        now,
+        id
+      );
   }
 
   /**

@@ -136,7 +136,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
 
   return (
     <div style={{ padding: 28 }}>
-      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Nouvelle vente</h1>
+      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Sortie de stock</h1>
 
       <form onSubmit={(e) => void handleSubmit(e)}>
         <Card style={{ marginBottom: 16 }}>

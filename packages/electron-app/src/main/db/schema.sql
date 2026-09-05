@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS produits (
   type          TEXT NOT NULL,
   taille        TEXT NOT NULL,
   taille_tri    REAL NOT NULL,
-  reference     TEXT NOT NULL UNIQUE,
+  largeur       REAL,
+  hauteur       REAL,
+  reference     TEXT NOT NULL,
   prix          INTEGER NOT NULL,
   seuil_alerte  INTEGER NOT NULL DEFAULT 0,
   deleted_at    TEXT,
@@ -38,6 +40,13 @@ CREATE TABLE IF NOT EXISTS produits (
 );
 CREATE INDEX IF NOT EXISTS idx_produits_taille_tri ON produits (taille_tri);
 CREATE INDEX IF NOT EXISTS idx_produits_updated_at ON produits (updated_at);
+-- Unicité de la référence UNIQUEMENT parmi les produits actifs (correction
+-- Phase 2 §5) : un produit réellement supprimé (soft delete) ne doit
+-- jamais bloquer la réutilisation de sa référence par un nouveau produit.
+-- Un index PARTIEL (WHERE deleted_at IS NULL) plutôt qu'une contrainte
+-- UNIQUE au niveau de la colonne, qui s'appliquerait à tort aux lignes
+-- supprimées conservées pour l'historique.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_produits_reference_actif ON produits (reference) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS images_produit (
   id          TEXT PRIMARY KEY,

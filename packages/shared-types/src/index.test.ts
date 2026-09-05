@@ -8,6 +8,8 @@ describe("shared-types (Phase 0 smoke test)", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
       motif: "Marbre Blanc",
+      largeur: 60,
+      hauteur: 60,
       type: "Grès cérame",
       taille: "60x60 cm",
       tailleTri: 60,

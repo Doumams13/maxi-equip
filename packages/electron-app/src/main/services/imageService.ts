@@ -107,6 +107,22 @@ export class ImageService {
   }
 
   /**
+   * Restaure le focus de la fenêtre après un dialogue natif (sélecteur de
+   * fichiers). Correction d'un vrai bug signalé (formulaire "bloqué"
+   * après un premier enregistrement) : sous Windows, il arrive que la
+   * fenêtre Electron ne récupère pas correctement le focus clavier/souris
+   * après la fermeture d'un dialogue natif ouvert avec dialog.showOpenDialog
+   * — un comportement connu d'Electron/Chromium, pas un bug applicatif —
+   * laissant les champs du formulaire visuellement présents mais inertes
+   * tant que l'utilisateur ne reclique pas manuellement sur la fenêtre.
+   */
+  private restoreWindowFocus(): void {
+    if (this.window.isMinimized()) this.window.restore();
+    this.window.focus();
+    this.window.webContents.focus();
+  }
+
+  /**
    * Ouvre le sélecteur de fichiers natif et copie les fichiers choisis
    * dans le stockage DÉFINITIF d'un produit qui existe déjà (édition
    * d'un produit existant — écran "Images" de la liste).
@@ -117,6 +133,7 @@ export class ImageService {
       properties: ["openFile", "multiSelections"],
       filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }],
     });
+    this.restoreWindowFocus();
 
     if (result.canceled || result.filePaths.length === 0) return { added: 0 };
 
@@ -144,6 +161,7 @@ export class ImageService {
       properties: ["openFile", "multiSelections"],
       filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }],
     });
+    this.restoreWindowFocus();
 
     if (result.canceled || result.filePaths.length === 0) return [];
 

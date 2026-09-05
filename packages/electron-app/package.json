@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:sqlcipher": "electron scripts/test-sqlcipher.cjs --no-sandbox",
-    "test:auth-bootstrap": "electron scripts/test-auth-bootstrap.cjs --no-sandbox"
+    "test:auth-bootstrap": "electron scripts/test-auth-bootstrap.cjs --no-sandbox",
+    "test:reference-migration": "electron scripts/test-reference-migration.cjs --no-sandbox"
   },
   "dependencies": {
     "@maxi-equip/design-system": "*",

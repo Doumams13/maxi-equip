@@ -80,7 +80,7 @@ export function StockScreen() {
 
   return (
     <div style={{ padding: 28 }}>
-      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Stock</h1>
+      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Entrée de stock</h1>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
         {emplacements.map((e) => (

@@ -78,13 +78,15 @@ const maxiEquipApi = {
     motif?: string;
     type: string;
     taille: string;
+    largeur?: number;
+    hauteur?: number;
     reference: string;
     prix: number;
     seuilAlerte: number;
   }): Promise<{ id: string }> => ipcRenderer.invoke("catalogue:create", input),
   updateProduit: (
     id: string,
-    input: { type: string; taille: string; reference: string; prix: number; seuilAlerte: number }
+    input: { type: string; taille: string; largeur?: number; hauteur?: number; reference: string; prix: number; seuilAlerte: number }
   ): Promise<{ success: boolean }> => ipcRenderer.invoke("catalogue:update", id, input),
   deleteProduit: (id: string, deletedBy: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke("catalogue:delete", id, deletedBy),
@@ -95,6 +97,12 @@ const maxiEquipApi = {
     ipcRenderer.invoke("stock:byEmplacement", emplacementId),
   enregistrerEntree: (produitId: string, emplacementId: string, quantite: number): Promise<StockOperationResult> =>
     ipcRenderer.invoke("stock:entree", produitId, emplacementId, quantite),
+  enregistrerTransfert: (
+    produitId: string,
+    sourceId: string,
+    destinationId: string,
+    quantite: number
+  ): Promise<StockOperationResult> => ipcRenderer.invoke("stock:transfert", produitId, sourceId, destinationId, quantite),
 
   enregistrerVente: (input: VenteInput): Promise<StockOperationResult & { factureId?: string; numero?: string; total?: number }> =>
     ipcRenderer.invoke("ventes:create", input),

@@ -12,13 +12,21 @@ app.whenReady().then(() => {
     const Database = require("better-sqlite3-multiple-ciphers");
     const db = new Database(":memory:");
 
-    // 1. Simule une base créée AVANT la correction (ancienne contrainte).
+    // 1. Simule une base créée AVANT la correction (ancienne contrainte),
+    //    AVEC une table référençant produits par clé étrangère (stocks)
+    //    — c'est précisément ce cas qui manquait dans la première version
+    //    de ce script, et qui a laissé passer le bug réel signalé par
+    //    l'utilisateur ("FOREIGN KEY constraint failed" au démarrage).
+    db.pragma("foreign_keys = ON");
     db.exec(`
       CREATE TABLE produits (
         id TEXT PRIMARY KEY, motif TEXT NOT NULL, type TEXT NOT NULL, taille TEXT NOT NULL,
         taille_tri REAL NOT NULL, reference TEXT NOT NULL UNIQUE, prix INTEGER NOT NULL,
         seuil_alerte INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by TEXT,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE stocks (
+        id TEXT PRIMARY KEY, produit_id TEXT NOT NULL REFERENCES produits(id), quantite INTEGER NOT NULL
       );
     `);
     db.prepare(
@@ -29,32 +37,42 @@ app.whenReady().then(() => {
       `INSERT INTO produits (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, created_at, updated_at)
        VALUES ('id-actif', 'Actif', 'T', '30x30 cm', 30, 'REF-002', 2000, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
     ).run();
+    db.prepare(`INSERT INTO stocks (id, produit_id, quantite) VALUES ('s1', 'id-actif', 50)`).run();
     results.ancienne_base_simulee = "OK";
 
-    // 2. Applique EXACTEMENT la même logique de migration que migrate.ts.
+    // 2. Applique EXACTEMENT la même logique de migration que migrate.ts —
+    //    PRAGMA foreign_keys basculé EN DEHORS de la transaction (un
+    //    PRAGMA à l'intérieur d'une transaction SQLite est un no-op).
     function fixReferenceUniqueConstraint(db) {
       const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'produits'").get();
       if (!row || !/reference\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(row.sql)) return;
-      const migrer = db.transaction(() => {
-        db.exec("PRAGMA foreign_keys = OFF");
-        db.exec(`CREATE TABLE produits_nouveau (
-          id TEXT PRIMARY KEY, motif TEXT NOT NULL, type TEXT NOT NULL, taille TEXT NOT NULL,
-          taille_tri REAL NOT NULL, largeur REAL, hauteur REAL, reference TEXT NOT NULL,
-          prix INTEGER NOT NULL, seuil_alerte INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by TEXT,
-          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-        );`);
-        db.exec(`INSERT INTO produits_nouveau
-          (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at)
-          SELECT id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at FROM produits;`);
-        db.exec("DROP TABLE produits;");
-        db.exec("ALTER TABLE produits_nouveau RENAME TO produits;");
-        db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_produits_reference_actif ON produits (reference) WHERE deleted_at IS NULL;");
-        db.exec("PRAGMA foreign_keys = ON");
-      });
-      migrer();
+      db.pragma("foreign_keys = OFF");
+      try {
+        const migrer = db.transaction(() => {
+          db.exec(`CREATE TABLE produits_nouveau (
+            id TEXT PRIMARY KEY, motif TEXT NOT NULL, type TEXT NOT NULL, taille TEXT NOT NULL,
+            taille_tri REAL NOT NULL, largeur REAL, hauteur REAL, reference TEXT NOT NULL,
+            prix INTEGER NOT NULL, seuil_alerte INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+          );`);
+          db.exec(`INSERT INTO produits_nouveau
+            (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at)
+            SELECT id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at FROM produits;`);
+          db.exec("DROP TABLE produits;");
+          db.exec("ALTER TABLE produits_nouveau RENAME TO produits;");
+          db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_produits_reference_actif ON produits (reference) WHERE deleted_at IS NULL;");
+        });
+        migrer();
+      } finally {
+        db.pragma("foreign_keys = ON");
+      }
     }
     fixReferenceUniqueConstraint(db);
     results.migration_executee = "OK";
+
+    // Vérifie que la ligne de stocks référençant l'ancien produit (via FK) a bien survécu au remplacement de table.
+    const stockToujoursLie = db.prepare("SELECT * FROM stocks WHERE produit_id = 'id-actif'").get();
+    results.cle_etrangere_preservee_apres_migration = stockToujoursLie ? "OK" : "FAIL";
 
     // 3. Vérifications.
     const count = db.prepare("SELECT COUNT(*) as n FROM produits").get().n;

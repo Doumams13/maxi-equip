@@ -56,6 +56,27 @@ export class FactureRepository {
     return (this.db.prepare("SELECT COUNT(*) as n FROM factures").get() as { n: number }).n;
   }
 
+  /** Somme des totaux de toutes les factures — chiffre d'affaires total (dashboard §3/§13). */
+  sommeTotal(): number {
+    return (this.db.prepare("SELECT COALESCE(SUM(total), 0) as s FROM factures").get() as { s: number }).s;
+  }
+
+  /**
+   * Produits les plus vendus, agrégés directement depuis les lignes de
+   * facture déjà enregistrées (§7/§13 de la correction) — la quantité
+   * comptée est celle de la ligne CLIENT (interne+externe déjà fusionnés
+   * par le domaine), jamais recalculée séparément.
+   */
+  topProduitsVendus(limite = 5): { label: string; quantite: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT motif || ' — ' || taille as label, SUM(quantite) as quantite
+         FROM lignes_facture GROUP BY motif, taille ORDER BY quantite DESC LIMIT ?`
+      )
+      .all(limite) as { label: string; quantite: number }[];
+    return rows;
+  }
+
   private getLignes(factureId: string): LigneFacture[] {
     return this.db
       .prepare("SELECT produit_id as produitId, motif, taille, quantite, prix_unitaire as prixUnitaire FROM lignes_facture WHERE facture_id = ?")

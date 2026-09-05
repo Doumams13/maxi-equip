@@ -70,4 +70,37 @@ export class MouvementRepository {
       );
     return id;
   }
+
+  /** Somme des quantités pour un type de mouvement, toutes périodes — dashboard (§3/§13 de la correction). */
+  sommeQuantiteParType(type: Mouvement["type"]): number {
+    return (
+      this.db.prepare("SELECT COALESCE(SUM(quantite), 0) as total FROM mouvements WHERE type = ?").get(type) as { total: number }
+    ).total;
+  }
+
+  /**
+   * Série Entrées/Sorties des 7 derniers jours, un point par jour
+   * (§5 de la correction — graphique du dashboard). Un jour sans
+   * mouvement retourne explicitement 0, jamais une valeur inventée.
+   */
+  serieEntreesSortiesSeptJours(): { jour: string; entrees: number; sorties: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT date(date) as jour, type, SUM(quantite) as total FROM mouvements
+         WHERE date(date) >= date('now', '-6 days') AND type IN ('entree', 'sortie')
+         GROUP BY date(date), type`
+      )
+      .all() as { jour: string; type: string; total: number }[];
+
+    const resultat: { jour: string; entrees: number; sorties: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      const entree = rows.find((r) => r.jour === iso && r.type === "entree")?.total ?? 0;
+      const sortie = rows.find((r) => r.jour === iso && r.type === "sortie")?.total ?? 0;
+      resultat.push({ jour: iso, entrees: entree, sorties: sortie });
+    }
+    return resultat;
+  }
 }

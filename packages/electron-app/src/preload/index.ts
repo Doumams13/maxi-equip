@@ -78,13 +78,15 @@ const maxiEquipApi = {
     motif?: string;
     type: string;
     taille: string;
+    largeur?: number;
+    hauteur?: number;
     reference: string;
     prix: number;
     seuilAlerte: number;
   }): Promise<{ id: string }> => ipcRenderer.invoke("catalogue:create", input),
   updateProduit: (
     id: string,
-    input: { type: string; taille: string; reference: string; prix: number; seuilAlerte: number }
+    input: { type: string; taille: string; largeur?: number; hauteur?: number; reference: string; prix: number; seuilAlerte: number }
   ): Promise<{ success: boolean }> => ipcRenderer.invoke("catalogue:update", id, input),
   deleteProduit: (id: string, deletedBy: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke("catalogue:delete", id, deletedBy),

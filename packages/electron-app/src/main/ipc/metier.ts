@@ -47,8 +47,20 @@ export function registerMetierIpcHandlers(
 
   ipcMain.handle(
     "catalogue:create",
-    (_e, input: { motif?: string; type: string; taille: string; reference: string; prix: number; seuilAlerte: number }) => {
-      const tailleTri = parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
+    (
+      _e,
+      input: {
+        motif?: string;
+        type: string;
+        taille: string;
+        largeur?: number;
+        hauteur?: number;
+        reference: string;
+        prix: number;
+        seuilAlerte: number;
+      }
+    ) => {
+      const tailleTri = input.largeur ?? (parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
       // Le "motif" n'est plus un champ obligatoire saisi par l'utilisateur
       // (correction Phase 2 §3 : "il n'y a pas de champ Nom du produit
       // obligatoire — la référence est l'information d'identification").
@@ -56,15 +68,19 @@ export function registerMetierIpcHandlers(
       // futur, recherche, regroupement) ; à défaut de valeur fournie, elle
       // est initialisée à la référence pour ne jamais laisser de valeur vide.
       const motif = input.motif?.trim() || input.reference.trim();
-      return { id: produitRepository.create({ ...input, motif, tailleTri }) };
+      return { id: produitRepository.create({ ...input, motif, tailleTri, largeur: input.largeur ?? null, hauteur: input.hauteur ?? null }) };
     }
   );
 
   ipcMain.handle(
     "catalogue:update",
-    (_e, id: string, input: { type: string; taille: string; reference: string; prix: number; seuilAlerte: number }) => {
-      const tailleTri = parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
-      produitRepository.update(id, { ...input, tailleTri });
+    (
+      _e,
+      id: string,
+      input: { type: string; taille: string; largeur?: number; hauteur?: number; reference: string; prix: number; seuilAlerte: number }
+    ) => {
+      const tailleTri = input.largeur ?? (parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
+      produitRepository.update(id, { ...input, tailleTri, largeur: input.largeur ?? null, hauteur: input.hauteur ?? null });
       return { success: true };
     }
   );

@@ -16,6 +16,9 @@ export interface Produit extends MetierEntity, SoftDeletable {
   type: string;
   taille: string;
   tailleTri: number;
+  /** Dimension numérique isolée (correction Phase 2 §14/15) — permet un filtrage/tri fiable sans reparser `taille`. Nullable : les produits créés avant cette évolution ne sont pas rétroactivement modifiés. */
+  largeur: number | null;
+  hauteur: number | null;
   reference: string;
   /** Prix catalogue, en FCFA. Jamais modifié par une promotion ou une vente. */
   prix: number;

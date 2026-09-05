@@ -69,6 +69,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
   const [stagedImages, setStagedImages] = useState<StagedImage[]>([]);
   const [principaleStagingId, setPrincipaleStagingId] = useState<string | null>(null);
   const [pickingImages, setPickingImages] = useState(false);
+  const [formInstanceKey, setFormInstanceKey] = useState(0);
   const [imagesModalProduit, setImagesModalProduit] = useState<{ id: string; motif: string } | null>(null);
 
   async function refresh() {
@@ -114,6 +115,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
       seuilAlerte: String(p.seuilAlerte),
     });
     setEditingId(p.id);
+    setFormInstanceKey((k) => k + 1);
     setShowForm(true);
   }
 
@@ -176,11 +178,15 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
     setSaving(true);
     try {
       const taille = `${form.largeur} × ${form.hauteur} cm`;
+      const largeur = Number(form.largeur);
+      const hauteur = Number(form.hauteur);
 
       if (editingId) {
         await window.maxiEquip.updateProduit(editingId, {
           type: form.type.trim(),
           taille,
+          largeur,
+          hauteur,
           reference: form.reference.trim(),
           prix: Number(form.prix),
           seuilAlerte: Number(form.seuilAlerte) || 0,
@@ -190,6 +196,8 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
         const { id } = await window.maxiEquip.createProduit({
           type: form.type.trim(),
           taille,
+          largeur,
+          hauteur,
           reference: form.reference.trim(),
           prix: Number(form.prix),
           seuilAlerte: Number(form.seuilAlerte) || 0,
@@ -225,14 +233,14 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
     <div style={{ padding: 28 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
         <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, margin: 0 }}>Produits</h1>
-        <Button onClick={() => (showForm ? void handleCloseForm() : (resetForm(), setEditingId(null), setShowForm(true)))}>
+        <Button onClick={() => (showForm ? void handleCloseForm() : (resetForm(), setEditingId(null), setFormInstanceKey((k) => k + 1), setShowForm(true)))}>
           {showForm ? <X size={16} /> : <Plus size={16} />}
           {showForm ? "Annuler" : "Nouveau produit"}
         </Button>
       </div>
 
       {showForm && (
-        <Card style={{ marginBottom: 20 }}>
+        <Card key={formInstanceKey} style={{ marginBottom: 20 }}>
           <h2 style={{ margin: "0 0 14px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>
             {editingId ? "Modifier le produit" : "Nouveau produit"}
           </h2>

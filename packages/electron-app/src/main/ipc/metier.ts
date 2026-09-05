@@ -133,6 +133,7 @@ export function registerMetierIpcHandlers(
 
   // --- Historique ---
   ipcMain.handle("historique:list", () => mouvementRepository.list());
+  ipcMain.handle("historique:listEnrichi", () => mouvementRepository.listEnrichi());
 
   // --- Dashboard ---
   ipcMain.handle("dashboard:summary", (_e, userId: string) => {

@@ -7,13 +7,25 @@ interface LigneVenteForm {
   produitId: string;
   quantite: string;
   prixUnitaire: string;
+  /** Répartition explicite par dépôt — clé = emplacementId. */
+  allocations: Record<string, string>;
   fournisseurExterne: string;
   prixAchatExterne: string;
 }
 
 function ligneVide(): LigneVenteForm {
-  return { produitId: "", quantite: "1", prixUnitaire: "", fournisseurExterne: "", prixAchatExterne: "" };
+  return { produitId: "", quantite: "1", prixUnitaire: "", allocations: {}, fournisseurExterne: "", prixAchatExterne: "" };
 }
+
+const inputStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: defaultTokens.radius.sm,
+  border: `1px solid ${defaultTokens.colors.border}`,
+  fontFamily: defaultTokens.typography.body,
+  fontSize: 13,
+  width: "100%",
+  boxSizing: "border-box",
+};
 
 interface LigneRecap {
   label: string;
@@ -22,13 +34,11 @@ interface LigneRecap {
 }
 
 /**
- * Écran de vérification avant confirmation — reproduit SaleConfirmModal de
- * la maquette originale (App.jsx ligne 2015, titre "Vérification de la
- * vente") : explicitement prévu par le cahier des charges Phase 2
- * ("sortie/vente avec écran de vérification"), absent des versions
- * précédentes de cet écran. Deux issues possibles : « Modifier » (retour
- * au formulaire, rien n'est enregistré) ou « Confirmer et générer la
- * facture » (déclenche réellement enregistrerVente).
+ * Écran de vérification avant confirmation — reproduit SaleConfirmModal
+ * de la maquette originale. Ne montre QUE ce que le client verra
+ * (quantité, prix, total) — jamais la répartition interne par dépôt ou
+ * l'approvisionnement externe (§10 de la correction : la facture client
+ * ne révèle jamais l'organisation interne).
  */
 function SaleConfirmModal({
   clientNom,
@@ -72,13 +82,7 @@ function SaleConfirmModal({
           {lignes.map((l, i) => (
             <div
               key={i}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "10px 14px",
-                fontSize: 13,
-                borderTop: i > 0 ? `1px solid ${defaultTokens.colors.borderSoft}` : "none",
-              }}
+              style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", fontSize: 13, borderTop: i > 0 ? `1px solid ${defaultTokens.colors.borderSoft}` : "none" }}
             >
               <span>{l.label}</span>
               <span style={{ color: defaultTokens.colors.textSoft }}>
@@ -86,16 +90,7 @@ function SaleConfirmModal({
               </span>
             </div>
           ))}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              padding: "10px 14px",
-              fontWeight: 800,
-              fontFamily: defaultTokens.typography.display,
-              background: defaultTokens.colors.surfaceAlt,
-            }}
-          >
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", fontWeight: 800, fontFamily: defaultTokens.typography.display, background: defaultTokens.colors.surfaceAlt }}>
             <span>Total</span>
             <span>{total.toLocaleString("fr-FR")} FCFA</span>
           </div>
@@ -116,33 +111,26 @@ function SaleConfirmModal({
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  padding: "8px 10px",
-  borderRadius: defaultTokens.radius.sm,
-  border: `1px solid ${defaultTokens.colors.border}`,
-  fontFamily: defaultTokens.typography.body,
-  fontSize: 13,
-  width: "100%",
-  boxSizing: "border-box",
-};
-
 export interface VentesScreenProps {
   session: { userId: string; nom: string };
 }
 
 /**
- * Écran de vente — Phase 2 §11. AUCUNE règle de stock ou de facturation
- * n'est réimplémentée ici : la répartition interne/externe, la fusion en
- * une seule ligne, le calcul du total viennent tous du service principal
- * (VenteService), qui appelle lui-même exclusivement packages/domain.
- * Cet écran ne fait qu'assembler la saisie et afficher le résultat.
+ * Écran de vente — renommé "Vente" dans toute l'interface (correction
+ * Phase 2 §4 : une sortie de stock est, du point de vue utilisateur, une
+ * VENTE ; le type technique "sortie" reste inchangé en base). Chaque
+ * ligne permet désormais une répartition explicite entre Akébé et Akanda
+ * (§6/§7), le reliquat non couvert devenant automatiquement la part
+ * externe (§8/§9) — AUCUNE règle de stock n'est réimplémentée ici : la
+ * vérification par dépôt vient de VenteService, qui appelle lui-même
+ * domain.stock.applySortie.
  */
 export function VentesScreen({ session }: VentesScreenProps) {
   const { showSuccess, showWarning, showError } = useToast();
   const [produits, setProduits] = useState<Produit[]>([]);
   const [depots, setDepots] = useState<Emplacement[]>([]);
-  const [depotSourceId, setDepotSourceId] = useState<string>("");
-  const [stockDepot, setStockDepot] = useState<Record<string, number>>({});
+  const [pointDeVenteId, setPointDeVenteId] = useState<string>("");
+  const [stockParDepot, setStockParDepot] = useState<Record<string, Record<string, number>>>({}); // { emplacementId: { produitId: quantite } }
   const [clientNom, setClientNom] = useState("");
   const [clientTelephone, setClientTelephone] = useState("");
   const [vendeurNomManuel, setVendeurNomManuel] = useState("");
@@ -150,32 +138,27 @@ export function VentesScreen({ session }: VentesScreenProps) {
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  async function chargerStock(id: string) {
-    const stock = await window.maxiEquip.getStockByEmplacement(id);
-    setStockDepot(Object.fromEntries(stock.map((s) => [s.produitId, s.quantite])));
+  async function chargerStocks(depotsListe: Emplacement[]) {
+    const entries = await Promise.all(
+      depotsListe.map(async (d) => {
+        const stock = await window.maxiEquip.getStockByEmplacement(d.id);
+        return [d.id, Object.fromEntries(stock.map((s) => [s.produitId, s.quantite]))] as const;
+      })
+    );
+    setStockParDepot(Object.fromEntries(entries));
   }
 
   useEffect(() => {
     void (async () => {
       const [prods, emps] = await Promise.all([window.maxiEquip.listProduits(), window.maxiEquip.listEmplacements()]);
       setProduits(prods);
-      // Décision métier : SHOP n'a pas de stock, uniquement point de vente
-      // (§3). Les seuls dépôts réels pour une sortie/vente sont Akébé et
-      // Akanda — le vendeur choisit explicitement lequel, même principe
-      // que pour une entrée ou un transfert.
       const seulsDepots = emps.filter((e) => !e.estPointDeVente);
+      const shop = emps.find((e) => e.estPointDeVente) ?? null;
       setDepots(seulsDepots);
-      const premier = seulsDepots[0];
-      if (premier) {
-        setDepotSourceId(premier.id);
-        await chargerStock(premier.id);
-      }
+      if (shop) setPointDeVenteId(shop.id);
+      await chargerStocks(seulsDepots);
     })();
   }, []);
-
-  useEffect(() => {
-    if (depotSourceId) void chargerStock(depotSourceId);
-  }, [depotSourceId]);
 
   function updateLigne(index: number, patch: Partial<LigneVenteForm>) {
     setLignes((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
@@ -183,25 +166,35 @@ export function VentesScreen({ session }: VentesScreenProps) {
 
   function handleProduitChange(index: number, produitId: string) {
     const produit = produits.find((p) => p.id === produitId);
-    updateLigne(index, { produitId, prixUnitaire: produit ? String(produit.prix) : "" });
+    updateLigne(index, { produitId, prixUnitaire: produit ? String(produit.prix) : "", allocations: {} });
   }
 
-  function ligneNeedsExterne(ligne: LigneVenteForm): boolean {
-    if (!ligne.produitId || !ligne.quantite) return false;
-    const disponible = stockDepot[ligne.produitId] ?? 0;
-    return Number(ligne.quantite) > disponible;
+  function totalAlloue(ligne: LigneVenteForm): number {
+    return depots.reduce((s, d) => s + (Number(ligne.allocations[d.id]) || 0), 0);
+  }
+
+  function quantiteExterne(ligne: LigneVenteForm): number {
+    return Math.max(0, (Number(ligne.quantite) || 0) - totalAlloue(ligne));
   }
 
   const total = lignes.reduce((sum, l) => sum + (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0), 0);
 
+  function validerTelephone(valeur: string): boolean {
+    return /^[0-9+()\s-]{6,}$/.test(valeur.trim());
+  }
+
   async function handleOuvrirVerification(e: React.FormEvent) {
     e.preventDefault();
-    if (!depotSourceId) {
-      showError("Dépôt introuvable", "Aucun dépôt (Akébé/Akanda) n'est configuré.");
+    if (!pointDeVenteId) {
+      showError("Point de vente introuvable", "Aucun emplacement SHOP n'est configuré.");
       return;
     }
     if (!clientNom.trim()) {
       showWarning("Client requis", "Veuillez renseigner le nom du client.");
+      return;
+    }
+    if (!clientTelephone.trim() || !validerTelephone(clientTelephone)) {
+      showWarning("Téléphone requis", "Le numéro de téléphone du client est obligatoire et doit être valide.");
       return;
     }
     const lignesValides = lignes.filter((l) => l.produitId && Number(l.quantite) > 0);
@@ -209,19 +202,25 @@ export function VentesScreen({ session }: VentesScreenProps) {
       showWarning("Ligne requise", "Ajoutez au moins un produit à la vente.");
       return;
     }
+    for (const l of lignesValides) {
+      if (totalAlloue(l) > Number(l.quantite)) {
+        showWarning("Répartition invalide", "La répartition entre dépôts dépasse la quantité demandée pour au moins une ligne.");
+        return;
+      }
+    }
     setShowConfirm(true);
   }
 
   async function handleConfirmerVente() {
-    if (!depotSourceId) return;
+    if (!pointDeVenteId) return;
     const lignesValides = lignes.filter((l) => l.produitId && Number(l.quantite) > 0);
 
     setSaving(true);
     try {
       const result = await window.maxiEquip.enregistrerVente({
-        emplacementId: depotSourceId,
+        pointDeVenteId,
         clientNom: clientNom.trim(),
-        clientTelephone: clientTelephone.trim() || null,
+        clientTelephone: clientTelephone.trim(),
         clientAdresse: null,
         vendeurUtilisateurId: session.userId,
         vendeurCompteConnecteNom: session.nom,
@@ -230,6 +229,9 @@ export function VentesScreen({ session }: VentesScreenProps) {
           produitId: l.produitId,
           quantite: Number(l.quantite),
           prixUnitaire: Number(l.prixUnitaire),
+          allocationsDepots: depots
+            .map((d) => ({ emplacementId: d.id, quantite: Number(l.allocations[d.id]) || 0 }))
+            .filter((a) => a.quantite > 0),
           fournisseurExterne: l.fournisseurExterne.trim() || undefined,
           prixAchatExterne: l.prixAchatExterne ? Number(l.prixAchatExterne) : undefined,
         })),
@@ -242,15 +244,13 @@ export function VentesScreen({ session }: VentesScreenProps) {
         setVendeurNomManuel("");
         setLignes([ligneVide()]);
         setShowConfirm(false);
-        await chargerStock(depotSourceId);
+        await chargerStocks(depots);
       } else {
-        // On garde la modale ouverte : l'utilisateur voit l'erreur et peut
-        // revenir modifier sans perdre sa saisie.
         showError("Opération impossible", result.reason.message);
       }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[ventes] enregistrement impossible :", err);
+      console.error("[vente] enregistrement impossible :", err);
       showError("Vente impossible", "Une erreur inattendue s'est produite. Veuillez réessayer.");
     } finally {
       setSaving(false);
@@ -259,33 +259,29 @@ export function VentesScreen({ session }: VentesScreenProps) {
 
   return (
     <div style={{ padding: 28 }}>
-      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Sortie de stock</h1>
+      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Vente</h1>
 
       <form onSubmit={(e) => void handleOuvrirVerification(e)}>
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Client</label>
               <input style={inputStyle} value={clientNom} onChange={(e) => setClientNom(e.target.value)} placeholder="Nom du client" />
             </div>
             <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Téléphone (facultatif)</label>
-              <input style={inputStyle} value={clientTelephone} onChange={(e) => setClientTelephone(e.target.value)} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Dépôt source</label>
-              <select style={inputStyle} value={depotSourceId} onChange={(e) => setDepotSourceId(e.target.value)}>
-                {depots.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.nom}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                Vendeur (par défaut : {session.nom})
+                Téléphone <span style={{ color: defaultTokens.colors.danger }}>*</span>
               </label>
+              <input
+                style={{ ...inputStyle, borderColor: clientTelephone && !validerTelephone(clientTelephone) ? defaultTokens.colors.danger : defaultTokens.colors.border }}
+                value={clientTelephone}
+                onChange={(e) => setClientTelephone(e.target.value)}
+                placeholder="Ex. 077 12 34 56"
+                required
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Vendeur (par défaut : {session.nom})</label>
               <input style={inputStyle} value={vendeurNomManuel} onChange={(e) => setVendeurNomManuel(e.target.value)} placeholder="Préciser si différent" />
             </div>
           </div>
@@ -295,8 +291,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
           <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, marginTop: 0 }}>Produits</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {lignes.map((ligne, index) => {
-              const needsExterne = ligneNeedsExterne(ligne);
-              const disponible = stockDepot[ligne.produitId] ?? 0;
+              const externe = quantiteExterne(ligne);
               return (
                 <div key={index} style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.md, padding: 12 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
@@ -310,11 +305,6 @@ export function VentesScreen({ session }: VentesScreenProps) {
                           </option>
                         ))}
                       </select>
-                      {ligne.produitId && (
-                        <p style={{ fontSize: 11, color: defaultTokens.colors.textFaint, margin: "4px 0 0" }}>
-                          Stock disponible : {disponible}
-                        </p>
-                      )}
                     </div>
                     <div>
                       <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Quantité</label>
@@ -329,11 +319,38 @@ export function VentesScreen({ session }: VentesScreenProps) {
                     </Button>
                   </div>
 
-                  {needsExterne && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10, padding: 10, background: defaultTokens.colors.warningSoft, borderRadius: defaultTokens.radius.sm }}>
-                      <p style={{ gridColumn: "1 / -1", margin: 0, fontSize: 11.5, color: defaultTokens.colors.warning, fontWeight: 700 }}>
-                        Stock insuffisant ({disponible} disponible pour {ligne.quantite} demandé) — approvisionnement externe requis pour compléter :
+                  {ligne.produitId && (
+                    <div style={{ marginTop: 10, padding: 10, background: defaultTokens.colors.surfaceAlt, borderRadius: defaultTokens.radius.sm }}>
+                      <p style={{ margin: "0 0 8px", fontSize: 11.5, fontWeight: 700, color: defaultTokens.colors.textSoft }}>
+                        Répartition par dépôt (Akébé / Akanda) :
                       </p>
+                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        {depots.map((d) => {
+                          const disponible = stockParDepot[d.id]?.[ligne.produitId] ?? 0;
+                          return (
+                            <div key={d.id} style={{ flex: 1, minWidth: 140 }}>
+                              <label style={{ display: "block", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>
+                                {d.nom} <span style={{ color: defaultTokens.colors.textFaint, fontWeight: 400 }}>({disponible} dispo.)</span>
+                              </label>
+                              <input
+                                style={inputStyle}
+                                type="number"
+                                min={0}
+                                value={ligne.allocations[d.id] ?? ""}
+                                onChange={(e) => updateLigne(index, { allocations: { ...ligne.allocations, [d.id]: e.target.value } })}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p style={{ margin: "8px 0 0", fontSize: 11.5, color: externe > 0 ? defaultTokens.colors.warning : defaultTokens.colors.textFaint, fontWeight: externe > 0 ? 700 : 400 }}>
+                        {externe > 0 ? `Complément externe requis : ${externe}` : "Entièrement couvert par les dépôts."}
+                      </p>
+                    </div>
+                  )}
+
+                  {externe > 0 && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10, padding: 10, background: defaultTokens.colors.warningSoft, borderRadius: defaultTokens.radius.sm }}>
                       <div>
                         <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Fournisseur</label>
                         <input style={inputStyle} value={ligne.fournisseurExterne} onChange={(e) => updateLigne(index, { fournisseurExterne: e.target.value })} />
@@ -355,9 +372,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
         </Card>
 
         <Card style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 16, fontWeight: 800, fontFamily: defaultTokens.typography.display }}>
-            Total : {total.toLocaleString("fr-FR")} FCFA
-          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, fontFamily: defaultTokens.typography.display }}>Total : {total.toLocaleString("fr-FR")} FCFA</div>
           <Button type="submit">Vérifier la vente</Button>
         </Card>
       </form>

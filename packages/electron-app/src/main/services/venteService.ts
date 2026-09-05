@@ -12,19 +12,34 @@ export class VenteValidationError extends Error {
   }
 }
 
+/** Quantité explicitement prélevée sur un dépôt donné (Akébé ou Akanda) pour une ligne de vente. */
+export interface AllocationDepot {
+  emplacementId: string;
+  quantite: number;
+}
+
 export interface VenteLigneInput {
   produitId: string;
+  /** Quantité totale demandée par le client pour cette ligne. */
   quantite: number;
   prixUnitaire: number;
-  /** Renseignés uniquement si la ligne nécessite un approvisionnement externe (déterminé par le stock réel, pas par le Renderer). */
+  /**
+   * Répartition explicite entre les dépôts réels (Akébé/Akanda) —
+   * correction Phase 2 : une vente peut prélever sur un seul dépôt, sur
+   * les deux, ou sur aucun (entièrement externe). La somme de ces
+   * allocations ne doit jamais dépasser `quantite`.
+   */
+  allocationsDepots: AllocationDepot[];
+  /** Renseignés uniquement si la somme des allocations ne couvre pas `quantite` (le reste est externe). */
   fournisseurExterne?: string;
   prixAchatExterne?: number;
 }
 
 export interface VenteInput {
-  emplacementId: string; // toujours SHOP en pratique (§11 du prompt Phase 2)
+  /** Point de vente (SHOP) — sert uniquement à l'enregistrement de la facture, jamais à une vérification de stock (SHOP n'a pas de stock). */
+  pointDeVenteId: string;
   clientNom: string;
-  clientTelephone: string | null;
+  clientTelephone: string;
   clientAdresse: string | null;
   vendeurUtilisateurId: string;
   vendeurCompteConnecteNom: string;
@@ -40,13 +55,25 @@ export interface VenteResult {
 
 /**
  * Orchestre une vente. AUCUNE règle métier n'est réimplémentée ici :
- * - la répartition interne/externe vient de domainStock.repartirVenteInterneExterne ;
+ * - la vérification de disponibilité PAR DÉPÔT vient de
+ *   domainStock.applySortie (déjà existante — aucune nouvelle règle
+ *   n'a été ajoutée au domaine pour ce correctif) ;
  * - la fusion en une seule ligne facture vient de domainInvoicing.buildLigneFacture ;
  * - le relevé interne vient de domainInvoicing.buildLignesReleveInterne ;
  * - le total vient de domainInvoicing.calculerTotalFacture ;
  * - le vendeur effectif vient de domainVendeur.resolveVendeurEffectif.
- * Ce service assemble uniquement domaine + dépôts de données, dans une
- * seule transaction SQLite (tout ou rien).
+ *
+ * Une ligne de vente peut désormais prélever sur PLUSIEURS dépôts à la
+ * fois (Akébé + Akanda), chaque allocation étant validée et déduite
+ * indépendamment via applySortie — une allocation qui dépasse le stock
+ * réel de SON dépôt échoue immédiatement (InsufficientStockError),
+ * jamais un dépassement silencieux compensé par l'autre dépôt. Le reliquat
+ * non couvert par les dépôts devient la part externe.
+ *
+ * Chaque dépôt réellement utilisé génère son propre mouvement de sortie,
+ * tous liés à la même facture — la vente reste UNE facture côté client,
+ * mais plusieurs mouvements traçables en interne (§11/§13 de la
+ * correction).
  */
 export class VenteService {
   constructor(
@@ -61,11 +88,14 @@ export class VenteService {
     if (input.lignes.length === 0) {
       throw new VenteValidationError("Une vente doit contenir au moins une ligne.");
     }
+    if (!input.clientTelephone || input.clientTelephone.trim().length === 0) {
+      throw new VenteValidationError("Le numéro de téléphone du client est obligatoire.");
+    }
 
     const executer = this.db.transaction(() => {
       const lignesFacture: LigneFacture[] = [];
       const lignesReleveInterne: LigneReleveInterne[] = [];
-      const mouvementsAEnregistrer: { produitId: string; quantite: number }[] = [];
+      const mouvementsAEnregistrer: { produitId: string; emplacementId: string; quantite: number }[] = [];
 
       for (const ligne of input.lignes) {
         const produit = this.produitRepository.findById(ligne.produitId);
@@ -73,12 +103,30 @@ export class VenteService {
           throw new VenteValidationError(`Produit introuvable (${ligne.produitId}).`);
         }
 
-        const disponible = this.stockRepository.getQuantite(ligne.produitId, input.emplacementId);
-        const repartition = domainStock.repartirVenteInterneExterne(input.emplacementId, disponible, ligne.quantite);
-
-        if (repartition.quantiteExterne > 0 && (!ligne.fournisseurExterne || ligne.prixAchatExterne === undefined)) {
+        const allocationsValides = ligne.allocationsDepots.filter((a) => a.quantite > 0);
+        const quantiteAllouee = allocationsValides.reduce((s, a) => s + a.quantite, 0);
+        if (quantiteAllouee > ligne.quantite) {
           throw new VenteValidationError(
-            `Stock insuffisant pour "${produit.motif} ${produit.taille}" (${disponible} disponible(s) pour ${ligne.quantite} demandé(s)) — fournisseur et coût d'achat externes requis pour compléter.`
+            `La répartition entre dépôts (${quantiteAllouee}) dépasse la quantité demandée (${ligne.quantite}) pour "${produit.motif} ${produit.taille}".`
+          );
+        }
+
+        // Chaque dépôt est validé et déduit INDÉPENDAMMENT — une
+        // allocation qui dépasse le stock réel de SON dépôt échoue
+        // immédiatement, jamais compensée silencieusement par l'autre
+        // dépôt (§6/§7 de la correction : l'utilisateur répartit
+        // explicitement, le système ne devine pas).
+        for (const allocation of allocationsValides) {
+          const disponible = this.stockRepository.getQuantite(produit.id, allocation.emplacementId);
+          const delta = domainStock.applySortie(allocation.emplacementId, disponible, allocation.quantite);
+          this.stockRepository.applyDelta({ ...delta, produitId: produit.id });
+          mouvementsAEnregistrer.push({ produitId: produit.id, emplacementId: allocation.emplacementId, quantite: allocation.quantite });
+        }
+
+        const quantiteExterne = ligne.quantite - quantiteAllouee;
+        if (quantiteExterne > 0 && (!ligne.fournisseurExterne || ligne.prixAchatExterne === undefined)) {
+          throw new VenteValidationError(
+            `Répartition incomplète pour "${produit.motif} ${produit.taille}" (${quantiteAllouee}/${ligne.quantite} couvert par les dépôts) — fournisseur et coût d'achat externes requis pour le complément.`
           );
         }
 
@@ -87,8 +135,8 @@ export class VenteService {
           motif: produit.motif,
           taille: produit.taille,
           prixUnitaire: ligne.prixUnitaire,
-          quantiteInterne: repartition.quantiteInterne,
-          quantiteExterne: repartition.quantiteExterne,
+          quantiteInterne: quantiteAllouee,
+          quantiteExterne,
           fournisseur: ligne.fournisseurExterne,
           prixAchatExterne: ligne.prixAchatExterne,
         });
@@ -100,18 +148,13 @@ export class VenteService {
             motif: produit.motif,
             taille: produit.taille,
             prixUnitaire: ligne.prixUnitaire,
-            quantiteInterne: repartition.quantiteInterne,
-            quantiteExterne: repartition.quantiteExterne,
+            quantiteInterne: quantiteAllouee,
+            quantiteExterne,
             fournisseur: ligne.fournisseurExterne,
             prixAchatExterne: ligne.prixAchatExterne,
           },
         ]);
         lignesReleveInterne.push(...releve);
-
-        if (repartition.stockDelta) {
-          this.stockRepository.applyDelta({ ...repartition.stockDelta, produitId: produit.id });
-          mouvementsAEnregistrer.push({ produitId: produit.id, quantite: repartition.quantiteInterne });
-        }
       }
 
       const total = domainInvoicing.calculerTotalFacture(lignesFacture);
@@ -125,7 +168,10 @@ export class VenteService {
       const factureId = this.factureRepository.create({
         numero,
         date: now,
-        emplacementId: input.emplacementId,
+        // Le point de vente (SHOP) — jamais un dépôt : une vente peut
+        // désormais provenir de deux dépôts à la fois, ce champ ne peut
+        // donc plus représenter "le" dépôt utilisé (correction Phase 2).
+        emplacementId: input.pointDeVenteId,
         clientNom: input.clientNom,
         clientTelephone: input.clientTelephone,
         clientAdresse: input.clientAdresse,
@@ -141,7 +187,7 @@ export class VenteService {
         this.mouvementRepository.create({
           type: "sortie",
           produitId: m.produitId,
-          emplacementId: input.emplacementId,
+          emplacementId: m.emplacementId,
           emplacementSourceId: null,
           emplacementDestinationId: null,
           quantite: m.quantite,

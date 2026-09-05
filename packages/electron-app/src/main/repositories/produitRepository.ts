@@ -73,13 +73,20 @@ export class ProduitRepository {
   listSousSeuilDepots(depotIds: string[]): { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[] {
     if (depotIds.length === 0) return [];
     const placeholders = depotIds.map(() => "?").join(",");
+    // IMPORTANT : HAVING sans GROUP BY n'est pas valide en SQLite sur une
+    // requête non agrégée (erreur "HAVING clause on a non-aggregate
+    // query", reproduite et confirmée) — le filtre sur la colonne
+    // calculée "stock" doit donc se faire via un WHERE sur une
+    // sous-requête, pas un HAVING direct.
     const rows = this.db
       .prepare(
-        `SELECT p.id, p.motif, p.type, p.taille, p.seuil_alerte as seuilAlerte,
-                COALESCE((SELECT SUM(s.quantite) FROM stocks s WHERE s.produit_id = p.id AND s.emplacement_id IN (${placeholders})), 0) as stock
-         FROM produits p
-         WHERE p.deleted_at IS NULL AND p.seuil_alerte > 0
-         HAVING stock <= seuilAlerte
+        `SELECT * FROM (
+           SELECT p.id, p.motif, p.type, p.taille, p.seuil_alerte as seuilAlerte,
+                  COALESCE((SELECT SUM(s.quantite) FROM stocks s WHERE s.produit_id = p.id AND s.emplacement_id IN (${placeholders})), 0) as stock
+           FROM produits p
+           WHERE p.deleted_at IS NULL AND p.seuil_alerte > 0
+         )
+         WHERE stock <= seuilAlerte
          ORDER BY stock ASC`
       )
       .all(...depotIds) as { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];

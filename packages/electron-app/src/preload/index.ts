@@ -23,17 +23,22 @@ type StockOperationResult =
   | { success: true; [key: string]: unknown }
   | { success: false; reason: { code: StockErrorReason; message: string; available?: number; requested?: number } };
 
+export interface AllocationDepot {
+  emplacementId: string;
+  quantite: number;
+}
 export interface VenteLigneInput {
   produitId: string;
   quantite: number;
   prixUnitaire: number;
+  allocationsDepots: AllocationDepot[];
   fournisseurExterne?: string;
   prixAchatExterne?: number;
 }
 export interface VenteInput {
-  emplacementId: string;
+  pointDeVenteId: string;
   clientNom: string;
-  clientTelephone: string | null;
+  clientTelephone: string;
   clientAdresse: string | null;
   vendeurUtilisateurId: string;
   vendeurCompteConnecteNom: string;
@@ -110,6 +115,22 @@ const maxiEquipApi = {
 
   listFactures: (): Promise<Facture[]> => ipcRenderer.invoke("factures:list"),
   listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
+  listHistoriqueEnrichi: (): Promise<{
+    id: string;
+    type: string;
+    date: string;
+    quantite: number;
+    produitId: string;
+    produitMotif: string;
+    produitReference: string;
+    produitTaille: string;
+    emplacementNom: string | null;
+    emplacementSourceNom: string | null;
+    emplacementDestinationNom: string | null;
+    factureId: string | null;
+    factureNumero: string | null;
+    clientNom: string | null;
+  }[]> => ipcRenderer.invoke("historique:listEnrichi"),
 
   getDashboardSummary: (userId: string): Promise<{
     mouvementsRecents: Mouvement[];

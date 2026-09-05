@@ -53,7 +53,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     { id: "produits", label: "Carreaux", autorise: permissions.canOperateStock },
     { id: "stock", label: "Entrée de stock", autorise: permissions.canOperateStock },
     { id: "transferts", label: "Transferts", autorise: permissions.canOperateStock },
-    { id: "ventes", label: "Sortie de stock", autorise: permissions.canOperateSales },
+    { id: "ventes", label: "Vente", autorise: permissions.canOperateSales },
     { id: "factures", label: "Factures", autorise: permissions.canAccessHistory },
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
   ];

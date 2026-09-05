@@ -15,6 +15,23 @@ interface MouvementRow {
   note: string | null;
 }
 
+export interface MouvementEnrichi {
+  id: string;
+  type: string;
+  date: string;
+  quantite: number;
+  produitId: string;
+  produitMotif: string;
+  produitReference: string;
+  produitTaille: string;
+  emplacementNom: string | null;
+  emplacementSourceNom: string | null;
+  emplacementDestinationNom: string | null;
+  factureId: string | null;
+  factureNumero: string | null;
+  clientNom: string | null;
+}
+
 function rowToMouvement(row: MouvementRow): Mouvement {
   return {
     id: row.id,
@@ -102,5 +119,35 @@ export class MouvementRepository {
       resultat.push({ jour: iso, entrees: entree, sorties: sortie });
     }
     return resultat;
+  }
+
+  /**
+   * Historique enrichi — jointure produit/emplacement(s)/facture, pour la
+   * recherche globale et l'affichage complet de l'Historique (§14-§17 de
+   * la correction). SHOP n'apparaît jamais comme emplacement source/
+   * destination d'un mouvement de stock, conformément à la décision
+   * métier "SHOP n'a pas de stock" — cette requête ne fait que refléter
+   * les données réellement enregistrées, elle n'exclut rien elle-même.
+   */
+  listEnrichi(limit = 300): MouvementEnrichi[] {
+    return this.db
+      .prepare(
+        `SELECT
+           m.id, m.type, m.date, m.quantite,
+           p.id as produitId, p.motif as produitMotif, p.reference as produitReference, p.taille as produitTaille,
+           e.nom as emplacementNom,
+           es.nom as emplacementSourceNom,
+           ed.nom as emplacementDestinationNom,
+           f.id as factureId, f.numero as factureNumero, f.client_nom as clientNom
+         FROM mouvements m
+         JOIN produits p ON p.id = m.produit_id
+         LEFT JOIN emplacements e ON e.id = m.emplacement_id
+         LEFT JOIN emplacements es ON es.id = m.emplacement_source_id
+         LEFT JOIN emplacements ed ON ed.id = m.emplacement_destination_id
+         LEFT JOIN factures f ON f.id = m.facture_id
+         ORDER BY m.date DESC
+         LIMIT ?`
+      )
+      .all(limit) as MouvementEnrichi[];
   }
 }

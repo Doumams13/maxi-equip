@@ -156,8 +156,12 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
   const produitsFiltres = useMemo(() => {
     const q = recherche.trim().toLowerCase();
     if (!q) return produits;
-    // Recherche pensée autour de la référence (§4/§24), sans exclure une correspondance sur le type par confort.
-    return produits.filter((p) => p.reference.toLowerCase().includes(q) || p.type.toLowerCase().includes(q));
+    // Recherche globale sur les colonnes pertinentes (§16/§17 de la
+    // correction) : référence, type ET taille — pas limitée à une seule
+    // colonne, l'utilisateur ne doit pas avoir à choisir quel champ chercher.
+    return produits.filter(
+      (p) => p.reference.toLowerCase().includes(q) || p.type.toLowerCase().includes(q) || p.taille.toLowerCase().includes(q) || p.motif.toLowerCase().includes(q)
+    );
   }, [produits, recherche]);
 
   /**
@@ -503,7 +507,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
           style={{ ...inputStyle, paddingLeft: 36 }}
           value={recherche}
           onChange={(e) => setRecherche(e.target.value)}
-          placeholder="Rechercher par référence…"
+          placeholder="Référence, type, taille, motif…"
         />
       </div>
 

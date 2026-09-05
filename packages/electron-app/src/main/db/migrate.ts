@@ -50,40 +50,50 @@ function fixReferenceUniqueConstraint(db: Database.Database): void {
     return; // Déjà corrigé (nouvelle base) ou table absente — rien à faire.
   }
 
-  const migrer = db.transaction(() => {
-    db.exec("PRAGMA foreign_keys = OFF");
-    db.exec(`
-      CREATE TABLE produits_nouveau (
-        id            TEXT PRIMARY KEY,
-        motif         TEXT NOT NULL,
-        type          TEXT NOT NULL,
-        taille        TEXT NOT NULL,
-        taille_tri    REAL NOT NULL,
-        largeur       REAL,
-        hauteur       REAL,
-        reference     TEXT NOT NULL,
-        prix          INTEGER NOT NULL,
-        seuil_alerte  INTEGER NOT NULL DEFAULT 0,
-        deleted_at    TEXT,
-        deleted_by    TEXT,
-        created_at    TEXT NOT NULL,
-        updated_at    TEXT NOT NULL
-      );
-    `);
-    db.exec(`
-      INSERT INTO produits_nouveau
-        (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at)
-      SELECT id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at
-      FROM produits;
-    `);
-    db.exec("DROP TABLE produits;");
-    db.exec("ALTER TABLE produits_nouveau RENAME TO produits;");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_produits_taille_tri ON produits (taille_tri);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_produits_updated_at ON produits (updated_at);");
-    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_produits_reference_actif ON produits (reference) WHERE deleted_at IS NULL;");
-    db.exec("PRAGMA foreign_keys = ON");
-  });
-  migrer();
+  // IMPORTANT : PRAGMA foreign_keys est un no-op s'il est exécuté à
+  // l'intérieur d'une transaction (documentation SQLite) — il doit donc
+  // être basculé ICI, avant et après la transaction, jamais à l'intérieur
+  // (c'était l'erreur : la désactivation n'avait aucun effet, et la
+  // suppression de la table produits, référencée par clé étrangère
+  // depuis stocks/mouvements/lignes_facture/images_produit, échouait avec
+  // "FOREIGN KEY constraint failed").
+  db.pragma("foreign_keys = OFF");
+  try {
+    const migrer = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE produits_nouveau (
+          id            TEXT PRIMARY KEY,
+          motif         TEXT NOT NULL,
+          type          TEXT NOT NULL,
+          taille        TEXT NOT NULL,
+          taille_tri    REAL NOT NULL,
+          largeur       REAL,
+          hauteur       REAL,
+          reference     TEXT NOT NULL,
+          prix          INTEGER NOT NULL,
+          seuil_alerte  INTEGER NOT NULL DEFAULT 0,
+          deleted_at    TEXT,
+          deleted_by    TEXT,
+          created_at    TEXT NOT NULL,
+          updated_at    TEXT NOT NULL
+        );
+      `);
+      db.exec(`
+        INSERT INTO produits_nouveau
+          (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at)
+        SELECT id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at
+        FROM produits;
+      `);
+      db.exec("DROP TABLE produits;");
+      db.exec("ALTER TABLE produits_nouveau RENAME TO produits;");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_produits_taille_tri ON produits (taille_tri);");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_produits_updated_at ON produits (updated_at);");
+      db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_produits_reference_actif ON produits (reference) WHERE deleted_at IS NULL;");
+    });
+    migrer();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
 }
 
 /**

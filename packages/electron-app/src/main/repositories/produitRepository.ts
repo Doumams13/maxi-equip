@@ -58,17 +58,32 @@ export class ProduitRepository {
     return (this.db.prepare("SELECT COUNT(*) as n FROM produits WHERE deleted_at IS NULL").get() as { n: number }).n;
   }
 
-  countBelowThreshold(): number {
-    // Compte les produits dont AU MOINS un emplacement est sous son seuil d'alerte.
-    return (
-      this.db
-        .prepare(
-          `SELECT COUNT(DISTINCT p.id) as n FROM produits p
-           JOIN stocks s ON s.produit_id = p.id
-           WHERE p.deleted_at IS NULL AND s.quantite <= p.seuil_alerte AND p.seuil_alerte > 0`
-        )
-        .get() as { n: number }
-    ).n;
+  /**
+   * Nombre de produits dont le stock CUMULÉ sur les dépôts donnés est sous
+   * leur seuil d'alerte — jamais SHOP (décision métier §3/§9 de la
+   * correction). Remplace l'ancienne version qui comparait le stock d'un
+   * seul emplacement à la fois, ce qui ne correspondait pas à la règle
+   * "stock Akébé + Akanda cumulé".
+   */
+  countSousSeuilDepots(depotIds: string[]): number {
+    return this.listSousSeuilDepots(depotIds).length;
+  }
+
+  /** Produits sous seuil, avec leur stock cumulé sur les dépôts donnés — section "Produits en stock faible" du dashboard (§8/§13). */
+  listSousSeuilDepots(depotIds: string[]): { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[] {
+    if (depotIds.length === 0) return [];
+    const placeholders = depotIds.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT p.id, p.motif, p.type, p.taille, p.seuil_alerte as seuilAlerte,
+                COALESCE((SELECT SUM(s.quantite) FROM stocks s WHERE s.produit_id = p.id AND s.emplacement_id IN (${placeholders})), 0) as stock
+         FROM produits p
+         WHERE p.deleted_at IS NULL AND p.seuil_alerte > 0
+         HAVING stock <= seuilAlerte
+         ORDER BY stock ASC`
+      )
+      .all(...depotIds) as { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
+    return rows;
   }
 
   /** Valeurs déjà utilisées pour "type" — autocomplétion, jamais une liste fermée (cahier des charges §4). */

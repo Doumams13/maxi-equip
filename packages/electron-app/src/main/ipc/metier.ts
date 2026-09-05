@@ -142,21 +142,42 @@ export function registerMetierIpcHandlers(
     // dashboard portent donc exclusivement sur les dépôts (Akébé/Akanda),
     // jamais sur SHOP.
     const depots = emplacements.filter((e) => !e.estPointDeVente);
+    const depotIds = depots.map((e) => e.id);
     const factures = factureRepository.list(200); // fenêtre raisonnable pour les agrégats "aujourd'hui" en Phase 2
     const aujourdhui = new Date().toDateString();
     const facturesAujourdhui = factures.filter((f) => new Date(f.date).toDateString() === aujourdhui);
 
     const stockDepots = depots.reduce((s, e) => s + stockRepository.listByEmplacement(e.id).reduce((a, r) => a + r.quantite, 0), 0);
+    const stockParEmplacement = depots.map((e) => {
+      const lignes = stockRepository.listByEmplacement(e.id);
+      return {
+        emplacementId: e.id,
+        nom: e.nom,
+        cartons: lignes.reduce((s, r) => s + r.quantite, 0),
+        referencesEnRupture: lignes.filter((r) => r.quantite <= 0).length,
+      };
+    });
 
     return {
       // Communs
       mouvementsRecents: mouvementRepository.listRecent(5),
-      // Administrateur — vue globale
+      // Administrateur — vue globale (ligne 1)
       stockTousDepots: stockDepots,
-      caTotal: factures.reduce((s, f) => s + f.total, 0),
-      produitsSousSeuilGlobal: produitRepository.countBelowThreshold(),
+      caTotal: factureRepository.sommeTotal(),
+      produitsSousSeuilGlobal: produitRepository.countSousSeuilDepots(depotIds),
       totalFactures: factureRepository.count(),
       totalProduits: produitRepository.count(),
+      // Administrateur — ligne 2
+      totalEntrees: mouvementRepository.sommeQuantiteParType("entree"),
+      totalSorties: mouvementRepository.sommeQuantiteParType("sortie"),
+      // Promotions : fonctionnalité non développée (Phase 4) — 0 réel et
+      // honnête, pas une donnée inventée pour remplir la case (§4/§24).
+      promotionsActives: 0,
+      // Administrateur — graphique + tableaux
+      serieEntreesSorties: mouvementRepository.serieEntreesSortiesSeptJours(),
+      stockParEmplacement,
+      topProduitsVendus: factureRepository.topProduitsVendus(5),
+      produitsSousSeuilListe: produitRepository.listSousSeuilDepots(depotIds).slice(0, 6),
       // Gérant — vue opérationnelle (dépôts, pas de "stock SHOP")
       stockDepots,
       ventesAujourdhui: facturesAujourdhui.reduce((s, f) => s + f.total, 0),

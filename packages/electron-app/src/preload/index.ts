@@ -118,6 +118,13 @@ const maxiEquipApi = {
     produitsSousSeuilGlobal: number;
     totalFactures: number;
     totalProduits: number;
+    totalEntrees: number;
+    totalSorties: number;
+    promotionsActives: number;
+    serieEntreesSorties: { jour: string; entrees: number; sorties: number }[];
+    stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
+    topProduitsVendus: { label: string; quantite: number }[];
+    produitsSousSeuilListe: { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
     stockDepots: number;
     ventesAujourdhui: number;
     mesVentesAujourdhui: number;

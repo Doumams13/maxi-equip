@@ -333,11 +333,22 @@ export function VentesScreen({ session }: VentesScreenProps) {
                                 {d.nom} <span style={{ color: defaultTokens.colors.textFaint, fontWeight: 400 }}>({disponible} dispo.)</span>
                               </label>
                               <input
-                                style={inputStyle}
+                                style={{ ...inputStyle, opacity: disponible === 0 ? 0.6 : 1, cursor: disponible === 0 ? "not-allowed" : "text" }}
                                 type="number"
                                 min={0}
+                                max={disponible}
+                                disabled={disponible === 0}
                                 value={ligne.allocations[d.id] ?? ""}
-                                onChange={(e) => updateLigne(index, { allocations: { ...ligne.allocations, [d.id]: e.target.value } })}
+                                onChange={(e) => {
+                                  // Jamais plus que le stock réellement disponible à CE dépôt —
+                                  // ni via la saisie clavier, ni via les flèches natives du champ
+                                  // (qui respectent déjà `max`, mais la saisie manuelle doit être
+                                  // bornée explicitement ici, sinon un dépassement resterait
+                                  // possible avant validation côté serveur).
+                                  const brut = e.target.value;
+                                  const valeur = brut === "" ? "" : String(Math.max(0, Math.min(disponible, Number(brut))));
+                                  updateLigne(index, { allocations: { ...ligne.allocations, [d.id]: valeur } });
+                                }}
                               />
                             </div>
                           );

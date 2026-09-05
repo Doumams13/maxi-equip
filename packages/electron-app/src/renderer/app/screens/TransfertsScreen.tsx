@@ -12,11 +12,11 @@ const inputStyle: React.CSSProperties = {
 };
 
 /**
- * Écran Transferts — entrée de navigation distincte, conforme à la
- * structure de la première maquette validée (baseNavItems). Réutilise
- * exclusivement StockService.enregistrerTransfert(), déjà implémenté
- * depuis le début de la Phase 2 mais jamais câblé à une interface —
- * aucune règle métier n'est ajoutée ici, seul le domaine décide (§19).
+ * Écran Transferts — Phase 2, corrigé pour la décision métier "SHOP n'a
+ * pas de stock" (§3/§5) : les seuls emplacements de transfert possibles
+ * sont Akébé et Akanda, jamais SHOP. Réutilise exclusivement
+ * StockService.enregistrerTransfert() — aucune règle métier ajoutée ici,
+ * seul le domaine décide (§19).
  */
 export function TransfertsScreen() {
   const { showSuccess, showWarning, showError } = useToast();
@@ -27,6 +27,8 @@ export function TransfertsScreen() {
   const [destinationId, setDestinationId] = useState("");
   const [quantite, setQuantite] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const depots = emplacements.filter((e) => !e.estPointDeVente);
 
   useEffect(() => {
     void (async () => {
@@ -94,7 +96,7 @@ export function TransfertsScreen() {
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Depuis</label>
               <select style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }} value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
                 <option value="">Sélectionner…</option>
-                {emplacements.map((e) => (
+                {depots.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.nom}
                   </option>
@@ -106,7 +108,7 @@ export function TransfertsScreen() {
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Vers</label>
               <select style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }} value={destinationId} onChange={(e) => setDestinationId(e.target.value)}>
                 <option value="">Sélectionner…</option>
-                {emplacements.map((e) => (
+                {depots.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.nom}
                   </option>

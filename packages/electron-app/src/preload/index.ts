@@ -118,8 +118,8 @@ const maxiEquipApi = {
     produitsSousSeuilGlobal: number;
     totalFactures: number;
     totalProduits: number;
-    stockShop: number;
-    ventesShopAujourdhui: number;
+    stockDepots: number;
+    ventesAujourdhui: number;
     mesVentesAujourdhui: number;
     mesFacturesAujourdhuiCount: number;
   }> => ipcRenderer.invoke("dashboard:summary", userId),

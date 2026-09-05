@@ -2,10 +2,22 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'"
-    />
+    <!--
+      Aucune balise <meta> Content-Security-Policy ici, volontairement.
+      Le processus Main applique déjà une CSP complète et à jour via
+      en-tête HTTP (voir main/security/windowOptions.ts +
+      applyContentSecurityPolicy() dans main/index.ts), qui couvre TOUTES
+      les requêtes du Renderer, y compris le chargement de ce fichier.
+
+      Une ancienne balise <meta> CSP de la Phase 1 (sans img-src) a
+      auparavant coexisté avec cette CSP du Main : le navigateur applique
+      alors l'INTERSECTION des deux, et la balise <meta>, plus stricte,
+      bloquait silencieusement les images en data: — c'est la cause
+      exacte du bug "images sélectionnées mais affichées comme cassées"
+      (icône de navigateur + texte alternatif visible, mais pixels
+      absents). Une seule source de vérité pour la CSP évite que ce
+      problème ne se reproduise à la prochaine évolution de la politique.
+    -->
     <title>MAXI EQUIP</title>
     <style>
       /*

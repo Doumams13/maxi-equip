@@ -95,7 +95,7 @@ export class VenteService {
     const executer = this.db.transaction(() => {
       const lignesFacture: LigneFacture[] = [];
       const lignesReleveInterne: LigneReleveInterne[] = [];
-      const mouvementsAEnregistrer: { produitId: string; emplacementId: string; quantite: number }[] = [];
+      const mouvementsAEnregistrer: { produitId: string; emplacementId: string | null; quantite: number; note: string | null }[] = [];
 
       for (const ligne of input.lignes) {
         const produit = this.produitRepository.findById(ligne.produitId);
@@ -132,7 +132,7 @@ export class VenteService {
           const disponible = this.stockRepository.getQuantite(produit.id, allocation.emplacementId);
           const delta = domainStock.applySortie(allocation.emplacementId, disponible, allocation.quantite);
           this.stockRepository.applyDelta({ ...delta, produitId: produit.id });
-          mouvementsAEnregistrer.push({ produitId: produit.id, emplacementId: allocation.emplacementId, quantite: allocation.quantite });
+          mouvementsAEnregistrer.push({ produitId: produit.id, emplacementId: allocation.emplacementId, quantite: allocation.quantite, note: null });
         }
 
         const quantiteExterne = ligne.quantite - quantiteAllouee;
@@ -140,6 +140,23 @@ export class VenteService {
           throw new VenteValidationError(
             `Répartition incomplète pour "${produit.motif} ${produit.taille}" (${quantiteAllouee}/${ligne.quantite} couvert par les dépôts) — fournisseur et coût d'achat externes requis pour le complément.`
           );
+        }
+        if (quantiteExterne > 0) {
+          // BUG CORRIGÉ : une vente entièrement (ou partiellement) couverte
+          // par un fournisseur externe ne créait auparavant AUCUNE trace
+          // dans les mouvements — l'Historique n'affichant que des
+          // mouvements, une vente 100% externe y était invisible pour
+          // TOUT LE MONDE (jamais un problème de rôle : reproduit et
+          // confirmé en relisant le code, aucun filtrage par rôle
+          // n'existe dans ce service ni dans les requêtes de lecture).
+          // `emplacementId: null` — aucun dépôt réel n'est concerné,
+          // jamais de déduction de stock ici, uniquement une trace.
+          mouvementsAEnregistrer.push({
+            produitId: produit.id,
+            emplacementId: null,
+            quantite: quantiteExterne,
+            note: `Approvisionnement externe (${ligne.fournisseurExterne})`,
+          });
         }
 
         const ligneFacture = domainInvoicing.buildLigneFacture({
@@ -206,7 +223,7 @@ export class VenteService {
           date: now,
           factureId,
           utilisateurId: input.vendeurUtilisateurId,
-          note: null,
+          note: m.note,
         });
       }
 

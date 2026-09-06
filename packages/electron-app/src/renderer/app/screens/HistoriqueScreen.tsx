@@ -26,6 +26,10 @@ function debutPeriode(periode: Periode): Date | null {
 
 function nomEmplacement(m: MouvementEnrichi): string {
   if (m.type === "transfert") return `${m.emplacementSourceNom ?? "?"} → ${m.emplacementDestinationNom ?? "?"}`;
+  // Une vente peut être entièrement ou partiellement couverte par un
+  // fournisseur externe (bug corrigé : cette part crée désormais une
+  // trace elle aussi, sans dépôt réel associé — voir venteService).
+  if (m.type === "sortie" && !m.emplacementNom) return "Externe";
   return m.emplacementNom ?? "—";
 }
 

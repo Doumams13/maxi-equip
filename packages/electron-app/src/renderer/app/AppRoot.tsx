@@ -12,6 +12,14 @@ import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
 
 type Session = { userId: string; identifiant: string; nom: string; role: string };
 
+/**
+ * Cible d'une navigation "cliquable" depuis l'Historique ou le Dashboard
+ * (Consolidation §16-§21) — un type d'opération + son identifiant réel,
+ * jamais une correspondance approximative par nom/date/montant (§19 :
+ * "utiliser un identifiant unique et fiable").
+ */
+export type CibleOperation = { type: "facture"; id: string } | { type: "mouvement"; id: string };
+
 export interface AppRootProps {
   onLoggedOut: () => void;
 }
@@ -30,6 +38,19 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   const [permissions, setPermissions] = useState<auth.PermissionSet | null>(null);
   const [activeScreen, setActiveScreen] = useState<ScreenId>("dashboard");
   const [loading, setLoading] = useState(true);
+  const [cibleSurbrillance, setCibleSurbrillance] = useState<CibleOperation | null>(null);
+
+  /**
+   * Navigation cliquable centralisée (§16-§23 de la consolidation) : reçoit
+   * une cible fiable (type + identifiant réel), bascule vers le module
+   * approprié, et transmet la cible pour que l'écran de destination
+   * retrouve, fasse défiler et mette en évidence la bonne ligne — jamais
+   * une correspondance approximative par texte affiché.
+   */
+  function irVersOperation(cible: CibleOperation) {
+    setActiveScreen(cible.type === "facture" ? "factures" : "historique");
+    setCibleSurbrillance(cible);
+  }
 
   useEffect(() => {
     void (async () => {
@@ -61,19 +82,37 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   function renderScreen() {
     switch (activeScreen) {
       case "dashboard":
-        return <DashboardScreen session={{ userId: session!.userId, nom: session!.nom, role: session!.role }} />;
+        return (
+          <DashboardScreen
+            session={{ userId: session!.userId, nom: session!.nom, role: session!.role }}
+            onNaviguerVersOperation={irVersOperation}
+          />
+        );
       case "produits":
         return <ProduitsScreen session={{ userId: session!.userId }} />;
       case "stock":
-        return <StockScreen session={{ userId: session!.userId }} />;
+        return <StockScreen />;
       case "transferts":
-        return <TransfertsScreen session={{ userId: session!.userId }} />;
+        return <TransfertsScreen />;
       case "ventes":
         return <VentesScreen session={{ userId: session!.userId, nom: session!.nom }} />;
       case "factures":
-        return <FacturesScreen />;
+        return (
+          <FacturesScreen
+            session={{ userId: session!.userId, role: session!.role }}
+            cibleSurbrillance={cibleSurbrillance?.type === "facture" ? cibleSurbrillance.id : null}
+            onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
+          />
+        );
       case "historique":
-        return <HistoriqueScreen />;
+        return (
+          <HistoriqueScreen
+            session={{ userId: session!.userId }}
+            cibleSurbrillance={cibleSurbrillance?.type === "mouvement" ? cibleSurbrillance.id : null}
+            onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
+            onNaviguerVersOperation={irVersOperation}
+          />
+        );
       default:
         return null;
     }

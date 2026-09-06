@@ -146,7 +146,8 @@ app.whenReady().then(async () => {
       factureRepository,
       stockService,
       venteService,
-      imageService
+      imageService,
+      sessionManager
     );
     registerImageIpcHandlers(imageService);
   } catch (err) {

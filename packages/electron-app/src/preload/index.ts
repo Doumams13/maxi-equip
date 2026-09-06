@@ -121,24 +121,23 @@ const maxiEquipApi = {
 
   getStockByEmplacement: (emplacementId: string): Promise<{ produitId: string; quantite: number }[]> =>
     ipcRenderer.invoke("stock:byEmplacement", emplacementId),
-  enregistrerEntree: (produitId: string, emplacementId: string, quantite: number, utilisateurId: string): Promise<StockOperationResult> =>
-    ipcRenderer.invoke("stock:entree", produitId, emplacementId, quantite, utilisateurId),
+  enregistrerEntree: (produitId: string, emplacementId: string, quantite: number): Promise<StockOperationResult> =>
+    ipcRenderer.invoke("stock:entree", produitId, emplacementId, quantite),
   enregistrerTransfert: (
     produitId: string,
     sourceId: string,
     destinationId: string,
-    quantite: number,
-    utilisateurId: string
-  ): Promise<StockOperationResult> => ipcRenderer.invoke("stock:transfert", produitId, sourceId, destinationId, quantite, utilisateurId),
+    quantite: number
+  ): Promise<StockOperationResult> => ipcRenderer.invoke("stock:transfert", produitId, sourceId, destinationId, quantite),
 
   enregistrerVente: (input: VenteInput): Promise<StockOperationResult & { factureId?: string; numero?: string; total?: number }> =>
     ipcRenderer.invoke("ventes:create", input),
 
-  listFactures: (): Promise<Facture[]> => ipcRenderer.invoke("factures:list"),
+  listFactures: (): Promise<(Facture & { vendeurNom: string | null; vendeurRole: string | null })[]> => ipcRenderer.invoke("factures:list"),
   listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
   listHistoriqueEnrichi: (): Promise<MouvementEnrichi[]> => ipcRenderer.invoke("historique:listEnrichi"),
 
-  getDashboardSummary: (userId: string): Promise<{
+  getDashboardSummary: (): Promise<{
     stockTousDepots: number;
     caTotal: number;
     produitsSousSeuilGlobal: number;
@@ -151,7 +150,7 @@ const maxiEquipApi = {
     stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
     topProduitsVendus: { label: string; quantite: number }[];
     produitsSousSeuilListe: { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
-    activiteRecenteGlobale: MouvementEnrichi[];
+    activiteRecente: MouvementEnrichi[];
     stockDepots: number;
     stockParEmplacementPourGerant: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
     mesVentesAujourdhui: number;
@@ -159,8 +158,7 @@ const maxiEquipApi = {
     mesFacturesAujourdhuiCount: number;
     mesEntrees: number;
     mesSorties: number;
-    activiteRecentePersonnelle: MouvementEnrichi[];
-  }> => ipcRenderer.invoke("dashboard:summary", userId),
+  } | null> => ipcRenderer.invoke("dashboard:summary"),
 
   // --- Images produit (correction Phase 2) ---
   // Le Renderer ne reçoit jamais de chemin de fichier — uniquement des

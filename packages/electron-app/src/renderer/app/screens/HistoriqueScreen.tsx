@@ -2,23 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, defaultTokens } from "@maxi-equip/design-system";
 import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight, Search } from "lucide-react";
 import { MOUVEMENT_LABELS as TYPE_LABELS, MOUVEMENT_COLORS as TYPE_COLORS } from "../mouvementLabels.js";
-
-interface MouvementEnrichi {
-  id: string;
-  type: string;
-  date: string;
-  quantite: number;
-  produitId: string;
-  produitMotif: string;
-  produitReference: string;
-  produitTaille: string;
-  emplacementNom: string | null;
-  emplacementSourceNom: string | null;
-  emplacementDestinationNom: string | null;
-  factureId: string | null;
-  factureNumero: string | null;
-  clientNom: string | null;
-}
+import type { MouvementEnrichi } from "../../../preload/index.js";
+import type { CibleOperation } from "../AppRoot.js";
+import { useSurbrillanceOperation } from "../highlight.js";
 
 type Periode = "jour" | "semaine" | "mois" | "personnalise" | "tout";
 type ColonneTriable = "date" | "type" | "emplacement" | "produit" | "quantite" | "facture";
@@ -91,7 +77,18 @@ function KpiMini({ icon: Icon, value, label, tone }: { icon: typeof ArrowDownToL
  * réellement globale (référence, motif, taille, n° facture, client —
  * §16/§17), et les colonnes pertinentes sont triables (§18-§21).
  */
-export function HistoriqueScreen() {
+export function HistoriqueScreen({
+  session,
+  cibleSurbrillance,
+  onSurbrillanceAppliquee,
+  onNaviguerVersOperation,
+}: {
+  session: { userId: string };
+  cibleSurbrillance: string | null;
+  onSurbrillanceAppliquee: () => void;
+  onNaviguerVersOperation: (cible: CibleOperation) => void;
+}) {
+  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(cibleSurbrillance, onSurbrillanceAppliquee);
   const [mouvements, setMouvements] = useState<MouvementEnrichi[]>([]);
   const [recherche, setRecherche] = useState("");
   const [typeFiltre, setTypeFiltre] = useState<string>("tous");
@@ -104,6 +101,18 @@ export function HistoriqueScreen() {
   useEffect(() => {
     void window.maxiEquip.listHistoriqueEnrichi().then(setMouvements);
   }, []);
+
+  // Une navigation cliquable doit retrouver la ligne même si un filtre
+  // était actif (§20 de la consolidation : "ajuster temporairement les
+  // filtres si nécessaire") — les filtres sont réinitialisés dès qu'une
+  // cible de surbrillance arrive, pour garantir que la ligne est visible.
+  useEffect(() => {
+    if (!cibleSurbrillance) return;
+    setRecherche("");
+    setTypeFiltre("tous");
+    setEmplacementFiltre("tous");
+    setPeriode("tout");
+  }, [cibleSurbrillance]);
 
   const emplacementsDisponibles = useMemo(() => {
     const noms = new Set<string>();
@@ -257,7 +266,7 @@ export function HistoriqueScreen() {
         {tries.length === 0 ? (
           <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Aucun mouvement ne correspond à vos filtres.</p>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div ref={conteneurRef} style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
@@ -279,13 +288,23 @@ export function HistoriqueScreen() {
                 <th style={{ padding: "10px 16px" }}>
                   <EnteteTriable label="Facture" colonne="facture" tri={tri} onTrier={handleTrier} />
                 </th>
+                <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textFaint, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em" }}>Auteur</th>
               </tr>
             </thead>
             <tbody>
               {tries.map((m) => {
                 const Icone = TYPE_ICONS[m.type] ?? ArrowDownToLine;
                 return (
-                  <tr key={m.id} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+                  <tr
+                    key={m.id}
+                    data-operation-id={m.id}
+                    onClick={() => m.factureId && onNaviguerVersOperation({ type: "facture", id: m.factureId })}
+                    style={{
+                      borderTop: `1px solid ${defaultTokens.colors.borderSoft}`,
+                      cursor: m.factureId ? "pointer" : "default",
+                      ...styleSurbrillance(m.id),
+                    }}
+                  >
                     <td style={{ padding: "10px 16px", color: defaultTokens.colors.textSoft, whiteSpace: "nowrap" }}>{new Date(m.date).toLocaleString("fr-FR")}</td>
                     <td style={{ padding: "10px 16px" }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: TYPE_COLORS[m.type], fontWeight: 700 }}>
@@ -307,6 +326,22 @@ export function HistoriqueScreen() {
                     <td style={{ padding: "10px 16px" }}>
                       {m.factureNumero ? (
                         <span style={{ fontFamily: defaultTokens.typography.mono, fontSize: 12, color: defaultTokens.colors.accent, fontWeight: 600 }}>{m.factureNumero}</span>
+                      ) : (
+                        <span style={{ color: defaultTokens.colors.textFaint }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "10px 16px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+                      {/*
+                        L'anonymisation est déjà décidée côté Main (jamais
+                        ici) : si utilisateurNom est absent, c'est que le
+                        serveur a délibérément choisi de ne pas le
+                        transmettre (Consolidation §4/§23). "Vous" pour ses
+                        propres opérations (§5), jamais le nom d'un autre.
+                      */}
+                      {m.utilisateurId === session.userId ? (
+                        <span style={{ fontWeight: 700, color: defaultTokens.colors.accent }}>Vous</span>
+                      ) : m.utilisateurNom ? (
+                        `${m.utilisateurNom} (${m.utilisateurRole})`
                       ) : (
                         <span style={{ color: defaultTokens.colors.textFaint }}>—</span>
                       )}

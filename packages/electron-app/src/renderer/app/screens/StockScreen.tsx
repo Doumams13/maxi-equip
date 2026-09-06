@@ -1,14 +1,22 @@
 import { useEffect, useState } from "react";
-import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
+import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
+import { ProduitSelector } from "../components/ProduitSelector.js";
 
 /**
  * Écran Entrée de stock — Phase 2 §10, corrigé pour la décision métier
  * "SHOP n'a pas de stock" (§3) : SHOP est uniquement le point de vente,
- * les seuls emplacements de stockage réels sont Akébé et Akanda. SHOP est
- * donc explicitement exclu des emplacements proposés ici. Aucune règle
- * métier ici par ailleurs : la vérification de disponibilité et le calcul
- * du delta viennent de packages/domain, via le canal IPC stock:entree.
+ * les seuls emplacements de stockage réels sont Akébé et Akanda.
+ *
+ * Corrections supplémentaires : sélecteur de produit avec recherche
+ * (ProduitSelector, composant commun réutilisé aussi par Vente et
+ * Transfert), quantité strictement positive (plafonnée côté UI, refusée
+ * côté domaine si contournée), et double validation avant exécution
+ * réelle (ConfirmDialog).
+ *
+ * Aucune règle métier ici : la vérification de disponibilité et le
+ * calcul du delta viennent de packages/domain, via le canal IPC
+ * stock:entree (§19 — le domaine reste la seule source de vérité).
  */
 export function StockScreen() {
   const { showSuccess, showWarning, showError } = useToast();
@@ -19,6 +27,7 @@ export function StockScreen() {
   const [entreeProduitId, setEntreeProduitId] = useState("");
   const [entreeQuantite, setEntreeQuantite] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const depots = emplacements.filter((e) => !e.estPointDeVente);
 
@@ -44,7 +53,7 @@ export function StockScreen() {
     if (emplacementId) void refresh(emplacementId);
   }, [emplacementId]);
 
-  async function handleEntree(e: React.FormEvent) {
+  function handleOuvrirConfirmation(e: React.FormEvent) {
     e.preventDefault();
     if (!entreeProduitId) {
       showWarning("Produit requis", "Sélectionnez un produit avant d'enregistrer une entrée.");
@@ -55,6 +64,11 @@ export function StockScreen() {
       showWarning("Quantité requise", "Saisissez une quantité strictement positive.");
       return;
     }
+    setShowConfirm(true);
+  }
+
+  async function handleConfirmerEntree() {
+    const quantite = Number(entreeQuantite);
     setSaving(true);
     try {
       const result = await window.maxiEquip.enregistrerEntree(entreeProduitId, emplacementId, quantite);
@@ -62,6 +76,7 @@ export function StockScreen() {
         showSuccess("Entrée enregistrée", "Le stock a été mis à jour avec succès.");
         setEntreeProduitId("");
         setEntreeQuantite("");
+        setShowConfirm(false);
         await refresh(emplacementId);
       } else {
         showError("Opération impossible", result.reason.message);
@@ -82,6 +97,9 @@ export function StockScreen() {
     fontFamily: defaultTokens.typography.body,
     fontSize: 13.5,
   };
+
+  const produitSelectionne = produits.find((p) => p.id === entreeProduitId) ?? null;
+  const depotSelectionne = depots.find((d) => d.id === emplacementId) ?? null;
 
   return (
     <div style={{ padding: 28 }}>
@@ -110,25 +128,25 @@ export function StockScreen() {
 
       <Card style={{ marginBottom: 20 }}>
         <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, marginTop: 0 }}>Enregistrer une entrée</h2>
-        <form onSubmit={(e) => void handleEntree(e)} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div>
+        <form onSubmit={handleOuvrirConfirmation} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ minWidth: 280 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Produit</label>
-            <select style={{ ...inputStyle, minWidth: 240 }} value={entreeProduitId} onChange={(e) => setEntreeProduitId(e.target.value)}>
-              <option value="">Sélectionner…</option>
-              {produits.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.motif} — {p.taille}
-                </option>
-              ))}
-            </select>
+            <ProduitSelector produits={produits} value={entreeProduitId} onChange={setEntreeProduitId} />
           </div>
           <div>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Quantité</label>
-            <input style={{ ...inputStyle, width: 100 }} type="number" value={entreeQuantite} onChange={(e) => setEntreeQuantite(e.target.value)} />
+            <input
+              style={{ ...inputStyle, width: 100 }}
+              type="number"
+              min={1}
+              value={entreeQuantite}
+              onChange={(e) => {
+                const brut = e.target.value;
+                setEntreeQuantite(brut === "" ? "" : String(Math.max(1, Math.trunc(Number(brut)))));
+              }}
+            />
           </div>
-          <Button type="submit" loading={saving}>
-            Enregistrer
-          </Button>
+          <Button type="submit">Enregistrer</Button>
         </form>
       </Card>
 
@@ -154,9 +172,7 @@ export function StockScreen() {
                   <tr key={p.id} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
                     <td style={{ padding: "10px 16px" }}>{p.motif}</td>
                     <td style={{ padding: "10px 16px", fontWeight: 700 }}>{p.taille}</td>
-                    <td style={{ padding: "10px 16px", color: sousSeuil ? defaultTokens.colors.danger : defaultTokens.colors.text, fontWeight: sousSeuil ? 700 : 400 }}>
-                      {quantite}
-                    </td>
+                    <td style={{ padding: "10px 16px", color: sousSeuil ? defaultTokens.colors.danger : defaultTokens.colors.text, fontWeight: sousSeuil ? 700 : 400 }}>{quantite}</td>
                     <td style={{ padding: "10px 16px", color: defaultTokens.colors.textFaint }}>{p.seuilAlerte}</td>
                   </tr>
                 );
@@ -165,6 +181,21 @@ export function StockScreen() {
           </table>
         )}
       </Card>
+
+      {showConfirm && produitSelectionne && (
+        <ConfirmDialog
+          title="Confirmer l'entrée de stock ?"
+          resume={[
+            { label: "Produit", value: `${produitSelectionne.motif} — ${produitSelectionne.taille}` },
+            { label: "Référence", value: produitSelectionne.reference },
+            { label: "Dépôt", value: depotSelectionne?.nom ?? "—" },
+            { label: "Quantité", value: `${entreeQuantite} cartons` },
+          ]}
+          onAnnuler={() => setShowConfirm(false)}
+          onConfirmer={() => void handleConfirmerEntree()}
+          confirming={saving}
+        />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Plus, Trash2, Pencil, CheckCircle2, X } from "lucide-react";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
+import { ProduitSelector } from "../components/ProduitSelector.js";
 
 interface LigneVenteForm {
   produitId: string;
@@ -31,14 +32,18 @@ interface LigneRecap {
   label: string;
   quantite: number;
   prixUnitaire: number;
+  /** Répartition interne (Akébé/Akanda/externe) — affichée UNIQUEMENT dans cette vérification interne, jamais sur la facture client (§18 de la correction). */
+  repartitionInterne: string;
 }
 
 /**
  * Écran de vérification avant confirmation — reproduit SaleConfirmModal
- * de la maquette originale. Ne montre QUE ce que le client verra
- * (quantité, prix, total) — jamais la répartition interne par dépôt ou
- * l'approvisionnement externe (§10 de la correction : la facture client
- * ne révèle jamais l'organisation interne).
+ * de la maquette originale, complété pour afficher la répartition
+ * interne par dépôt (§16/§17 de la correction : "la confirmation doit
+ * clairement afficher la répartition interne avant validation"). Cette
+ * répartition reste un affichage strictement interne à l'application —
+ * la facture PDF/document client, elle, ne montre jamais Akébé, Akanda
+ * ni l'approvisionnement externe (§18, inchangé).
  */
 function SaleConfirmModal({
   clientNom,
@@ -59,7 +64,7 @@ function SaleConfirmModal({
 }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-      <Card elevated style={{ width: 560, boxSizing: "border-box" }}>
+      <Card elevated style={{ width: 580, boxSizing: "border-box" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ margin: 0, fontFamily: defaultTokens.typography.display, fontSize: 17 }}>Vérification de la vente</h2>
           <button onClick={onModifier} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }} aria-label="Fermer">
@@ -78,16 +83,16 @@ function SaleConfirmModal({
           </div>
         </div>
 
-        <div style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.md, overflow: "hidden", marginBottom: 16 }}>
+        <div style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.md, overflow: "hidden", marginBottom: 10 }}>
           {lignes.map((l, i) => (
-            <div
-              key={i}
-              style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", fontSize: 13, borderTop: i > 0 ? `1px solid ${defaultTokens.colors.borderSoft}` : "none" }}
-            >
-              <span>{l.label}</span>
-              <span style={{ color: defaultTokens.colors.textSoft }}>
-                {l.quantite} × {l.prixUnitaire.toLocaleString("fr-FR")} FCFA = {(l.quantite * l.prixUnitaire).toLocaleString("fr-FR")} FCFA
-              </span>
+            <div key={i} style={{ padding: "10px 14px", borderTop: i > 0 ? `1px solid ${defaultTokens.colors.borderSoft}` : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span>{l.label}</span>
+                <span style={{ color: defaultTokens.colors.textSoft }}>
+                  {l.quantite} × {l.prixUnitaire.toLocaleString("fr-FR")} FCFA = {(l.quantite * l.prixUnitaire).toLocaleString("fr-FR")} FCFA
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: defaultTokens.colors.textFaint, marginTop: 2 }}>{l.repartitionInterne}</div>
             </div>
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", fontWeight: 800, fontFamily: defaultTokens.typography.display, background: defaultTokens.colors.surfaceAlt }}>
@@ -95,9 +100,12 @@ function SaleConfirmModal({
             <span>{total.toLocaleString("fr-FR")} FCFA</span>
           </div>
         </div>
+        <p style={{ margin: "0 0 16px", fontSize: 11, color: defaultTokens.colors.textFaint, fontStyle: "italic" }}>
+          La répartition par dépôt est un affichage interne — jamais présente sur la facture remise au client.
+        </p>
 
         <div style={{ display: "flex", gap: 10 }}>
-          <Button variant="secondary" onClick={onModifier} style={{ flex: 1 }}>
+          <Button variant="secondary" onClick={onModifier} disabled={confirming} style={{ flex: 1 }}>
             <Pencil size={15} />
             Modifier
           </Button>
@@ -297,22 +305,33 @@ export function VentesScreen({ session }: VentesScreenProps) {
                   <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
                     <div>
                       <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Produit</label>
-                      <select style={inputStyle} value={ligne.produitId} onChange={(e) => handleProduitChange(index, e.target.value)}>
-                        <option value="">Sélectionner…</option>
-                        {produits.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.motif} — {p.taille}
-                          </option>
-                        ))}
-                      </select>
+                      <ProduitSelector produits={produits} value={ligne.produitId} onChange={(id) => handleProduitChange(index, id)} />
                     </div>
                     <div>
                       <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Quantité</label>
-                      <input style={inputStyle} type="number" value={ligne.quantite} onChange={(e) => updateLigne(index, { quantite: e.target.value })} />
+                      <input
+                        style={inputStyle}
+                        type="number"
+                        min={1}
+                        value={ligne.quantite}
+                        onChange={(e) => {
+                          const brut = e.target.value;
+                          updateLigne(index, { quantite: brut === "" ? "" : String(Math.max(1, Math.trunc(Number(brut)))) });
+                        }}
+                      />
                     </div>
                     <div>
                       <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Prix unitaire</label>
-                      <input style={inputStyle} type="number" value={ligne.prixUnitaire} onChange={(e) => updateLigne(index, { prixUnitaire: e.target.value })} />
+                      <input
+                        style={inputStyle}
+                        type="number"
+                        min={0}
+                        value={ligne.prixUnitaire}
+                        onChange={(e) => {
+                          const brut = e.target.value;
+                          updateLigne(index, { prixUnitaire: brut === "" ? "" : String(Math.max(0, Number(brut))) });
+                        }}
+                      />
                     </div>
                     <Button type="button" variant="ghost" onClick={() => setLignes((prev) => prev.filter((_, i) => i !== index))}>
                       <Trash2 size={15} />
@@ -368,7 +387,16 @@ export function VentesScreen({ session }: VentesScreenProps) {
                       </div>
                       <div>
                         <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Coût d'achat unitaire</label>
-                        <input style={inputStyle} type="number" value={ligne.prixAchatExterne} onChange={(e) => updateLigne(index, { prixAchatExterne: e.target.value })} />
+                        <input
+                          style={inputStyle}
+                          type="number"
+                          min={0}
+                          value={ligne.prixAchatExterne}
+                          onChange={(e) => {
+                            const brut = e.target.value;
+                            updateLigne(index, { prixAchatExterne: brut === "" ? "" : String(Math.max(0, Number(brut))) });
+                          }}
+                        />
                       </div>
                     </div>
                   )}
@@ -394,11 +422,22 @@ export function VentesScreen({ session }: VentesScreenProps) {
           vendeur={vendeurNomManuel.trim() || session.nom}
           lignes={lignes
             .filter((l) => l.produitId && Number(l.quantite) > 0)
-            .map((l) => ({
-              label: produits.find((p) => p.id === l.produitId)?.reference ?? "",
-              quantite: Number(l.quantite),
-              prixUnitaire: Number(l.prixUnitaire) || 0,
-            }))}
+            .map((l) => {
+              const parts = depots
+                .map((d) => {
+                  const q = Number(l.allocations[d.id]) || 0;
+                  return q > 0 ? `${d.nom} ${q}` : null;
+                })
+                .filter((v): v is string => v !== null);
+              const externe = quantiteExterne(l);
+              if (externe > 0) parts.push(`Externe ${externe}${l.fournisseurExterne ? ` (${l.fournisseurExterne})` : ""}`);
+              return {
+                label: produits.find((p) => p.id === l.produitId)?.reference ?? "",
+                quantite: Number(l.quantite),
+                prixUnitaire: Number(l.prixUnitaire) || 0,
+                repartitionInterne: parts.length > 0 ? `Répartition : ${parts.join(" · ")}` : "Répartition non renseignée",
+              };
+            })}
           total={total}
           onModifier={() => setShowConfirm(false)}
           onConfirmer={() => void handleConfirmerVente()}

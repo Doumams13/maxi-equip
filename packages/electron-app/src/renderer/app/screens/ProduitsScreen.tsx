@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { Card, Button, Combobox, useToast, defaultTokens } from "@maxi-equip/design-system";
+import { Card, Button, Combobox, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle, ArrowUp, ArrowDown, ChevronsUpDown } from "lucide-react";
 import type { ProduitAvecMiniature, StagedImage } from "../../../preload/index.js";
 import { ImagesModal } from "./ImagesModal.js";
@@ -141,6 +141,9 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
   const [principaleStagingId, setPrincipaleStagingId] = useState<string | null>(null);
   const [pickingImages, setPickingImages] = useState(false);
   const [formInstanceKey, setFormInstanceKey] = useState(0);
+  const [showConfirmSave, setShowConfirmSave] = useState(false);
+  const [confirmDeleteProduit, setConfirmDeleteProduit] = useState<ProduitAvecMiniature | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [imagesModalProduit, setImagesModalProduit] = useState<{ id: string; motif: string } | null>(null);
 
   async function refresh() {
@@ -232,19 +235,20 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
     setShowForm(true);
   }
 
-  async function handleDelete(p: ProduitAvecMiniature) {
-    const confirme = window.confirm(
-      `Supprimer le produit "${p.reference}" ? Il n'apparaîtra plus dans le catalogue, mais son historique (ventes, mouvements déjà enregistrés) reste conservé.`
-    );
-    if (!confirme) return;
+  async function handleDemanderSuppression() {
+    if (!confirmDeleteProduit) return;
+    setDeleting(true);
     try {
-      await window.maxiEquip.deleteProduit(p.id, session.userId);
-      showSuccess("Produit supprimé", `"${p.reference}" a été retiré du catalogue.`);
+      await window.maxiEquip.deleteProduit(confirmDeleteProduit.id, session.userId);
+      showSuccess("Produit supprimé", `"${confirmDeleteProduit.reference}" a été retiré du catalogue.`);
+      setConfirmDeleteProduit(null);
       await refresh();
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[produits] suppression impossible :", err);
       showError("Suppression impossible", "Une erreur inattendue s'est produite.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -282,12 +286,16 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
     if (dims) setForm((f) => ({ ...f, largeur: dims.largeur, hauteur: dims.hauteur }));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleOuvrirConfirmationEnregistrement(e: React.FormEvent) {
     e.preventDefault();
     if (!form.type.trim() || !form.largeur || !form.hauteur || !form.reference.trim() || !form.prix) {
       showWarning("Champs requis", "Merci de renseigner le type, la taille (largeur et hauteur), la référence et le prix.");
       return;
     }
+    setShowConfirmSave(true);
+  }
+
+  async function handleConfirmerEnregistrement() {
     setSaving(true);
     try {
       const taille = `${form.largeur} × ${form.hauteur} cm`;
@@ -329,6 +337,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
       resetForm();
       setEditingId(null);
       setShowForm(false);
+      setShowConfirmSave(false);
       await refresh();
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -357,7 +366,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
           <h2 style={{ margin: "0 0 14px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>
             {editingId ? "Modifier le produit" : "Nouveau produit"}
           </h2>
-          <form onSubmit={(e) => void handleSubmit(e)}>
+          <form onSubmit={handleOuvrirConfirmationEnregistrement}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
               <div>
                 <label style={labelStyle}>Type</label>
@@ -369,16 +378,24 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
                   <input
                     style={{ ...inputStyle, textAlign: "center" }}
                     type="number"
+                    min={1}
                     value={form.largeur}
-                    onChange={(e) => setForm((f) => ({ ...f, largeur: e.target.value }))}
+                    onChange={(e) => {
+                      const brut = e.target.value;
+                      setForm((f) => ({ ...f, largeur: brut === "" ? "" : String(Math.max(1, Number(brut))) }));
+                    }}
                     placeholder="60"
                   />
                   <span style={{ color: defaultTokens.colors.textFaint, fontWeight: 700 }}>×</span>
                   <input
                     style={{ ...inputStyle, textAlign: "center" }}
                     type="number"
+                    min={1}
                     value={form.hauteur}
-                    onChange={(e) => setForm((f) => ({ ...f, hauteur: e.target.value }))}
+                    onChange={(e) => {
+                      const brut = e.target.value;
+                      setForm((f) => ({ ...f, hauteur: brut === "" ? "" : String(Math.max(1, Number(brut))) }));
+                    }}
                     placeholder="60"
                   />
                   <span style={{ color: defaultTokens.colors.textSoft, fontSize: 13, flexShrink: 0 }}>cm</span>
@@ -412,11 +429,29 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
               </div>
               <div>
                 <label style={labelStyle}>Prix (FCFA)</label>
-                <input style={inputStyle} type="number" value={form.prix} onChange={(e) => setForm((f) => ({ ...f, prix: e.target.value }))} />
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min={0}
+                  value={form.prix}
+                  onChange={(e) => {
+                    const brut = e.target.value;
+                    setForm((f) => ({ ...f, prix: brut === "" ? "" : String(Math.max(0, Number(brut))) }));
+                  }}
+                />
               </div>
               <div>
                 <label style={labelStyle}>Seuil d'alerte (cartons)</label>
-                <input style={inputStyle} type="number" value={form.seuilAlerte} onChange={(e) => setForm((f) => ({ ...f, seuilAlerte: e.target.value }))} />
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min={0}
+                  value={form.seuilAlerte}
+                  onChange={(e) => {
+                    const brut = e.target.value;
+                    setForm((f) => ({ ...f, seuilAlerte: brut === "" ? "" : String(Math.max(0, Math.trunc(Number(brut)))) }));
+                  }}
+                />
               </div>
             </div>
 
@@ -565,7 +600,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
                     <Button variant="ghost" onClick={() => handleStartEdit(p)} title="Modifier">
                       <Pencil size={15} />
                     </Button>
-                    <Button variant="ghost" onClick={() => void handleDelete(p)} title="Supprimer">
+                    <Button variant="ghost" onClick={() => setConfirmDeleteProduit(p)} title="Supprimer">
                       <Trash2 size={15} color={defaultTokens.colors.danger} />
                     </Button>
                   </td>
@@ -582,6 +617,38 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
           produitMotif={imagesModalProduit.motif}
           onClose={() => setImagesModalProduit(null)}
           onImagesChanged={() => void refresh()}
+        />
+      )}
+
+      {showConfirmSave && (
+        <ConfirmDialog
+          title={editingId ? "Confirmer la modification du produit ?" : "Confirmer la création du produit ?"}
+          resume={[
+            { label: "Référence", value: form.reference.trim() },
+            { label: "Type", value: form.type.trim() },
+            { label: "Taille", value: `${form.largeur} × ${form.hauteur} cm` },
+            { label: "Prix", value: `${Number(form.prix).toLocaleString("fr-FR")} FCFA` },
+            ...(!editingId ? [{ label: "Images", value: String(stagedImages.length) }] : []),
+          ]}
+          onAnnuler={() => setShowConfirmSave(false)}
+          onConfirmer={() => void handleConfirmerEnregistrement()}
+          confirming={saving}
+        />
+      )}
+
+      {confirmDeleteProduit && (
+        <ConfirmDialog
+          title="Supprimer ce produit ?"
+          danger
+          confirmLabel="Confirmer la suppression"
+          resume={[
+            { label: "Référence", value: confirmDeleteProduit.reference },
+            { label: "Type", value: confirmDeleteProduit.type },
+            { label: "Taille", value: confirmDeleteProduit.taille },
+          ]}
+          onAnnuler={() => setConfirmDeleteProduit(null)}
+          onConfirmer={() => void handleDemanderSuppression()}
+          confirming={deleting}
         />
       )}
     </div>

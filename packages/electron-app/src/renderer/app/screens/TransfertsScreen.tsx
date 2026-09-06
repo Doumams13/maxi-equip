@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
+import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { ArrowLeftRight } from "lucide-react";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
+import { ProduitSelector } from "../components/ProduitSelector.js";
 
 const inputStyle: React.CSSProperties = {
   padding: "9px 12px",
@@ -17,6 +18,10 @@ const inputStyle: React.CSSProperties = {
  * sont Akébé et Akanda, jamais SHOP. Réutilise exclusivement
  * StockService.enregistrerTransfert() — aucune règle métier ajoutée ici,
  * seul le domaine décide (§19).
+ *
+ * Corrections supplémentaires : sélecteur de produit avec recherche
+ * (composant commun ProduitSelector), quantité strictement positive, et
+ * double validation avant exécution réelle.
  */
 export function TransfertsScreen() {
   const { showSuccess, showWarning, showError } = useToast();
@@ -27,6 +32,7 @@ export function TransfertsScreen() {
   const [destinationId, setDestinationId] = useState("");
   const [quantite, setQuantite] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const depots = emplacements.filter((e) => !e.estPointDeVente);
 
@@ -38,7 +44,7 @@ export function TransfertsScreen() {
     })();
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleOuvrirConfirmation(e: React.FormEvent) {
     e.preventDefault();
     if (!produitId || !sourceId || !destinationId) {
       showWarning("Champs requis", "Sélectionnez un produit, un dépôt source et un dépôt destination.");
@@ -53,6 +59,11 @@ export function TransfertsScreen() {
       showWarning("Quantité requise", "Saisissez une quantité strictement positive.");
       return;
     }
+    setShowConfirm(true);
+  }
+
+  async function handleConfirmerTransfert() {
+    const q = Number(quantite);
     setSaving(true);
     try {
       const result = await window.maxiEquip.enregistrerTransfert(produitId, sourceId, destinationId, q);
@@ -60,6 +71,7 @@ export function TransfertsScreen() {
         showSuccess("Transfert enregistré", "Le stock a été mis à jour sur les deux emplacements.");
         setProduitId("");
         setQuantite("");
+        setShowConfirm(false);
       } else {
         showError("Opération impossible", result.reason.message);
       }
@@ -72,24 +84,19 @@ export function TransfertsScreen() {
     }
   }
 
+  const produitSelectionne = produits.find((p) => p.id === produitId) ?? null;
+  const source = depots.find((d) => d.id === sourceId) ?? null;
+  const destination = depots.find((d) => d.id === destinationId) ?? null;
+
   return (
     <div style={{ padding: 28 }}>
-      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>
-        Transferts
-      </h1>
+      <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Transferts</h1>
 
       <Card style={{ maxWidth: 560 }}>
-        <form onSubmit={(e) => void handleSubmit(e)} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <form onSubmit={handleOuvrirConfirmation} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Produit</label>
-            <select style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }} value={produitId} onChange={(e) => setProduitId(e.target.value)}>
-              <option value="">Sélectionner…</option>
-              {produits.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.reference} — {p.taille}
-                </option>
-              ))}
-            </select>
+            <ProduitSelector produits={produits} value={produitId} onChange={setProduitId} />
           </div>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
@@ -118,13 +125,36 @@ export function TransfertsScreen() {
           </div>
           <div>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Quantité</label>
-            <input style={{ ...inputStyle, width: 140 }} type="number" value={quantite} onChange={(e) => setQuantite(e.target.value)} />
+            <input
+              style={{ ...inputStyle, width: 140 }}
+              type="number"
+              min={1}
+              value={quantite}
+              onChange={(e) => {
+                const brut = e.target.value;
+                setQuantite(brut === "" ? "" : String(Math.max(1, Math.trunc(Number(brut)))));
+              }}
+            />
           </div>
-          <Button type="submit" loading={saving}>
-            Enregistrer le transfert
-          </Button>
+          <Button type="submit">Effectuer le transfert</Button>
         </form>
       </Card>
+
+      {showConfirm && produitSelectionne && (
+        <ConfirmDialog
+          title="Confirmer le transfert ?"
+          resume={[
+            { label: "Produit", value: `${produitSelectionne.motif} — ${produitSelectionne.taille}` },
+            { label: "Référence", value: produitSelectionne.reference },
+            { label: "De", value: source?.nom ?? "—" },
+            { label: "Vers", value: destination?.nom ?? "—" },
+            { label: "Quantité", value: `${quantite} cartons` },
+          ]}
+          onAnnuler={() => setShowConfirm(false)}
+          onConfirmer={() => void handleConfirmerTransfert()}
+          confirming={saving}
+        />
+      )}
     </div>
   );
 }

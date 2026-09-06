@@ -12,6 +12,7 @@ interface MouvementRow {
   quantite: number;
   date: string;
   facture_id: string | null;
+  utilisateur_id: string | null;
   note: string | null;
 }
 
@@ -30,6 +31,10 @@ export interface MouvementEnrichi {
   factureId: string | null;
   factureNumero: string | null;
   clientNom: string | null;
+  /** Auteur de l'opération — pour la traçabilité Administrateur (§3/§11 de la correction). Peut être null pour les mouvements enregistrés avant cette évolution. */
+  utilisateurId: string | null;
+  utilisateurNom: string | null;
+  utilisateurRole: string | null;
 }
 
 function rowToMouvement(row: MouvementRow): Mouvement {
@@ -43,11 +48,30 @@ function rowToMouvement(row: MouvementRow): Mouvement {
     quantite: row.quantite,
     date: row.date,
     factureId: row.facture_id,
+    utilisateurId: row.utilisateur_id,
     note: row.note,
     createdAt: "",
     updatedAt: "",
   };
 }
+
+const SELECT_ENRICHI = `
+  SELECT
+    m.id, m.type, m.date, m.quantite,
+    p.id as produitId, p.motif as produitMotif, p.reference as produitReference, p.taille as produitTaille,
+    e.nom as emplacementNom,
+    es.nom as emplacementSourceNom,
+    ed.nom as emplacementDestinationNom,
+    f.id as factureId, f.numero as factureNumero, f.client_nom as clientNom,
+    m.utilisateur_id as utilisateurId, u.nom as utilisateurNom, u.role as utilisateurRole
+  FROM mouvements m
+  JOIN produits p ON p.id = m.produit_id
+  LEFT JOIN emplacements e ON e.id = m.emplacement_id
+  LEFT JOIN emplacements es ON es.id = m.emplacement_source_id
+  LEFT JOIN emplacements ed ON ed.id = m.emplacement_destination_id
+  LEFT JOIN factures f ON f.id = m.facture_id
+  LEFT JOIN utilisateurs u ON u.id = m.utilisateur_id
+`;
 
 export class MouvementRepository {
   constructor(private readonly db: Database.Database) {}
@@ -68,8 +92,8 @@ export class MouvementRepository {
     this.db
       .prepare(
         `INSERT INTO mouvements
-         (id, type, produit_id, emplacement_id, emplacement_source_id, emplacement_destination_id, quantite, date, facture_id, note, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, type, produit_id, emplacement_id, emplacement_source_id, emplacement_destination_id, quantite, date, facture_id, utilisateur_id, note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -81,6 +105,7 @@ export class MouvementRepository {
         input.quantite,
         input.date,
         input.factureId,
+        input.utilisateurId,
         input.note,
         now,
         now
@@ -88,8 +113,15 @@ export class MouvementRepository {
     return id;
   }
 
-  /** Somme des quantités pour un type de mouvement, toutes périodes — dashboard (§3/§13 de la correction). */
-  sommeQuantiteParType(type: Mouvement["type"]): number {
+  /** Somme des quantités pour un type de mouvement — globale si utilisateurId omis, personnelle sinon (§9/§13 de la correction : le filtrage doit être réel, pas visuel). */
+  sommeQuantiteParType(type: Mouvement["type"], utilisateurId?: string): number {
+    if (utilisateurId) {
+      return (
+        this.db
+          .prepare("SELECT COALESCE(SUM(quantite), 0) as total FROM mouvements WHERE type = ? AND utilisateur_id = ?")
+          .get(type, utilisateurId) as { total: number }
+      ).total;
+    }
     return (
       this.db.prepare("SELECT COALESCE(SUM(quantite), 0) as total FROM mouvements WHERE type = ?").get(type) as { total: number }
     ).total;
@@ -122,32 +154,32 @@ export class MouvementRepository {
   }
 
   /**
-   * Historique enrichi — jointure produit/emplacement(s)/facture, pour la
-   * recherche globale et l'affichage complet de l'Historique (§14-§17 de
-   * la correction). SHOP n'apparaît jamais comme emplacement source/
-   * destination d'un mouvement de stock, conformément à la décision
-   * métier "SHOP n'a pas de stock" — cette requête ne fait que refléter
-   * les données réellement enregistrées, elle n'exclut rien elle-même.
+   * Historique enrichi — jointure produit/emplacement(s)/facture/auteur,
+   * pour la recherche globale et l'affichage complet de l'Historique
+   * (§14-§17 d'une correction précédente). SHOP n'apparaît jamais comme
+   * emplacement source/destination d'un mouvement de stock, conformément
+   * à la décision métier "SHOP n'a pas de stock".
    */
   listEnrichi(limit = 300): MouvementEnrichi[] {
-    return this.db
-      .prepare(
-        `SELECT
-           m.id, m.type, m.date, m.quantite,
-           p.id as produitId, p.motif as produitMotif, p.reference as produitReference, p.taille as produitTaille,
-           e.nom as emplacementNom,
-           es.nom as emplacementSourceNom,
-           ed.nom as emplacementDestinationNom,
-           f.id as factureId, f.numero as factureNumero, f.client_nom as clientNom
-         FROM mouvements m
-         JOIN produits p ON p.id = m.produit_id
-         LEFT JOIN emplacements e ON e.id = m.emplacement_id
-         LEFT JOIN emplacements es ON es.id = m.emplacement_source_id
-         LEFT JOIN emplacements ed ON ed.id = m.emplacement_destination_id
-         LEFT JOIN factures f ON f.id = m.facture_id
-         ORDER BY m.date DESC
-         LIMIT ?`
-      )
-      .all(limit) as MouvementEnrichi[];
+    return this.db.prepare(`${SELECT_ENRICHI} ORDER BY m.date DESC LIMIT ?`).all(limit) as MouvementEnrichi[];
+  }
+
+  /**
+   * Activité récente GLOBALE avec auteur — Administrateur uniquement
+   * (§3 de la correction : "l'Administrateur doit pouvoir suivre ce que
+   * les Gérants font ou ont fait").
+   */
+  activiteRecenteGlobale(limit = 8): MouvementEnrichi[] {
+    return this.db.prepare(`${SELECT_ENRICHI} ORDER BY m.date DESC LIMIT ?`).all(limit) as MouvementEnrichi[];
+  }
+
+  /**
+   * Activité récente PERSONNELLE — filtrée réellement en base sur
+   * l'auteur (§8/§9 de la correction : "ne pas récupérer toutes les
+   * données puis masquer visuellement" — le filtre est dans la requête
+   * SQL elle-même, jamais après coup côté Renderer).
+   */
+  activiteRecentePersonnelle(utilisateurId: string, limit = 8): MouvementEnrichi[] {
+    return this.db.prepare(`${SELECT_ENRICHI} WHERE m.utilisateur_id = ? ORDER BY m.date DESC LIMIT ?`).all(utilisateurId, limit) as MouvementEnrichi[];
   }
 }

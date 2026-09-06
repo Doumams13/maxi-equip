@@ -14,7 +14,7 @@ export class StockService {
     private readonly mouvementRepository: MouvementRepository
   ) {}
 
-  enregistrerEntree(produitId: string, emplacementId: string, quantite: number): void {
+  enregistrerEntree(produitId: string, emplacementId: string, quantite: number, utilisateurId: string): void {
     const delta = domainStock.applyEntree(emplacementId, quantite); // lève une erreur domaine si quantité invalide
     this.stockRepository.applyDelta({ ...delta, produitId });
     this.mouvementRepository.create({
@@ -26,11 +26,12 @@ export class StockService {
       quantite,
       date: new Date().toISOString(),
       factureId: null,
+      utilisateurId,
       note: null,
     });
   }
 
-  enregistrerTransfert(produitId: string, sourceId: string, destinationId: string, quantite: number): void {
+  enregistrerTransfert(produitId: string, sourceId: string, destinationId: string, quantite: number, utilisateurId: string): void {
     const disponible = this.stockRepository.getQuantite(produitId, sourceId);
     const [deltaSource, deltaDestination] = domainStock.applyTransfert(sourceId, destinationId, disponible, quantite);
     this.stockRepository.applyDelta({ ...deltaSource, produitId });
@@ -44,6 +45,7 @@ export class StockService {
       quantite,
       date: new Date().toISOString(),
       factureId: null,
+      utilisateurId,
       note: null,
     });
   }

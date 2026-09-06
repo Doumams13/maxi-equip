@@ -13,6 +13,25 @@ export function runMigrations(db: Database.Database): void {
   addEstPrincipaleColumnIfMissing(db);
   fixReferenceUniqueConstraint(db);
   addLargeurHauteurColumnsIfMissing(db);
+  addUtilisateurIdToMouvementsIfMissing(db);
+}
+
+/**
+ * Correction "logique des dashboards Administrateur/Gérant" : ajoute la
+ * colonne `utilisateur_id` à la table `mouvements` sur une base créée
+ * avant cette évolution. Structure durable, pas une solution temporaire
+ * (demande explicite) : chaque futur mouvement enregistre son auteur ;
+ * les mouvements déjà existants restent avec `utilisateur_id = NULL`
+ * (honnête — leur auteur réel n'a jamais été enregistré, impossible de
+ * le reconstituer rétroactivement sans inventer une donnée).
+ */
+function addUtilisateurIdToMouvementsIfMissing(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(mouvements)").all() as { name: string }[];
+  const hasColumn = columns.some((c) => c.name === "utilisateur_id");
+  if (!hasColumn) {
+    db.exec("ALTER TABLE mouvements ADD COLUMN utilisateur_id TEXT REFERENCES utilisateurs(id)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_mouvements_utilisateur ON mouvements (utilisateur_id)");
+  }
 }
 
 /**

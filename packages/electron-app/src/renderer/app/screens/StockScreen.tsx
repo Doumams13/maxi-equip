@@ -18,7 +18,7 @@ import { ProduitSelector } from "../components/ProduitSelector.js";
  * calcul du delta viennent de packages/domain, via le canal IPC
  * stock:entree (§19 — le domaine reste la seule source de vérité).
  */
-export function StockScreen() {
+export function StockScreen({ session }: { session: { userId: string } }) {
   const { showSuccess, showWarning, showError } = useToast();
   const [emplacements, setEmplacements] = useState<Emplacement[]>([]);
   const [produits, setProduits] = useState<Produit[]>([]);
@@ -71,7 +71,7 @@ export function StockScreen() {
     const quantite = Number(entreeQuantite);
     setSaving(true);
     try {
-      const result = await window.maxiEquip.enregistrerEntree(entreeProduitId, emplacementId, quantite);
+      const result = await window.maxiEquip.enregistrerEntree(entreeProduitId, emplacementId, quantite, session.userId);
       if (result.success) {
         showSuccess("Entrée enregistrée", "Le stock a été mis à jour avec succès.");
         setEntreeProduitId("");

@@ -23,7 +23,7 @@ const inputStyle: React.CSSProperties = {
  * (composant commun ProduitSelector), quantité strictement positive, et
  * double validation avant exécution réelle.
  */
-export function TransfertsScreen() {
+export function TransfertsScreen({ session }: { session: { userId: string } }) {
   const { showSuccess, showWarning, showError } = useToast();
   const [produits, setProduits] = useState<Produit[]>([]);
   const [emplacements, setEmplacements] = useState<Emplacement[]>([]);
@@ -66,7 +66,7 @@ export function TransfertsScreen() {
     const q = Number(quantite);
     setSaving(true);
     try {
-      const result = await window.maxiEquip.enregistrerTransfert(produitId, sourceId, destinationId, q);
+      const result = await window.maxiEquip.enregistrerTransfert(produitId, sourceId, destinationId, q, session.userId);
       if (result.success) {
         showSuccess("Transfert enregistré", "Le stock a été mis à jour sur les deux emplacements.");
         setProduitId("");

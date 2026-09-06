@@ -100,18 +100,18 @@ export function registerMetierIpcHandlers(
   // --- Stock ---
   ipcMain.handle("stock:byEmplacement", (_e, emplacementId: string) => stockRepository.listByEmplacement(emplacementId));
 
-  ipcMain.handle("stock:entree", (_e, produitId: string, emplacementId: string, quantite: number) => {
+  ipcMain.handle("stock:entree", (_e, produitId: string, emplacementId: string, quantite: number, utilisateurId: string) => {
     try {
-      stockService.enregistrerEntree(produitId, emplacementId, quantite);
+      stockService.enregistrerEntree(produitId, emplacementId, quantite, utilisateurId);
       return { success: true };
     } catch (err) {
       return { success: false, reason: mapStockError(err) };
     }
   });
 
-  ipcMain.handle("stock:transfert", (_e, produitId: string, sourceId: string, destinationId: string, quantite: number) => {
+  ipcMain.handle("stock:transfert", (_e, produitId: string, sourceId: string, destinationId: string, quantite: number, utilisateurId: string) => {
     try {
-      stockService.enregistrerTransfert(produitId, sourceId, destinationId, quantite);
+      stockService.enregistrerTransfert(produitId, sourceId, destinationId, quantite, utilisateurId);
       return { success: true };
     } catch (err) {
       return { success: false, reason: mapStockError(err) };
@@ -160,30 +160,44 @@ export function registerMetierIpcHandlers(
     });
 
     return {
-      // Communs
-      mouvementsRecents: mouvementRepository.listRecent(5),
       // Administrateur — vue globale (ligne 1)
       stockTousDepots: stockDepots,
       caTotal: factureRepository.sommeTotal(),
       produitsSousSeuilGlobal: produitRepository.countSousSeuilDepots(depotIds),
       totalFactures: factureRepository.count(),
       totalProduits: produitRepository.count(),
-      // Administrateur — ligne 2
+      // Administrateur — ligne 2 (données globales)
       totalEntrees: mouvementRepository.sommeQuantiteParType("entree"),
       totalSorties: mouvementRepository.sommeQuantiteParType("sortie"),
       // Promotions : fonctionnalité non développée (Phase 4) — 0 réel et
       // honnête, pas une donnée inventée pour remplir la case (§4/§24).
       promotionsActives: 0,
-      // Administrateur — graphique + tableaux
+      // Administrateur — graphique + tableaux (globaux)
       serieEntreesSorties: mouvementRepository.serieEntreesSortiesSeptJours(),
       stockParEmplacement,
       topProduitsVendus: factureRepository.topProduitsVendus(5),
       produitsSousSeuilListe: produitRepository.listSousSeuilDepots(depotIds).slice(0, 6),
-      // Gérant — vue opérationnelle (dépôts, pas de "stock SHOP")
+      // Administrateur — activité de TOUTE l'entreprise, avec auteur
+      // (§3/§11 de la correction : traçabilité — qui a fait quoi).
+      activiteRecenteGlobale: mouvementRepository.activiteRecenteGlobale(8),
+
+      // Gérant — stock GLOBAL consultable (décision confirmée §10 : le
+      // Gérant peut voir Akébé, Akanda et le total, comme l'Administrateur).
       stockDepots,
-      ventesAujourdhui: facturesAujourdhui.reduce((s, f) => s + f.total, 0),
+      stockParEmplacementPourGerant: stockParEmplacement,
+
+      // Gérant — données STRICTEMENT PERSONNELLES, filtrées réellement en
+      // base sur utilisateurId (§5/§9 de la correction), jamais après
+      // coup côté Renderer. Labels sans ambiguïté ("mes"/"mon"), plus de
+      // métrique globale ambiguë affichée à côté d'une métrique
+      // personnelle du même type (§7 : supprime la confusion "Ventes du
+      // jour" 1 115 000 / "Mes ventes aujourd'hui" 0).
       mesVentesAujourdhui: facturesAujourdhui.filter((f) => f.vendeurUtilisateurId === userId).reduce((s, f) => s + f.total, 0),
+      monChiffreAffaires: factures.filter((f) => f.vendeurUtilisateurId === userId).reduce((s, f) => s + f.total, 0),
       mesFacturesAujourdhuiCount: facturesAujourdhui.filter((f) => f.vendeurUtilisateurId === userId).length,
+      mesEntrees: mouvementRepository.sommeQuantiteParType("entree", userId),
+      mesSorties: mouvementRepository.sommeQuantiteParType("sortie", userId),
+      activiteRecentePersonnelle: mouvementRepository.activiteRecentePersonnelle(userId, 8),
     };
   });
 }

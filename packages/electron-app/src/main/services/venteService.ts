@@ -205,6 +205,7 @@ export class VenteService {
           quantite: m.quantite,
           date: now,
           factureId,
+          utilisateurId: input.vendeurUtilisateurId,
           note: null,
         });
       }

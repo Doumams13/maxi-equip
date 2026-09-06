@@ -102,6 +102,18 @@ export class VenteService {
         if (!produit) {
           throw new VenteValidationError(`Produit introuvable (${ligne.produitId}).`);
         }
+        // Ferme un trou de validation identifié : une quantité totale
+        // négative ou nulle, combinée à une répartition par dépôt vide,
+        // devenait directement une "part externe" sans jamais passer par
+        // une vérification de disponibilité (§7/§8 de la correction —
+        // "empêcher qu'une quantité négative puisse entrer dans la
+        // logique métier par un autre chemin").
+        if (!Number.isFinite(ligne.quantite) || ligne.quantite <= 0) {
+          throw new VenteValidationError(`Quantité invalide pour "${produit.motif} ${produit.taille}" (reçu : ${ligne.quantite}).`);
+        }
+        if (!Number.isFinite(ligne.prixUnitaire) || ligne.prixUnitaire <= 0) {
+          throw new VenteValidationError(`Prix unitaire invalide pour "${produit.motif} ${produit.taille}" (reçu : ${ligne.prixUnitaire}).`);
+        }
 
         const allocationsValides = ligne.allocationsDepots.filter((a) => a.quantite > 0);
         const quantiteAllouee = allocationsValides.reduce((s, a) => s + a.quantite, 0);

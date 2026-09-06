@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, defaultTokens } from "@maxi-equip/design-system";
 import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight, Search } from "lucide-react";
+import { MOUVEMENT_LABELS as TYPE_LABELS, MOUVEMENT_COLORS as TYPE_COLORS } from "../mouvementLabels.js";
 
 interface MouvementEnrichi {
   id: string;
@@ -23,13 +24,6 @@ type Periode = "jour" | "semaine" | "mois" | "personnalise" | "tout";
 type ColonneTriable = "date" | "type" | "emplacement" | "produit" | "quantite" | "facture";
 type Direction = "asc" | "desc";
 
-/** Libellé utilisateur — "sortie" devient "Vente" dans l'interface (correction §4), la valeur technique reste inchangée. */
-const TYPE_LABELS: Record<string, string> = { entree: "Entrée", sortie: "Vente", transfert: "Transfert" };
-const TYPE_COLORS: Record<string, string> = {
-  entree: defaultTokens.colors.success,
-  sortie: defaultTokens.colors.danger,
-  transfert: defaultTokens.colors.info,
-};
 const TYPE_ICONS: Record<string, typeof ArrowDownToLine> = { entree: ArrowDownToLine, sortie: ArrowUpFromLine, transfert: ArrowLeftRight };
 
 function debutPeriode(periode: Periode): Date | null {

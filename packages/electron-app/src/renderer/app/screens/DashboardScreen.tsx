@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Mouvement } from "@maxi-equip/shared-types";
+import { MOUVEMENT_LABELS } from "../mouvementLabels.js";
 
 interface Summary {
   mouvementsRecents: Mouvement[];
@@ -270,7 +271,7 @@ function DashboardVendeur({ nom, summary }: { nom: string; summary: Summary }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {summary.mouvementsRecents.map((m) => (
               <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 10px", borderRadius: defaultTokens.radius.sm, background: defaultTokens.colors.surfaceAlt }}>
-                <span>{{ entree: "Entrée", sortie: "Sortie", transfert: "Transfert" }[m.type] ?? m.type}</span>
+                <span>{MOUVEMENT_LABELS[m.type] ?? m.type}</span>
                 <span style={{ color: defaultTokens.colors.textSoft }}>{new Date(m.date).toLocaleString("fr-FR")}</span>
               </div>
             ))}

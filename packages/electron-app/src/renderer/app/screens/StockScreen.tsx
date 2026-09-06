@@ -154,6 +154,7 @@ export function StockScreen() {
         {produits.length === 0 ? (
           <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Aucun produit au catalogue.</p>
         ) : (
+          <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead>
               <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
@@ -179,6 +180,7 @@ export function StockScreen() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
 

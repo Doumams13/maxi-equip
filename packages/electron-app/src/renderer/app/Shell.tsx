@@ -70,7 +70,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px 20px" }}>
           <Logo logoUrl={logoUrl} width={30} height={22} />
-          <span style={{ color: "#fff", fontFamily: defaultTokens.typography.display, fontWeight: 800, fontSize: 15 }}>
+          <span style={{ color: "#fff", fontFamily: defaultTokens.typography.display, fontWeight: 800, fontSize: defaultTokens.fluidType.h2 }}>
             MAXI EQUIP
           </span>
         </div>
@@ -94,7 +94,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
                     border: "none",
                     background: active ? defaultTokens.colors.sidebarActive : "transparent",
                     color: active ? "#fff" : "rgba(255,255,255,0.75)",
-                    fontSize: 13.5,
+                    fontSize: defaultTokens.fluidType.bodySmall,
                     fontWeight: active ? 700 : 500,
                     textAlign: "left",
                     cursor: "pointer",
@@ -109,8 +109,8 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
 
         <div style={{ borderTop: `1px solid ${defaultTokens.colors.sidebarBorder}`, paddingTop: 12, marginTop: 12 }}>
           <div style={{ padding: "0 8px 10px", color: "rgba(255,255,255,0.9)" }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>{session.nom}</div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", textTransform: "capitalize" }}>{session.role}</div>
+            <div style={{ fontSize: defaultTokens.fluidType.bodySmall, fontWeight: 700 }}>{session.nom}</div>
+            <div style={{ fontSize: defaultTokens.fluidType.caption, color: "rgba(255,255,255,0.55)", textTransform: "capitalize" }}>{session.role}</div>
           </div>
           <Button variant="ghost" loading={logoutLoading} onClick={() => void handleLogout()} style={{ width: "100%", color: "rgba(255,255,255,0.75)" }}>
             <LogOut size={15} />
@@ -120,7 +120,17 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
       </aside>
 
       <main style={{ flex: 1, minWidth: 0, height: "100%", overflowY: "auto", background: defaultTokens.colors.bg }}>
-        {children}
+        {/*
+          Conteneur de largeur maximale — correction "adaptation
+          responsive" : sans lui, un écran de contenu s'étire jusqu'au
+          bord de la fenêtre quel qu'en soit la largeur, ce qui produit de
+          grands espaces vides inutiles et des tableaux disproportionnés
+          sur un grand moniteur ou une télévision. Centré, plafonné à
+          layout.contentMaxWidth — sous cette largeur (dont 1280×720, la
+          résolution de référence), aucun effet, la mise en page reste
+          identique à avant cette correction.
+        */}
+        <div style={{ maxWidth: defaultTokens.layout.contentMaxWidth, margin: "0 auto" }}>{children}</div>
       </main>
     </div>
   );

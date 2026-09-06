@@ -85,7 +85,7 @@ export function ImagesModal({ produitId, produitMotif, onClose, onImagesChanged 
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <Card elevated style={{ width: 560, maxHeight: "80vh", overflowY: "auto", boxSizing: "border-box" }}>
+      <Card elevated style={{ width: "min(560px, 92vw)", maxHeight: "80vh", overflowY: "auto", boxSizing: "border-box" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ margin: 0, fontFamily: defaultTokens.typography.display, fontSize: 17 }}>Images — {produitMotif}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }} aria-label="Fermer">

@@ -53,6 +53,35 @@ export interface TypographyTokens {
   mono: string;
 }
 
+/**
+ * Échelle typographique fluide — Correction "adaptation responsive"
+ * (novembre 2026). Chaque taille utilise `clamp(min, préféré, max)` :
+ * jamais trop petite sur un grand écran (borne basse toujours respectée
+ * quelle que soit la fenêtre), jamais gigantesque en plein écran/4K
+ * (borne haute plafonnée). La valeur "préférée" varie légèrement avec la
+ * largeur de la fenêtre (`vw`), ce qui donne l'adaptation elle-même.
+ *
+ * 1280×720 reste la résolution de référence : à cette largeur, chaque
+ * taille correspond exactement aux valeurs déjà utilisées dans
+ * l'application avant cette correction (aucun changement visuel à la
+ * taille de référence, uniquement une meilleure adaptation au-delà).
+ */
+export interface FluidTypeScale {
+  h1: string;
+  h2: string;
+  body: string;
+  bodySmall: string;
+  label: string;
+  caption: string;
+}
+
+export interface LayoutTokens {
+  /** Largeur maximale du contenu principal — évite que les écrans s'étirent démesurément sur un très grand moniteur ou une télévision. */
+  contentMaxWidth: number;
+  /** Largeur de la sidebar — fixe (Corrections : "ne pas la faire devenir disproportionnée sur les grands écrans"). */
+  sidebarWidth: number;
+}
+
 export interface SpacingTokens {
   xs: number;
   sm: number;
@@ -76,6 +105,8 @@ export interface ShadowTokens {
 export interface DesignTokens {
   colors: ColorTokens;
   typography: TypographyTokens;
+  fluidType: FluidTypeScale;
+  layout: LayoutTokens;
   spacing: SpacingTokens;
   radius: RadiusTokens;
   shadows: ShadowTokens;
@@ -115,6 +146,18 @@ export const defaultTokens: DesignTokens = {
     display: "'Manrope', 'Inter', sans-serif",
     body: "'Inter', sans-serif",
     mono: "'IBM Plex Mono', monospace",
+  },
+  fluidType: {
+    h1: "clamp(19px, 1vw + 14px, 27px)",
+    h2: "clamp(14px, 0.35vw + 12.5px, 17px)",
+    body: "clamp(12.5px, 0.15vw + 12px, 14.5px)",
+    bodySmall: "clamp(11.5px, 0.12vw + 11px, 13px)",
+    label: "clamp(11px, 0.1vw + 10.5px, 12.5px)",
+    caption: "clamp(10px, 0.08vw + 9.7px, 11.5px)",
+  },
+  layout: {
+    contentMaxWidth: 1600,
+    sidebarWidth: 220,
   },
   spacing: { xs: 4, sm: 8, md: 16, lg: 24, xl: 40 },
   radius: { sm: 6, md: 10, lg: 16, pill: 999 },

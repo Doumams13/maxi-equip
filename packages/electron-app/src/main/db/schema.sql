@@ -91,7 +91,6 @@ CREATE TABLE IF NOT EXISTS mouvements (
 );
 CREATE INDEX IF NOT EXISTS idx_mouvements_produit ON mouvements (produit_id);
 CREATE INDEX IF NOT EXISTS idx_mouvements_date ON mouvements (date);
-CREATE INDEX IF NOT EXISTS idx_mouvements_utilisateur ON mouvements (utilisateur_id);
 
 -- ==========================================================
 -- Facturation (facture client / relevé interne strictement séparés)

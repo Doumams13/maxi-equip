@@ -154,4 +154,25 @@ export class FactureRepository {
       insertLigne.run(randomUUID(), id, ligne.motif, ligne.taille, ligne.quantite, ligne.fournisseur, ligne.prixAchat, ligne.prixVente);
     }
   }
+
+  /**
+   * Factures avec le nom/rôle du vendeur résolu — Consolidation
+   * Administrateur/Gérant §11 : nécessaire pour permettre à
+   * l'Administrateur de voir "qui a vendu", information ensuite
+   * anonymisée pour le Gérant au niveau IPC (jamais ici — ce dépôt ne
+   * fait que fournir la donnée brute).
+   */
+  listAvecVendeur(limit = 50): (Facture & { vendeurNom: string | null; vendeurRole: string | null })[] {
+    const factures = this.list(limit);
+    if (factures.length === 0) return [];
+    const placeholders = factures.map(() => "?").join(",");
+    const utilisateurs = this.db
+      .prepare(`SELECT id, nom, role FROM utilisateurs WHERE id IN (${placeholders})`)
+      .all(...factures.map((f) => f.vendeurUtilisateurId)) as { id: string; nom: string; role: string }[];
+    const parId = new Map(utilisateurs.map((u) => [u.id, u]));
+    return factures.map((f) => {
+      const u = parId.get(f.vendeurUtilisateurId);
+      return { ...f, vendeurNom: u?.nom ?? null, vendeurRole: u?.role ?? null };
+    });
+  }
 }

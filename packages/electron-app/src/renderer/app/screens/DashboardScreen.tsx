@@ -12,10 +12,12 @@ import {
   CheckCircle2,
   ImageOff,
   User,
+  ChevronRight,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { MOUVEMENT_LABELS } from "../mouvementLabels.js";
 import type { MouvementEnrichi } from "../../../preload/index.js";
+import type { CibleOperation } from "../AppRoot.js";
 
 interface Summary {
   stockTousDepots: number;
@@ -30,7 +32,7 @@ interface Summary {
   stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
   topProduitsVendus: { label: string; quantite: number }[];
   produitsSousSeuilListe: { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
-  activiteRecenteGlobale: MouvementEnrichi[];
+  activiteRecente: MouvementEnrichi[];
   stockDepots: number;
   stockParEmplacementPourGerant: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
   mesVentesAujourdhui: number;
@@ -38,7 +40,6 @@ interface Summary {
   mesFacturesAujourdhuiCount: number;
   mesEntrees: number;
   mesSorties: number;
-  activiteRecentePersonnelle: MouvementEnrichi[];
 }
 
 function KpiCard({
@@ -139,36 +140,48 @@ function StockParEmplacement({ lignes }: { lignes: Summary["stockParEmplacement"
   );
 }
 
-function LigneActivite({ m, avecAuteur }: { m: MouvementEnrichi; avecAuteur: boolean }) {
+function LigneActivite({ m, userId, onNaviguer }: { m: MouvementEnrichi; userId: string; onNaviguer: (c: CibleOperation) => void }) {
+  const cible: CibleOperation = m.factureId ? { type: "facture", id: m.factureId } : { type: "mouvement", id: m.id };
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "9px 10px", borderRadius: defaultTokens.radius.sm, background: defaultTokens.colors.surfaceAlt }}>
+    <button
+      onClick={() => onNaviguer(cible)}
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        width: "100%",
+        textAlign: "left",
+        fontSize: 13,
+        padding: "9px 10px",
+        borderRadius: defaultTokens.radius.sm,
+        background: defaultTokens.colors.surfaceAlt,
+        border: "none",
+        cursor: "pointer",
+        font: "inherit",
+      }}
+    >
       <div>
         <span style={{ fontWeight: 700, color: defaultTokens.colors.text }}>{MOUVEMENT_LABELS[m.type] ?? m.type}</span>
         <span style={{ color: defaultTokens.colors.textSoft }}>
           {" "}
           — {m.produitMotif} ({m.produitTaille})
         </span>
-        {avecAuteur && (
+        {(m.utilisateurId || m.utilisateurNom) && (
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2, fontSize: 11.5, color: defaultTokens.colors.textFaint }}>
             <User size={11} />
-            {m.utilisateurNom ? (
-              <span>
-                Effectué par : {m.utilisateurNom} ({m.utilisateurRole})
-              </span>
-            ) : (
-              <span>Auteur non enregistré</span>
-            )}
+            <span>{m.utilisateurId === userId ? "Vous" : m.utilisateurNom ? `${m.utilisateurNom} (${m.utilisateurRole})` : "Auteur non enregistré"}</span>
           </div>
         )}
       </div>
-      <span style={{ color: defaultTokens.colors.textSoft, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0, marginLeft: 12 }}>
-        {new Date(m.date).toLocaleString("fr-FR")}
-      </span>
-    </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 12 }}>
+        <span style={{ color: defaultTokens.colors.textSoft, fontSize: 12, whiteSpace: "nowrap" }}>{new Date(m.date).toLocaleString("fr-FR")}</span>
+        <ChevronRight size={14} color={defaultTokens.colors.textFaint} />
+      </div>
+    </button>
   );
 }
 
-function DashboardAdmin({ summary }: { summary: Summary }) {
+function DashboardAdmin({ summary, userId, onNaviguer }: { summary: Summary; userId: string; onNaviguer: (c: CibleOperation) => void }) {
   return (
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0, marginBottom: 2 }}>
@@ -264,12 +277,12 @@ function DashboardAdmin({ summary }: { summary: Summary }) {
 
       <Card>
         <TitreBloc>Activité récente de l'entreprise</TitreBloc>
-        {summary.activiteRecenteGlobale.length === 0 ? (
+        {summary.activiteRecente.length === 0 ? (
           <p style={{ color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Aucune opération enregistrée pour l'instant.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {summary.activiteRecenteGlobale.map((m) => (
-              <LigneActivite key={m.id} m={m} avecAuteur />
+            {summary.activiteRecente.map((m) => (
+              <LigneActivite key={m.id} m={m} userId={userId} onNaviguer={onNaviguer} />
             ))}
           </div>
         )}
@@ -278,7 +291,7 @@ function DashboardAdmin({ summary }: { summary: Summary }) {
   );
 }
 
-function DashboardVendeur({ nom, summary }: { nom: string; summary: Summary }) {
+function DashboardVendeur({ nom, summary, userId, onNaviguer }: { nom: string; summary: Summary; userId: string; onNaviguer: (c: CibleOperation) => void }) {
   return (
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Tableau de bord</h1>
@@ -300,14 +313,17 @@ function DashboardVendeur({ nom, summary }: { nom: string; summary: Summary }) {
         <KpiCard icon={ArrowUpFromLine} label="Mes sorties enregistrées" value={summary.mesSorties.toLocaleString("fr-FR")} tone="warning" />
       </div>
 
+      <TitreBloc>Activité récente de l'entreprise</TitreBloc>
       <Card>
-        <TitreBloc>Mon activité récente</TitreBloc>
-        {summary.activiteRecentePersonnelle.length === 0 ? (
-          <p style={{ color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Vous n'avez enregistré aucune opération pour l'instant.</p>
+        <p style={{ margin: "0 0 12px", fontSize: 12, color: defaultTokens.colors.textFaint }}>
+          Vous voyez toutes les opérations ; l'identité des autres utilisateurs reste masquée (vos propres opérations affichent « Vous »).
+        </p>
+        {summary.activiteRecente.length === 0 ? (
+          <p style={{ color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Aucune opération enregistrée pour l'instant.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {summary.activiteRecentePersonnelle.map((m) => (
-              <LigneActivite key={m.id} m={m} avecAuteur={false} />
+            {summary.activiteRecente.map((m) => (
+              <LigneActivite key={m.id} m={m} userId={userId} onNaviguer={onNaviguer} />
             ))}
           </div>
         )}
@@ -324,21 +340,24 @@ function DashboardVendeur({ nom, summary }: { nom: string; summary: Summary }) {
 
 export interface DashboardScreenProps {
   session: { userId: string; nom: string; role: string };
+  onNaviguerVersOperation: (cible: CibleOperation) => void;
 }
 
-export function DashboardScreen({ session }: DashboardScreenProps) {
+export function DashboardScreen({ session, onNaviguerVersOperation }: DashboardScreenProps) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       try {
-        setSummary(await window.maxiEquip.getDashboardSummary(session.userId));
+        const result = await window.maxiEquip.getDashboardSummary();
+        if (!result) throw new Error("Session expirée.");
+        setSummary(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
     })();
-  }, [session.userId]);
+  }, []);
 
   if (error) {
     return (
@@ -352,5 +371,9 @@ export function DashboardScreen({ session }: DashboardScreenProps) {
 
   if (!summary) return null;
 
-  return session.role === "administrateur" ? <DashboardAdmin summary={summary} /> : <DashboardVendeur nom={session.nom} summary={summary} />;
+  return session.role === "administrateur" ? (
+    <DashboardAdmin summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} />
+  ) : (
+    <DashboardVendeur nom={session.nom} summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} />
+  );
 }

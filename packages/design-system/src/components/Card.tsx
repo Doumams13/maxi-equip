@@ -1,7 +1,7 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, ReactNode, HTMLAttributes } from "react";
 import { defaultTokens } from "../tokens.js";
 
-export interface CardProps {
+export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, "style"> {
   children: ReactNode;
   padding?: number;
   /** Ajoute une ombre douce (carte "élevée") — utilisé notamment pour la carte de connexion. */
@@ -9,9 +9,10 @@ export interface CardProps {
   style?: CSSProperties;
 }
 
-export function Card({ children, padding = 20, elevated = false, style }: CardProps) {
+export function Card({ children, padding = 20, elevated = false, style, ...rest }: CardProps) {
   return (
     <div
+      {...rest}
       style={{
         background: defaultTokens.colors.surface,
         border: `1px solid ${defaultTokens.colors.borderSoft}`,

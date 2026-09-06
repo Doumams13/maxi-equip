@@ -84,12 +84,14 @@ CREATE TABLE IF NOT EXISTS mouvements (
   quantite                    INTEGER NOT NULL CHECK (quantite > 0),
   date                        TEXT NOT NULL,
   facture_id                  TEXT REFERENCES factures (id),
+  utilisateur_id              TEXT REFERENCES utilisateurs (id),
   note                        TEXT,
   created_at                  TEXT NOT NULL,
   updated_at                  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_mouvements_produit ON mouvements (produit_id);
 CREATE INDEX IF NOT EXISTS idx_mouvements_date ON mouvements (date);
+CREATE INDEX IF NOT EXISTS idx_mouvements_utilisateur ON mouvements (utilisateur_id);
 
 -- ==========================================================
 -- Facturation (facture client / relevé interne strictement séparés)

@@ -64,6 +64,26 @@ export interface StagedImage {
   dataUrl: string;
 }
 
+export interface MouvementEnrichi {
+  id: string;
+  type: string;
+  date: string;
+  quantite: number;
+  produitId: string;
+  produitMotif: string;
+  produitReference: string;
+  produitTaille: string;
+  emplacementNom: string | null;
+  emplacementSourceNom: string | null;
+  emplacementDestinationNom: string | null;
+  factureId: string | null;
+  factureNumero: string | null;
+  clientNom: string | null;
+  utilisateurId: string | null;
+  utilisateurNom: string | null;
+  utilisateurRole: string | null;
+}
+
 const maxiEquipApi = {
   ping: (): Promise<{ ok: boolean; message: string; timestamp: string }> => ipcRenderer.invoke("app:ping"),
   dbHealthCheck: (): Promise<{ tableCount: number; tables: string[] }> =>
@@ -101,39 +121,24 @@ const maxiEquipApi = {
 
   getStockByEmplacement: (emplacementId: string): Promise<{ produitId: string; quantite: number }[]> =>
     ipcRenderer.invoke("stock:byEmplacement", emplacementId),
-  enregistrerEntree: (produitId: string, emplacementId: string, quantite: number): Promise<StockOperationResult> =>
-    ipcRenderer.invoke("stock:entree", produitId, emplacementId, quantite),
+  enregistrerEntree: (produitId: string, emplacementId: string, quantite: number, utilisateurId: string): Promise<StockOperationResult> =>
+    ipcRenderer.invoke("stock:entree", produitId, emplacementId, quantite, utilisateurId),
   enregistrerTransfert: (
     produitId: string,
     sourceId: string,
     destinationId: string,
-    quantite: number
-  ): Promise<StockOperationResult> => ipcRenderer.invoke("stock:transfert", produitId, sourceId, destinationId, quantite),
+    quantite: number,
+    utilisateurId: string
+  ): Promise<StockOperationResult> => ipcRenderer.invoke("stock:transfert", produitId, sourceId, destinationId, quantite, utilisateurId),
 
   enregistrerVente: (input: VenteInput): Promise<StockOperationResult & { factureId?: string; numero?: string; total?: number }> =>
     ipcRenderer.invoke("ventes:create", input),
 
   listFactures: (): Promise<Facture[]> => ipcRenderer.invoke("factures:list"),
   listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
-  listHistoriqueEnrichi: (): Promise<{
-    id: string;
-    type: string;
-    date: string;
-    quantite: number;
-    produitId: string;
-    produitMotif: string;
-    produitReference: string;
-    produitTaille: string;
-    emplacementNom: string | null;
-    emplacementSourceNom: string | null;
-    emplacementDestinationNom: string | null;
-    factureId: string | null;
-    factureNumero: string | null;
-    clientNom: string | null;
-  }[]> => ipcRenderer.invoke("historique:listEnrichi"),
+  listHistoriqueEnrichi: (): Promise<MouvementEnrichi[]> => ipcRenderer.invoke("historique:listEnrichi"),
 
   getDashboardSummary: (userId: string): Promise<{
-    mouvementsRecents: Mouvement[];
     stockTousDepots: number;
     caTotal: number;
     produitsSousSeuilGlobal: number;
@@ -146,10 +151,15 @@ const maxiEquipApi = {
     stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
     topProduitsVendus: { label: string; quantite: number }[];
     produitsSousSeuilListe: { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
+    activiteRecenteGlobale: MouvementEnrichi[];
     stockDepots: number;
-    ventesAujourdhui: number;
+    stockParEmplacementPourGerant: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
     mesVentesAujourdhui: number;
+    monChiffreAffaires: number;
     mesFacturesAujourdhuiCount: number;
+    mesEntrees: number;
+    mesSorties: number;
+    activiteRecentePersonnelle: MouvementEnrichi[];
   }> => ipcRenderer.invoke("dashboard:summary", userId),
 
   // --- Images produit (correction Phase 2) ---

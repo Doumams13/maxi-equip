@@ -42,5 +42,14 @@ export interface Mouvement extends MetierEntity {
   /** Renseigné uniquement pour une sortie liée à une vente confirmée. */
   factureId: UUID | null;
 
+  /**
+   * Auteur réel de l'opération — correction "logique des dashboards
+   * Administrateur/Gérant" : source unique servant à distinguer les
+   * données globales (Administrateur) des données personnelles (Gérant,
+   * filtré sur son propre identifiant). Nullable : les mouvements
+   * enregistrés avant cette évolution n'ont jamais eu d'auteur tracé.
+   */
+  utilisateurId: UUID | null;
+
   note: string | null;
 }

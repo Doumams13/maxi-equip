@@ -30,8 +30,17 @@ function addUtilisateurIdToMouvementsIfMissing(db: Database.Database): void {
   const hasColumn = columns.some((c) => c.name === "utilisateur_id");
   if (!hasColumn) {
     db.exec("ALTER TABLE mouvements ADD COLUMN utilisateur_id TEXT REFERENCES utilisateurs(id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_mouvements_utilisateur ON mouvements (utilisateur_id)");
   }
+  // Toujours (re)créée après coup, jamais dans schema.sql lui-même : sur
+  // une base déjà existante, "CREATE TABLE IF NOT EXISTS" ne recrée pas
+  // la table (donc pas la colonne), mais une ligne "CREATE INDEX ... ON
+  // mouvements (utilisateur_id)" placée directement dans schema.sql
+  // s'exécuterait quand même et échouerait avec "no such column:
+  // utilisateur_id" puisque la colonne n'existe pas encore à ce moment-là
+  // — bug réel reproduit et corrigé ici. Une fois la colonne garantie
+  // présente (ci-dessus, ou déjà là sur une base neuve), cette ligne est
+  // sans risque dans les deux cas.
+  db.exec("CREATE INDEX IF NOT EXISTS idx_mouvements_utilisateur ON mouvements (utilisateur_id)");
 }
 
 /**

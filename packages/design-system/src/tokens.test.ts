@@ -35,3 +35,43 @@ describe("identité officielle MAXI EQUIP (Phase 1 — finalisation UI)", () => 
     expect(defaultTokens.colors.decorative).not.toBe(defaultTokens.colors.accent);
   });
 });
+
+describe("échelle typographique fluide (correction responsive)", () => {
+  function parseClamp(value: string): { min: number; max: number } {
+    const match = value.match(/clamp\(([\d.]+)px,.*?,\s*([\d.]+)px\)/);
+    if (!match) throw new Error(`Format clamp() inattendu : ${value}`);
+    return { min: parseFloat(match[1]!), max: parseFloat(match[2]!) };
+  }
+
+  it("chaque taille a une borne minimale strictement inférieure à sa borne maximale", () => {
+    for (const [nom, valeur] of Object.entries(defaultTokens.fluidType)) {
+      const { min, max } = parseClamp(valeur);
+      expect(min, `${nom} : min doit être < max`).toBeLessThan(max);
+    }
+  });
+
+  it("la hiérarchie est respectée : h1 > h2 > body > bodySmall > label > caption, à la fois en borne min et en borne max", () => {
+    const ordre: (keyof typeof defaultTokens.fluidType)[] = ["h1", "h2", "body", "bodySmall", "label", "caption"];
+    for (let i = 0; i < ordre.length - 1; i++) {
+      const a = parseClamp(defaultTokens.fluidType[ordre[i]!]);
+      const b = parseClamp(defaultTokens.fluidType[ordre[i + 1]!]);
+      expect(a.min, `${ordre[i]} min >= ${ordre[i + 1]} min`).toBeGreaterThanOrEqual(b.min);
+      expect(a.max, `${ordre[i]} max >= ${ordre[i + 1]} max`).toBeGreaterThanOrEqual(b.max);
+    }
+  });
+
+  it("aucune taille ne descend en dessous de 10px (lisibilité minimale) ni au-dessus de 28px (évite le gigantisme en plein écran)", () => {
+    for (const valeur of Object.values(defaultTokens.fluidType)) {
+      const { min, max } = parseClamp(valeur);
+      expect(min).toBeGreaterThanOrEqual(10);
+      expect(max).toBeLessThanOrEqual(28);
+    }
+  });
+});
+
+describe("tokens de mise en page (correction responsive)", () => {
+  it("expose une largeur maximale de contenu et une largeur de sidebar fixes", () => {
+    expect(defaultTokens.layout.contentMaxWidth).toBeGreaterThan(defaultTokens.layout.sidebarWidth);
+    expect(defaultTokens.layout.sidebarWidth).toBe(220); // inchangée par cette correction — la sidebar reste fixe, jamais disproportionnée
+  });
+});

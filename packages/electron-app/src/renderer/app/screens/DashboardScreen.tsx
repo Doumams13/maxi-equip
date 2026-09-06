@@ -89,7 +89,8 @@ function StockParEmplacement({ lignes }: { lignes: Summary["stockParEmplacement"
       <p style={{ padding: "0 20px 14px", margin: 0, fontSize: 12, color: defaultTokens.colors.textSoft }}>
         SHOP est le seul point de vente ; Akébé et Akanda sont les dépôts de stockage.
       </p>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
             {["Emplacement", "Cartons en stock", "Références en rupture"].map((h, i) => (
@@ -135,6 +136,7 @@ function StockParEmplacement({ lignes }: { lignes: Summary["stockParEmplacement"
           ))}
         </tbody>
       </table>
+          </div>
     </Card>
   );
 }
@@ -157,14 +159,14 @@ function DashboardAdmin({ summary }: { summary: Summary }) {
       </h1>
       <p style={{ marginTop: 0, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Vue globale de l'entreprise MAXI EQUIP</p>
 
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 16 }}>
         <KpiCard icon={Boxes} label="Stock total (Akébé + Akanda)" value={summary.stockTousDepots.toLocaleString("fr-FR")} tone="accent" />
         <KpiCard icon={DollarSign} label="Chiffre d'affaires total" value={`${summary.caTotal.toLocaleString("fr-FR")} FCFA`} tone="success" />
         <KpiCard icon={AlertTriangle} label="Alertes de stock (global)" value={summary.produitsSousSeuilGlobal} tone="warning" />
         <KpiCard icon={Receipt} label="Factures émises" value={summary.totalFactures} tone="info" />
       </div>
 
-      <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 16 }}>
         <KpiCard icon={ArrowDownToLine} label="Total entrées (toutes périodes)" value={summary.totalEntrees.toLocaleString("fr-FR")} tone="success" />
         <KpiCard icon={ArrowUpFromLine} label="Total sorties (toutes périodes)" value={summary.totalSorties.toLocaleString("fr-FR")} tone="danger" />
         <KpiCard icon={Percent} label="Promotions actives" value={summary.promotionsActives} tone="externe" />
@@ -257,7 +259,7 @@ function DashboardVendeur({ nom, summary }: { nom: string; summary: Summary }) {
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Tableau de bord</h1>
       <p style={{ marginTop: -8, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Bienvenue {nom} — activité MAXI EQUIP</p>
 
-      <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 20 }}>
         <KpiCard icon={Boxes} label="Cartons en stock (Akébé + Akanda)" value={summary.stockDepots.toLocaleString("fr-FR")} tone="accent" />
         <KpiCard icon={DollarSign} label="Ventes du jour" value={`${summary.ventesAujourdhui.toLocaleString("fr-FR")} FCFA`} tone="success" />
         <KpiCard icon={Receipt} label="Mes ventes aujourd'hui" value={`${summary.mesVentesAujourdhui.toLocaleString("fr-FR")} FCFA`} tone="info" />

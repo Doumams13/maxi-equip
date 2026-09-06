@@ -44,7 +44,7 @@ export function ConfirmDialog({ title, resume, onAnnuler, onConfirmer, confirmin
         if (e.target === e.currentTarget && !confirming) onAnnuler();
       }}
     >
-      <Card elevated style={{ width: 460, boxSizing: "border-box" }}>
+      <Card elevated style={{ width: "min(460px, 92vw)", boxSizing: "border-box" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {danger && <AlertTriangle size={18} color={defaultTokens.colors.danger} />}

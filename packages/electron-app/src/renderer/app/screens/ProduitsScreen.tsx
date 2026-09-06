@@ -552,6 +552,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
             {produits.length === 0 ? "Aucun produit au catalogue pour l'instant." : "Aucun produit ne correspond à cette recherche."}
           </p>
         ) : (
+          <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead>
               <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
@@ -608,6 +609,7 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
 

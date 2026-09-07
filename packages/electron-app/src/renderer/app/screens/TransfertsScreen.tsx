@@ -3,6 +3,8 @@ import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equi
 import { ArrowLeftRight } from "lucide-react";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
 import { ProduitSelector } from "../components/ProduitSelector.js";
+import { HistoriqueOperationsTable } from "../components/HistoriqueOperationsTable.js";
+import type { EvenementHistorique } from "../../../preload/index.js";
 
 const inputStyle: React.CSSProperties = {
   padding: "9px 12px",
@@ -20,10 +22,21 @@ const inputStyle: React.CSSProperties = {
  * seul le domaine décide (§19).
  *
  * Corrections supplémentaires : sélecteur de produit avec recherche
- * (composant commun ProduitSelector), quantité strictement positive, et
- * double validation avant exécution réelle.
+ * (composant commun ProduitSelector), quantité strictement positive,
+ * double validation avant exécution réelle, et historique COMPLET des
+ * transferts déjà enregistrés (correction "Entrée de stock / Transferts"
+ * §7/§8 — recherche, tri, pagination à 10 par page, navigation cliquable
+ * depuis l'Historique général).
  */
-export function TransfertsScreen() {
+export function TransfertsScreen({
+  session,
+  cibleSurbrillance,
+  onSurbrillanceAppliquee,
+}: {
+  session: { userId: string };
+  cibleSurbrillance: string | null;
+  onSurbrillanceAppliquee: () => void;
+}) {
   const { showSuccess, showWarning, showError } = useToast();
   const [produits, setProduits] = useState<Produit[]>([]);
   const [emplacements, setEmplacements] = useState<Emplacement[]>([]);
@@ -33,8 +46,13 @@ export function TransfertsScreen() {
   const [quantite, setQuantite] = useState("");
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [transfertsComplets, setTransfertsComplets] = useState<EvenementHistorique[]>([]);
 
   const depots = emplacements.filter((e) => !e.estPointDeVente);
+
+  async function refreshHistorique() {
+    setTransfertsComplets(await window.maxiEquip.listTransfertsComplets());
+  }
 
   useEffect(() => {
     void (async () => {
@@ -42,6 +60,7 @@ export function TransfertsScreen() {
       setProduits(prods);
       setEmplacements(emps);
     })();
+    void refreshHistorique();
   }, []);
 
   function handleOuvrirConfirmation(e: React.FormEvent) {
@@ -72,6 +91,7 @@ export function TransfertsScreen() {
         setProduitId("");
         setQuantite("");
         setShowConfirm(false);
+        await refreshHistorique();
       } else {
         showError("Opération impossible", result.reason.message);
       }
@@ -139,6 +159,16 @@ export function TransfertsScreen() {
           <Button type="submit">Effectuer le transfert</Button>
         </form>
       </Card>
+
+      <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 16, color: defaultTokens.colors.text, marginBottom: 14, marginTop: 24 }}>Historique des transferts</h2>
+      <HistoriqueOperationsTable
+        type="transfert"
+        evenements={transfertsComplets}
+        session={session}
+        depotsDisponibles={depots.map((d) => d.nom)}
+        cibleSurbrillance={cibleSurbrillance}
+        onSurbrillanceAppliquee={onSurbrillanceAppliquee}
+      />
 
       {showConfirm && produitSelectionne && (
         <ConfirmDialog

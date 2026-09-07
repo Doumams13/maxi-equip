@@ -72,6 +72,7 @@ export interface EvenementHistorique {
   quantite: number | null;
   produitMotif: string | null;
   produitTaille: string | null;
+  produitReference: string | null;
   emplacementNom: string | null;
   emplacementSourceNom: string | null;
   emplacementDestinationNom: string | null;
@@ -165,6 +166,8 @@ const maxiEquipApi = {
   } | null> => ipcRenderer.invoke("factures:donneesPourModification", factureId),
   listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
   listHistoriqueEnrichi: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("historique:listEnrichi"),
+  listEntreesCompletes: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("stock:listEntrees"),
+  listTransfertsComplets: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("stock:listTransferts"),
 
   getDashboardSummary: (): Promise<{
     stockTousDepots: number;

@@ -228,6 +228,25 @@ export function registerMetierIpcHandlers(
     return session ? anonymiserActivite(evenements, session) : evenements;
   });
 
+  /**
+   * Historique COMPLET des entrées/transferts — correction "Entrée de
+   * stock / Transferts" §2/§7 : nécessaire pour que la navigation
+   * cliquable depuis l'Historique général retrouve réellement une
+   * opération ancienne, quelle que soit la page où elle se trouve.
+   * Anonymisation systématique, jamais côté Renderer.
+   */
+  ipcMain.handle("stock:listEntrees", () => {
+    const session = sessionManager.get();
+    const entrees = mouvementRepository.listEntrees();
+    return session ? anonymiserActivite(entrees, session) : entrees;
+  });
+
+  ipcMain.handle("stock:listTransferts", () => {
+    const session = sessionManager.get();
+    const transferts = mouvementRepository.listTransferts();
+    return session ? anonymiserActivite(transferts, session) : transferts;
+  });
+
   // --- Dashboard ---
   ipcMain.handle("dashboard:summary", () => {
     const session = sessionManager.get();

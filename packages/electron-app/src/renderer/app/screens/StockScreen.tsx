@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
 import { ProduitSelector } from "../components/ProduitSelector.js";
+import { HistoriqueOperationsTable } from "../components/HistoriqueOperationsTable.js";
+import type { EvenementHistorique } from "../../../preload/index.js";
 
 /**
  * Écran Entrée de stock — Phase 2 §10, corrigé pour la décision métier
@@ -11,14 +13,25 @@ import { ProduitSelector } from "../components/ProduitSelector.js";
  * Corrections supplémentaires : sélecteur de produit avec recherche
  * (ProduitSelector, composant commun réutilisé aussi par Vente et
  * Transfert), quantité strictement positive (plafonnée côté UI, refusée
- * côté domaine si contournée), et double validation avant exécution
- * réelle (ConfirmDialog).
+ * côté domaine si contournée), double validation avant exécution réelle
+ * (ConfirmDialog), et historique COMPLET des entrées déjà enregistrées
+ * (correction "Entrée de stock / Transferts" §2/§3 — recherche, tri,
+ * pagination à 10 par page, navigation cliquable depuis l'Historique
+ * général).
  *
  * Aucune règle métier ici : la vérification de disponibilité et le
  * calcul du delta viennent de packages/domain, via le canal IPC
  * stock:entree (§19 — le domaine reste la seule source de vérité).
  */
-export function StockScreen() {
+export function StockScreen({
+  session,
+  cibleSurbrillance,
+  onSurbrillanceAppliquee,
+}: {
+  session: { userId: string };
+  cibleSurbrillance: string | null;
+  onSurbrillanceAppliquee: () => void;
+}) {
   const { showSuccess, showWarning, showError } = useToast();
   const [emplacements, setEmplacements] = useState<Emplacement[]>([]);
   const [produits, setProduits] = useState<Produit[]>([]);
@@ -28,12 +41,17 @@ export function StockScreen() {
   const [entreeQuantite, setEntreeQuantite] = useState("");
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [entreesCompletes, setEntreesCompletes] = useState<EvenementHistorique[]>([]);
 
   const depots = emplacements.filter((e) => !e.estPointDeVente);
 
   async function refresh(currentEmplacementId: string) {
     const stock = await window.maxiEquip.getStockByEmplacement(currentEmplacementId);
     setQuantites(Object.fromEntries(stock.map((s) => [s.produitId, s.quantite])));
+  }
+
+  async function refreshHistorique() {
+    setEntreesCompletes(await window.maxiEquip.listEntreesCompletes());
   }
 
   useEffect(() => {
@@ -47,6 +65,7 @@ export function StockScreen() {
         await refresh(premierDepot.id);
       }
     })();
+    void refreshHistorique();
   }, []);
 
   useEffect(() => {
@@ -78,6 +97,7 @@ export function StockScreen() {
         setEntreeQuantite("");
         setShowConfirm(false);
         await refresh(emplacementId);
+        await refreshHistorique();
       } else {
         showError("Opération impossible", result.reason.message);
       }
@@ -183,6 +203,16 @@ export function StockScreen() {
           </div>
         )}
       </Card>
+
+      <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 16, color: defaultTokens.colors.text, marginBottom: 14 }}>Historique des entrées de stock</h2>
+      <HistoriqueOperationsTable
+        type="entree"
+        evenements={entreesCompletes}
+        session={session}
+        depotsDisponibles={depots.map((d) => d.nom)}
+        cibleSurbrillance={cibleSurbrillance}
+        onSurbrillanceAppliquee={onSurbrillanceAppliquee}
+      />
 
       {showConfirm && produitSelectionne && (
         <ConfirmDialog

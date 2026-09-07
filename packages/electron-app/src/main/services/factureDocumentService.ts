@@ -31,8 +31,15 @@ const FOND_BOITE = "#f3f2ee";
 const NOIR = "#1a1a1a";
 
 function assetPath(nom: string): string {
-  // Empaqueté tel quel par electron-vite (voir electron.vite.config.ts, assets copiés).
-  return join(__dirname, "../../assets", nom);
+  // Empaqueté tel quel par electron-vite (voir electron.vite.config.ts,
+  // plugin copierAssetsFacture) : dist-main/main/index.cjs → dist-main/assets/.
+  // IMPORTANT : un seul niveau ("..") pour remonter de dist-main/main/ à
+  // dist-main/, exactement comme les autres références déjà présentes
+  // dans main/index.ts (ex. join(__dirname, "../preload")). Un bug réel
+  // utilisait ici "../../assets" (deux niveaux), pointant vers un dossier
+  // inexistant en dehors de dist-main — d'où le logo absent sur le PDF,
+  // masqué en plus par un try/catch silencieux (retiré ci-dessous).
+  return join(__dirname, "../assets", nom);
 }
 
 /**
@@ -47,6 +54,26 @@ function formaterMontant(n: number): string {
   return Math.round(n)
     .toString()
     .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+/**
+ * Charge une image dans le document — vérifie explicitement l'existence
+ * du fichier et journalise une erreur claire si absent, plutôt qu'un
+ * try/catch silencieux (§12 de la correction : c'est exactement ce
+ * silence qui a caché le bug de chemin précédent pendant tout ce temps).
+ */
+function chargerImage(doc: PDFKit.PDFDocument, chemin: string, x: number, y: number, options: { width: number; height: number }): void {
+  if (!existsSync(chemin)) {
+    // eslint-disable-next-line no-console
+    console.error(`[facture-pdf] Image introuvable, jamais laissée en espace vide silencieux : ${chemin}`);
+    return;
+  }
+  try {
+    doc.image(chemin, x, y, options);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[facture-pdf] Échec du chargement de l'image ${chemin} :`, err);
+  }
 }
 
 export interface FactureDocumentInput {
@@ -82,18 +109,13 @@ export async function genererFacturePdf(input: FactureDocumentInput): Promise<st
 
 function dessinerFacture(doc: PDFKit.PDFDocument, { facture, nomMagasin, vendeurNomAffiche }: FactureDocumentInput): void {
   // --- Filigrane (derrière tout le reste, tel qu'extrait du PDF officiel) ---
-  try {
-    doc.opacity(1).image(assetPath("facture-filigrane.png"), 79.2, 293.9, { width: 465, height: 321 });
-  } catch {
-    // Filigrane absent — le document reste utilisable sans, jamais bloquant.
-  }
+  // Plus de try/catch silencieux ici : une image manquante doit être
+  // visible dans les journaux, jamais masquée (§12 de la correction —
+  // c'est exactement ce silence qui avait caché le bug de chemin).
+  chargerImage(doc, assetPath("facture-filigrane.png"), 79.2, 293.9, { width: 465, height: 321 });
 
   // --- Logo couleur (haut gauche) ---
-  try {
-    doc.image(assetPath("facture-logo.jpg"), MARGE_GAUCHE, 56.5, { width: 240.1, height: 62.8 });
-  } catch {
-    // idem
-  }
+  chargerImage(doc, assetPath("facture-logo.jpg"), MARGE_GAUCHE, 56.5, { width: 240.1, height: 62.8 });
 
   // --- Titre FACTURE + numéro + date + statut (haut droite) ---
   doc.font("Helvetica-Bold").fontSize(20).fillColor(VERT).text("FACTURE", 400, 60.4, { width: MARGE_DROITE - 400, align: "right" });

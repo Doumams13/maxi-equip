@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { MOUVEMENT_LABELS } from "../mouvementLabels.js";
-import type { MouvementEnrichi } from "../../../preload/index.js";
+import type { EvenementHistorique } from "../../../preload/index.js";
 import type { CibleOperation } from "../AppRoot.js";
 
 interface Summary {
@@ -32,7 +32,7 @@ interface Summary {
   stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
   topProduitsVendus: { label: string; quantite: number }[];
   produitsSousSeuilListe: { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
-  activiteRecente: MouvementEnrichi[];
+  activiteRecente: EvenementHistorique[];
   stockDepots: number;
   stockParEmplacementPourGerant: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
   mesVentesAujourdhui: number;
@@ -140,8 +140,24 @@ function StockParEmplacement({ lignes }: { lignes: Summary["stockParEmplacement"
   );
 }
 
-function LigneActivite({ m, userId, onNaviguer }: { m: MouvementEnrichi; userId: string; onNaviguer: (c: CibleOperation) => void }) {
+/** Libellé lisible pour un type d'événement consolidé — "vente"/"annulation" n'ont pas d'équivalent direct dans MOUVEMENT_LABELS (qui décrit des mouvements techniques, pas des événements métier). */
+const TYPE_LABELS_EVENEMENT: Record<EvenementHistorique["type"], string> = {
+  vente: "Vente effectuée",
+  annulation: "Facture annulée",
+  entree: MOUVEMENT_LABELS.entree ?? "Entrée",
+  transfert: MOUVEMENT_LABELS.transfert ?? "Transfert",
+};
+
+/**
+ * Ligne d'activité cliquable (Consolidation §17/§18, correction "1 vente
+ * = 1 événement" §1/§16) — un clic redirige vers Factures (vente ou
+ * annulation) ou vers l'Historique (entrée/transfert manuel), avec
+ * l'identifiant réel de l'opération. L'auteur n'est affiché que si le
+ * serveur l'a transmis — anonymisation déjà décidée côté Main.
+ */
+function LigneActivite({ m, userId, onNaviguer }: { m: EvenementHistorique; userId: string; onNaviguer: (c: CibleOperation) => void }) {
   const cible: CibleOperation = m.factureId ? { type: "facture", id: m.factureId } : { type: "mouvement", id: m.id };
+  const estVenteOuAnnulation = m.type === "vente" || m.type === "annulation";
   return (
     <button
       onClick={() => onNaviguer(cible)}
@@ -161,11 +177,18 @@ function LigneActivite({ m, userId, onNaviguer }: { m: MouvementEnrichi; userId:
       }}
     >
       <div>
-        <span style={{ fontWeight: 700, color: defaultTokens.colors.text }}>{MOUVEMENT_LABELS[m.type] ?? m.type}</span>
-        <span style={{ color: defaultTokens.colors.textSoft }}>
-          {" "}
-          — {m.produitMotif} ({m.produitTaille})
-        </span>
+        <span style={{ fontWeight: 700, color: defaultTokens.colors.text }}>{TYPE_LABELS_EVENEMENT[m.type]}</span>
+        {estVenteOuAnnulation ? (
+          <span style={{ color: defaultTokens.colors.textSoft }}>
+            {" "}
+            — {m.factureNumero} · {m.clientNom}
+          </span>
+        ) : (
+          <span style={{ color: defaultTokens.colors.textSoft }}>
+            {" "}
+            — {m.produitMotif} ({m.produitTaille})
+          </span>
+        )}
         {(m.utilisateurId || m.utilisateurNom) && (
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2, fontSize: 11.5, color: defaultTokens.colors.textFaint }}>
             <User size={11} />

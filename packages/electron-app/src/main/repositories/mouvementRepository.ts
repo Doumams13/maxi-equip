@@ -16,26 +16,6 @@ interface MouvementRow {
   note: string | null;
 }
 
-export interface MouvementEnrichi {
-  id: string;
-  type: string;
-  date: string;
-  quantite: number;
-  produitId: string;
-  produitMotif: string;
-  produitReference: string;
-  produitTaille: string;
-  emplacementNom: string | null;
-  emplacementSourceNom: string | null;
-  emplacementDestinationNom: string | null;
-  factureId: string | null;
-  factureNumero: string | null;
-  clientNom: string | null;
-  /** Auteur de l'opération — pour la traçabilité Administrateur (§3/§11 de la correction). Peut être null pour les mouvements enregistrés avant cette évolution. */
-  utilisateurId: string | null;
-  utilisateurNom: string | null;
-  utilisateurRole: string | null;
-}
 
 function rowToMouvement(row: MouvementRow): Mouvement {
   return {
@@ -55,22 +35,75 @@ function rowToMouvement(row: MouvementRow): Mouvement {
   };
 }
 
-const SELECT_ENRICHI = `
-  SELECT
-    m.id, m.type, m.date, m.quantite,
-    p.id as produitId, p.motif as produitMotif, p.reference as produitReference, p.taille as produitTaille,
-    e.nom as emplacementNom,
-    es.nom as emplacementSourceNom,
-    ed.nom as emplacementDestinationNom,
-    f.id as factureId, f.numero as factureNumero, f.client_nom as clientNom,
-    m.utilisateur_id as utilisateurId, u.nom as utilisateurNom, u.role as utilisateurRole
-  FROM mouvements m
-  JOIN produits p ON p.id = m.produit_id
-  LEFT JOIN emplacements e ON e.id = m.emplacement_id
-  LEFT JOIN emplacements es ON es.id = m.emplacement_source_id
-  LEFT JOIN emplacements ed ON ed.id = m.emplacement_destination_id
-  LEFT JOIN factures f ON f.id = m.facture_id
-  LEFT JOIN utilisateurs u ON u.id = m.utilisateur_id
+export interface EvenementHistorique {
+  id: string;
+  type: "vente" | "annulation" | "entree" | "transfert";
+  date: string;
+  quantite: number | null;
+  produitMotif: string | null;
+  produitTaille: string | null;
+  emplacementNom: string | null;
+  emplacementSourceNom: string | null;
+  emplacementDestinationNom: string | null;
+  factureId: string | null;
+  factureNumero: string | null;
+  clientNom: string | null;
+  montant: number | null;
+  motifAnnulation: string | null;
+  utilisateurId: string | null;
+  utilisateurNom: string | null;
+  utilisateurRole: string | null;
+}
+
+const SELECT_EVENEMENTS = `
+  SELECT * FROM (
+    -- Une vente = UN SEUL événement, quel que soit le nombre de dépôts ou
+    -- la présence d'un complément externe (correction "1 vente = 1
+    -- événement dans l'historique", jamais plusieurs lignes techniques).
+    SELECT
+      'facture:' || f.id || ':effectuee' as id, 'vente' as type, f.date as date,
+      NULL as quantite, NULL as produitMotif, NULL as produitTaille,
+      NULL as emplacementNom, NULL as emplacementSourceNom, NULL as emplacementDestinationNom,
+      f.id as factureId, f.numero as factureNumero, f.client_nom as clientNom, f.total as montant,
+      NULL as motifAnnulation,
+      f.vendeur_utilisateur_id as utilisateurId, u1.nom as utilisateurNom, u1.role as utilisateurRole
+    FROM factures f
+    LEFT JOIN utilisateurs u1 ON u1.id = f.vendeur_utilisateur_id
+
+    UNION ALL
+
+    -- Une annulation = UN SEUL événement supplémentaire (jamais une
+    -- "Entrée de stock" — la restauration réelle du stock reste un détail
+    -- technique interne, non affiché séparément ici).
+    SELECT
+      'facture:' || f.id || ':annulee' as id, 'annulation' as type, f.annulee_le as date,
+      NULL, NULL, NULL, NULL, NULL, NULL,
+      f.id, f.numero, f.client_nom, f.total,
+      f.motif_annulation,
+      f.annulee_par, u2.nom, u2.role
+    FROM factures f
+    LEFT JOIN utilisateurs u2 ON u2.id = f.annulee_par
+    WHERE f.annulee_le IS NOT NULL
+
+    UNION ALL
+
+    -- Entrées et transferts manuels — jamais liés à une facture, donc
+    -- jamais concernés par le regroupement ci-dessus.
+    SELECT
+      m.id, m.type, m.date,
+      m.quantite, p.motif, p.taille,
+      e.nom, es.nom, ed.nom,
+      NULL, NULL, NULL, NULL,
+      NULL,
+      m.utilisateur_id, u3.nom, u3.role
+    FROM mouvements m
+    JOIN produits p ON p.id = m.produit_id
+    LEFT JOIN emplacements e ON e.id = m.emplacement_id
+    LEFT JOIN emplacements es ON es.id = m.emplacement_source_id
+    LEFT JOIN emplacements ed ON ed.id = m.emplacement_destination_id
+    LEFT JOIN utilisateurs u3 ON u3.id = m.utilisateur_id
+    WHERE m.facture_id IS NULL
+  )
 `;
 
 export class MouvementRepository {
@@ -154,33 +187,17 @@ export class MouvementRepository {
   }
 
   /**
-   * Historique enrichi — jointure produit/emplacement(s)/facture/auteur,
-   * pour la recherche globale et l'affichage complet de l'Historique
-   * (§14-§17 d'une correction précédente). SHOP n'apparaît jamais comme
-   * emplacement source/destination d'un mouvement de stock, conformément
-   * à la décision métier "SHOP n'a pas de stock".
+   * Activité GLOBALE consolidée (§1/§16 de la correction) — un événement
+   * "vente" ou "annulation" n'y apparaît qu'UNE SEULE fois, quel que soit
+   * le nombre de mouvements techniques sous-jacents.
    */
-  listEnrichi(limit = 300): MouvementEnrichi[] {
-    return this.db.prepare(`${SELECT_ENRICHI} ORDER BY m.date DESC LIMIT ?`).all(limit) as MouvementEnrichi[];
+  listEvenements(limit = 300): EvenementHistorique[] {
+    return this.db.prepare(`${SELECT_EVENEMENTS} ORDER BY date DESC LIMIT ?`).all(limit) as EvenementHistorique[];
   }
 
-  /**
-   * Activité récente GLOBALE avec auteur — Administrateur uniquement
-   * (§3 de la correction : "l'Administrateur doit pouvoir suivre ce que
-   * les Gérants font ou ont fait").
-   */
-  activiteRecenteGlobale(limit = 8): MouvementEnrichi[] {
-    return this.db.prepare(`${SELECT_ENRICHI} ORDER BY m.date DESC LIMIT ?`).all(limit) as MouvementEnrichi[];
-  }
-
-  /**
-   * Activité récente PERSONNELLE — filtrée réellement en base sur
-   * l'auteur (§8/§9 de la correction : "ne pas récupérer toutes les
-   * données puis masquer visuellement" — le filtre est dans la requête
-   * SQL elle-même, jamais après coup côté Renderer).
-   */
-  activiteRecentePersonnelle(utilisateurId: string, limit = 8): MouvementEnrichi[] {
-    return this.db.prepare(`${SELECT_ENRICHI} WHERE m.utilisateur_id = ? ORDER BY m.date DESC LIMIT ?`).all(utilisateurId, limit) as MouvementEnrichi[];
+  /** Activité PERSONNELLE consolidée — filtrée réellement en base sur l'auteur, même principe que listEvenements. */
+  listEvenementsPersonnels(utilisateurId: string, limit = 8): EvenementHistorique[] {
+    return this.db.prepare(`${SELECT_EVENEMENTS} WHERE utilisateurId = ? ORDER BY date DESC LIMIT ?`).all(utilisateurId, limit) as EvenementHistorique[];
   }
 
   /** Mouvements liés à une facture — nécessaire pour restaurer le stock lors d'une annulation (correction "Facturation" §5/§21). */

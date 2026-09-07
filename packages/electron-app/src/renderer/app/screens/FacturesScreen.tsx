@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus } from "lucide-react";
+import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil } from "lucide-react";
 import type { Facture } from "@maxi-equip/shared-types";
 import { useSurbrillanceOperation } from "../highlight.js";
 
@@ -56,6 +56,23 @@ function EnteteTriable({
 }
 
 function StatutBadge({ facture }: { facture: Facture }) {
+  if (facture.annuleeLe) {
+    return (
+      <span
+        style={{
+          display: "inline-block",
+          padding: "3px 10px",
+          borderRadius: defaultTokens.radius.pill,
+          fontSize: 11.5,
+          fontWeight: 700,
+          background: defaultTokens.colors.dangerSoft,
+          color: defaultTokens.colors.danger,
+        }}
+      >
+        Annulée
+      </span>
+    );
+  }
   const livree = facture.statutLivraison === "livree";
   return (
     <span
@@ -71,6 +88,59 @@ function StatutBadge({ facture }: { facture: Facture }) {
     >
       {livree ? "Payée — Livrée" : "Payée — En attente"}
     </span>
+  );
+}
+
+/**
+ * Modale du document interne d'approvisionnement — accessible à tous,
+ * sans distinction Admin/Gérant (§9 de la correction "Facturation").
+ * Chargé à la demande (pas de coût pour les factures sans complément
+ * externe, qui restent la majorité).
+ */
+function DocumentInterneModal({
+  factureNumero,
+  lignes,
+  onFermer,
+}: {
+  factureNumero: string;
+  lignes: { motif: string; taille: string; quantiteTotale: number; quantiteInterne: number; quantiteExterne: number; fournisseur: string | null; prixAchat: number | null }[];
+  onFermer: () => void;
+}) {
+  const aDuExterne = lignes.some((l) => l.quantiteExterne > 0);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
+      <Card elevated style={{ width: "min(560px, 92vw)", boxSizing: "border-box" }}>
+        <h2 style={{ margin: "0 0 4px", fontFamily: defaultTokens.typography.display, fontSize: 16.5 }}>Document interne — {factureNumero}</h2>
+        <p style={{ margin: "0 0 16px", fontSize: 12, color: defaultTokens.colors.textFaint }}>
+          Trace interne MAXI EQUIP, jamais transmise au client — provenance réelle des quantités.
+        </p>
+        {!aDuExterne ? (
+          <p style={{ fontSize: 13.5, color: defaultTokens.colors.textSoft }}>Cette vente a été entièrement couverte par le stock MAXI EQUIP — aucun complément externe.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+            {lignes.map((l, i) => (
+              <div key={i} style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.sm, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  {l.motif} — {l.taille} <span style={{ color: defaultTokens.colors.textSoft, fontWeight: 400 }}>({l.quantiteTotale} au total)</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft }}>MAXI EQUIP : {l.quantiteInterne}</div>
+                {l.quantiteExterne > 0 && (
+                  <>
+                    <div style={{ fontSize: 12.5, color: defaultTokens.colors.warning, fontWeight: 600 }}>Fournisseur externe : {l.quantiteExterne}</div>
+                    <div style={{ fontSize: 12, color: defaultTokens.colors.textFaint }}>
+                      {l.fournisseur} — coût d'achat unitaire : {l.prixAchat?.toLocaleString("fr-FR")} FCFA
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <Button variant="secondary" onClick={onFermer} style={{ width: "100%" }}>
+          Fermer
+        </Button>
+      </Card>
+    </div>
   );
 }
 
@@ -135,11 +205,13 @@ export function FacturesScreen({
   cibleSurbrillance,
   onSurbrillanceAppliquee,
   onNouvelleSortie,
+  onModifierFacture,
 }: {
   session: { userId: string; role: string };
   cibleSurbrillance: string | null;
   onSurbrillanceAppliquee: () => void;
   onNouvelleSortie: () => void;
+  onModifierFacture: (factureId: string) => void;
 }) {
   const { showSuccess, showError } = useToast();
   const [factures, setFactures] = useState<FactureAvecVendeur[]>([]);
@@ -150,6 +222,7 @@ export function FacturesScreen({
   const [tri, setTri] = useState<{ colonne: ColonneTriable | null; direction: Direction }>({ colonne: "date", direction: "desc" });
   const [chargementAction, setChargementAction] = useState<string | null>(null);
   const [factureAAnnuler, setFactureAAnnuler] = useState<FactureAvecVendeur | null>(null);
+  const [documentInterne, setDocumentInterne] = useState<{ numero: string; lignes: Awaited<ReturnType<typeof window.maxiEquip.getDocumentInterneFacture>> } | null>(null);
   const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(cibleSurbrillance, onSurbrillanceAppliquee);
 
   async function refresh() {
@@ -182,7 +255,7 @@ export function FacturesScreen({
     const q = recherche.trim().toLowerCase();
     return factures.filter((f) => {
       const matchRecherche = !q || f.numero.toLowerCase().includes(q) || f.clientNom.toLowerCase().includes(q);
-      const matchStatut = statutFiltre === "tous" || f.statutLivraison === statutFiltre;
+      const matchStatut = statutFiltre === "tous" || (statutFiltre === "annulee" ? !!f.annuleeLe : !f.annuleeLe && f.statutLivraison === statutFiltre);
       const nomAffiche = f.vendeurUtilisateurId === session.userId ? "Vous" : f.vendeurNom;
       const matchVendeur = vendeurFiltre === "tous" || nomAffiche === vendeurFiltre;
       return matchRecherche && matchStatut && matchVendeur;
@@ -260,6 +333,11 @@ export function FacturesScreen({
     }
   }
 
+  async function handleVoirDocumentInterne(facture: FactureAvecVendeur) {
+    const lignes = await window.maxiEquip.getDocumentInterneFacture(facture.id);
+    setDocumentInterne({ numero: facture.numero, lignes });
+  }
+
   return (
     <div style={{ padding: 28 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
@@ -290,6 +368,7 @@ export function FacturesScreen({
             <option value="tous">Tous les statuts</option>
             <option value="livree">Payée — Livrée</option>
             <option value="en_attente">Payée — En attente</option>
+            <option value="annulee">Annulée</option>
           </select>
           <select style={inputStyle} value={vendeurFiltre} onChange={(e) => setVendeurFiltre(e.target.value)}>
             <option value="tous">Tous les vendeurs</option>
@@ -364,14 +443,23 @@ export function FacturesScreen({
                         <Button variant="ghost" onClick={() => void handleOuvrir(f.id)} title="Télécharger">
                           <Download size={15} />
                         </Button>
-                        {f.statutLivraison === "en_attente" && (
+                        <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Document interne (fournisseur externe éventuel)">
+                          <FileText size={15} />
+                        </Button>
+                        {!f.annuleeLe && f.statutLivraison === "en_attente" && (
                           <Button variant="ghost" onClick={() => void handleMarquerLivree(f.id)} title="Marquer comme livrée">
                             <Truck size={15} color={defaultTokens.colors.success} />
                           </Button>
                         )}
-                        <Button variant="ghost" onClick={() => setFactureAAnnuler(f)} title="Annuler">
-                          <Ban size={15} color={defaultTokens.colors.danger} />
-                        </Button>
+                        {f.annuleeLe ? (
+                          <Button variant="ghost" onClick={() => onModifierFacture(f.id)} title="Modifier (corriger l'erreur dans une nouvelle vente)">
+                            <Pencil size={15} color={defaultTokens.colors.accent} />
+                          </Button>
+                        ) : (
+                          <Button variant="ghost" onClick={() => setFactureAAnnuler(f)} title="Annuler">
+                            <Ban size={15} color={defaultTokens.colors.danger} />
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -390,6 +478,8 @@ export function FacturesScreen({
           confirming={chargementAction === factureAAnnuler.id}
         />
       )}
+
+      {documentInterne && <DocumentInterneModal factureNumero={documentInterne.numero} lignes={documentInterne.lignes} onFermer={() => setDocumentInterne(null)} />}
     </div>
   );
 }

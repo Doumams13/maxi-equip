@@ -59,9 +59,14 @@ export class FactureRepository {
     return `${prefix}${String(nextSeq).padStart(4, "0")}`;
   }
 
-  /** Factures ACTIVES uniquement — une facture annulée n'apparaît plus ici (correction "Facturation" §17), seulement via l'historique. */
+  /**
+   * Toutes les factures — actives ET annulées (correction : "une facture
+   * annulée doit rester visible dans l'onglet Factures", §3). Le statut
+   * (actif/annulé) est porté par `annuleeLe`, jamais par l'absence de la
+   * ligne — plus aucune facture n'est masquée par cette méthode.
+   */
   list(limit = 200): Facture[] {
-    const rows = this.db.prepare("SELECT * FROM factures WHERE annulee_le IS NULL ORDER BY date DESC LIMIT ?").all(limit) as FactureRow[];
+    const rows = this.db.prepare("SELECT * FROM factures ORDER BY date DESC LIMIT ?").all(limit) as FactureRow[];
     return rows.map((row) => rowToFacture(row, this.getLignes(row.id)));
   }
 
@@ -80,16 +85,17 @@ export class FactureRepository {
     return { ...facture, vendeurNom: u?.nom ?? null, vendeurRole: u?.role ?? null };
   }
 
+  /** Nombre de factures ACTIVES uniquement — indicateurs du dashboard (une facture annulée ne compte jamais). */
   count(): number {
     return (this.db.prepare("SELECT COUNT(*) as n FROM factures WHERE annulee_le IS NULL").get() as { n: number }).n;
   }
 
-  /** Somme des totaux des factures ACTIVES — chiffre d'affaires (dashboard §3/§13). Une facture annulée ne compte jamais dans le CA. */
+  /** Somme des totaux des factures ACTIVES uniquement — chiffre d'affaires (dashboard §3/§13). Une facture annulée ne compte jamais dans le CA. */
   sommeTotal(): number {
     return (this.db.prepare("SELECT COALESCE(SUM(total), 0) as s FROM factures WHERE annulee_le IS NULL").get() as { s: number }).s;
   }
 
-  /** Total facturé sur le mois en cours — bandeau d'en-tête de l'écran Factures ("N factures · X FCFA facturés ce mois-ci"). */
+  /** Total facturé sur le mois en cours (factures actives uniquement) — bandeau d'en-tête de l'écran Factures. */
   sommeTotalMoisCourant(): { nombre: number; total: number } {
     const row = this.db
       .prepare(
@@ -238,5 +244,94 @@ export class FactureRepository {
       const u = parId.get(f.vendeurUtilisateurId);
       return { ...f, vendeurNom: u?.nom ?? null, vendeurRole: u?.role ?? null };
     });
+  }
+
+  /**
+   * Document interne d'approvisionnement — accessible à tous les
+   * utilisateurs ayant accès à la vente, sans distinction Admin/Gérant
+   * (§9 de la correction). N'existe (au sens utile) que pour les lignes
+   * ayant réellement eu un complément externe ; la quantité interne est
+   * déduite (quantité totale de la ligne facture − quantité externe
+   * enregistrée dans le relevé), jamais stockée deux fois séparément.
+   */
+  getDocumentInterne(
+    factureId: string
+  ): { motif: string; taille: string; quantiteTotale: number; quantiteInterne: number; quantiteExterne: number; fournisseur: string | null; prixAchat: number | null }[] {
+    const lignesFacture = this.getLignes(factureId);
+    const releve = this.db
+      .prepare(
+        `SELECT lri.motif, lri.taille, lri.quantite, lri.fournisseur, lri.prix_achat as prixAchat
+         FROM lignes_releve_interne lri
+         JOIN releves_internes_approvisionnement r ON r.id = lri.releve_id
+         WHERE r.facture_id = ?`
+      )
+      .all(factureId) as { motif: string; taille: string; quantite: number; fournisseur: string; prixAchat: number }[];
+
+    return lignesFacture.map((lf) => {
+      const externe = releve.find((r) => r.motif === lf.motif && r.taille === lf.taille);
+      return {
+        motif: lf.motif,
+        taille: lf.taille,
+        quantiteTotale: lf.quantite,
+        quantiteInterne: lf.quantite - (externe?.quantite ?? 0),
+        quantiteExterne: externe?.quantite ?? 0,
+        fournisseur: externe?.fournisseur ?? null,
+        prixAchat: externe?.prixAchat ?? null,
+      };
+    });
+  }
+
+  /**
+   * Reconstruit les données d'une vente à partir d'une facture existante
+   * (correction §4 : "Modifier" une facture annulée doit préremplir les
+   * informations existantes). La répartition par dépôt est reconstruite
+   * depuis les mouvements réellement enregistrés pour cette facture —
+   * jamais stockée séparément, toujours dérivée de la source de vérité.
+   */
+  getDonneesPourModification(factureId: string): {
+    clientNom: string;
+    clientTelephone: string | null;
+    clientAdresse: string | null;
+    modeReglement: string | null;
+    lignes: {
+      produitId: string | null;
+      motif: string;
+      taille: string;
+      quantite: number;
+      prixUnitaire: number;
+      allocationsDepots: { emplacementId: string; quantite: number }[];
+      fournisseurExterne: string | null;
+      prixAchatExterne: number | null;
+    }[];
+  } | null {
+    const facture = this.findById(factureId);
+    if (!facture) return null;
+    const documentInterne = this.getDocumentInterne(factureId);
+    const mouvements = this.db
+      .prepare(
+        "SELECT produit_id as produitId, emplacement_id as emplacementId, quantite FROM mouvements WHERE facture_id = ? AND type = 'sortie' AND emplacement_id IS NOT NULL"
+      )
+      .all(factureId) as { produitId: string; emplacementId: string; quantite: number }[];
+
+    return {
+      clientNom: facture.clientNom,
+      clientTelephone: facture.clientTelephone,
+      clientAdresse: facture.clientAdresse,
+      modeReglement: facture.modeReglement,
+      lignes: facture.lignes.map((l) => {
+        const doc = documentInterne.find((d) => d.motif === l.motif && d.taille === l.taille);
+        const allocations = mouvements.filter((m) => m.produitId === l.produitId).map((m) => ({ emplacementId: m.emplacementId, quantite: m.quantite }));
+        return {
+          produitId: l.produitId,
+          motif: l.motif,
+          taille: l.taille,
+          quantite: l.quantite,
+          prixUnitaire: l.prixUnitaire,
+          allocationsDepots: allocations,
+          fournisseurExterne: doc?.fournisseur ?? null,
+          prixAchatExterne: doc?.prixAchat ?? null,
+        };
+      }),
+    };
   }
 }

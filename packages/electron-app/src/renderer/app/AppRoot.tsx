@@ -39,6 +39,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   const [activeScreen, setActiveScreen] = useState<ScreenId>("dashboard");
   const [loading, setLoading] = useState(true);
   const [cibleSurbrillance, setCibleSurbrillance] = useState<CibleOperation | null>(null);
+  const [factureAPreRemplir, setFactureAPreRemplir] = useState<string | null>(null);
 
   /**
    * Navigation cliquable centralisée (§16-§23 de la consolidation) : reçoit
@@ -95,7 +96,13 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       case "transferts":
         return <TransfertsScreen />;
       case "ventes":
-        return <VentesScreen session={{ userId: session!.userId, nom: session!.nom }} />;
+        return (
+          <VentesScreen
+            session={{ userId: session!.userId, nom: session!.nom }}
+            factureAPreRemplir={factureAPreRemplir}
+            onPreRemplissageConsomme={() => setFactureAPreRemplir(null)}
+          />
+        );
       case "factures":
         return (
           <FacturesScreen
@@ -103,6 +110,10 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
             cibleSurbrillance={cibleSurbrillance?.type === "facture" ? cibleSurbrillance.id : null}
             onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
             onNouvelleSortie={() => setActiveScreen("ventes")}
+            onModifierFacture={(factureId) => {
+              setFactureAPreRemplir(factureId);
+              setActiveScreen("ventes");
+            }}
           />
         );
       case "historique":

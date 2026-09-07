@@ -204,15 +204,28 @@ export function registerMetierIpcHandlers(
     }
   });
 
+  /**
+   * Document interne d'approvisionnement — accessible à tous, sans
+   * distinction Admin/Gérant (§9 de la correction "Facturation").
+   */
+  ipcMain.handle("factures:documentInterne", (_e, factureId: string) => factureRepository.getDocumentInterne(factureId));
+
+  /**
+   * Données pour préremplir un nouveau formulaire de vente à partir
+   * d'une facture annulée (§4 : bouton "Modifier"). Ne modifie jamais la
+   * facture d'origine — elle reste la trace de l'erreur.
+   */
+  ipcMain.handle("factures:donneesPourModification", (_e, factureId: string) => factureRepository.getDonneesPourModification(factureId));
+
   // --- Historique ---
   ipcMain.handle("historique:list", () => mouvementRepository.list());
   ipcMain.handle("historique:listEnrichi", () => {
     const session = sessionManager.get();
-    const mouvements = mouvementRepository.listEnrichi();
-    // Anonymisation systématique (§12 de la correction : l'Historique du
-    // Gérant reste global, mais sans révéler l'identité des autres
-    // utilisateurs) — décidée ici, jamais côté Renderer.
-    return session ? anonymiserActivite(mouvements, session) : mouvements;
+    // "1 vente = 1 événement" (correction §1/§2/§16) — remplace l'ancien
+    // affichage mouvement par mouvement. Anonymisation systématique,
+    // décidée ici, jamais côté Renderer.
+    const evenements = mouvementRepository.listEvenements();
+    return session ? anonymiserActivite(evenements, session) : evenements;
   });
 
   // --- Dashboard ---
@@ -267,7 +280,7 @@ export function registerMetierIpcHandlers(
       // mais anonymisée côté serveur pour le Gérant (§4/§23) : jamais
       // l'identité d'un autre utilisateur, sa propre identité restant
       // visible (le Renderer peut afficher "Vous").
-      activiteRecente: anonymiserActivite(mouvementRepository.activiteRecenteGlobale(10), session),
+      activiteRecente: anonymiserActivite(mouvementRepository.listEvenements(10), session),
 
       // Gérant — stock GLOBAL consultable (décision confirmée §6 : le
       // Gérant peut voir Akébé, Akanda et le total, comme l'Administrateur).

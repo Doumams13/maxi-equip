@@ -1,13 +1,19 @@
 import type { auth } from "@maxi-equip/domain";
-import type { MouvementEnrichi } from "../repositories/mouvementRepository.js";
 import type { Facture } from "@maxi-equip/shared-types";
 
 type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null };
+interface AvecAuteur {
+  utilisateurId: string | null;
+  utilisateurNom: string | null;
+  utilisateurRole: string | null;
+}
 
 /**
  * Logique centralisée de visibilité de l'auteur d'une opération —
  * Consolidation Administrateur/Gérant. Utilisée partout où une activité
- * (mouvement) est renvoyée au Renderer : Historique, Dashboard.
+ * est renvoyée au Renderer : Historique, Dashboard. Générique — s'applique
+ * aussi bien à un mouvement brut enrichi qu'à un événement consolidé
+ * (une même logique, jamais dupliquée à plusieurs endroits, §23).
  *
  * Règle (§2-§5 de la correction) :
  * - Administrateur : voit toujours l'auteur de toute opération ;
@@ -21,13 +27,13 @@ type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: st
  * principe déjà établi du projet : "le Renderer ne doit pas être
  * considéré comme une source de confiance").
  */
-export function anonymiserActivite(mouvements: MouvementEnrichi[], session: auth.SessionLocale): MouvementEnrichi[] {
-  if (session.role === "administrateur") return mouvements;
+export function anonymiserActivite<T extends AvecAuteur>(activites: T[], session: auth.SessionLocale): T[] {
+  if (session.role === "administrateur") return activites;
 
-  return mouvements.map((m) => {
-    const estSonPropreOperation = m.utilisateurId === session.userId;
-    if (estSonPropreOperation) return m;
-    return { ...m, utilisateurId: null, utilisateurNom: null, utilisateurRole: null };
+  return activites.map((a) => {
+    const estSaPropreOperation = a.utilisateurId === session.userId;
+    if (estSaPropreOperation) return a;
+    return { ...a, utilisateurId: null, utilisateurNom: null, utilisateurRole: null };
   });
 }
 

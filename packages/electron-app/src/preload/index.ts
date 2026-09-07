@@ -65,21 +65,21 @@ export interface StagedImage {
   dataUrl: string;
 }
 
-export interface MouvementEnrichi {
+export interface EvenementHistorique {
   id: string;
-  type: string;
+  type: "vente" | "annulation" | "entree" | "transfert";
   date: string;
-  quantite: number;
-  produitId: string;
-  produitMotif: string;
-  produitReference: string;
-  produitTaille: string;
+  quantite: number | null;
+  produitMotif: string | null;
+  produitTaille: string | null;
   emplacementNom: string | null;
   emplacementSourceNom: string | null;
   emplacementDestinationNom: string | null;
   factureId: string | null;
   factureNumero: string | null;
   clientNom: string | null;
+  montant: number | null;
+  motifAnnulation: string | null;
   utilisateurId: string | null;
   utilisateurNom: string | null;
   utilisateurRole: string | null;
@@ -141,8 +141,30 @@ const maxiEquipApi = {
   marquerFactureLivree: (factureId: string): Promise<{ success: boolean }> => ipcRenderer.invoke("factures:marquerLivree", factureId),
   annulerFacture: (factureId: string, motif: string): Promise<{ success: boolean; message?: string }> =>
     ipcRenderer.invoke("factures:annuler", factureId, motif),
+  getDocumentInterneFacture: (
+    factureId: string
+  ): Promise<{ motif: string; taille: string; quantiteTotale: number; quantiteInterne: number; quantiteExterne: number; fournisseur: string | null; prixAchat: number | null }[]> =>
+    ipcRenderer.invoke("factures:documentInterne", factureId),
+  getDonneesPourModification: (
+    factureId: string
+  ): Promise<{
+    clientNom: string;
+    clientTelephone: string | null;
+    clientAdresse: string | null;
+    modeReglement: string | null;
+    lignes: {
+      produitId: string | null;
+      motif: string;
+      taille: string;
+      quantite: number;
+      prixUnitaire: number;
+      allocationsDepots: { emplacementId: string; quantite: number }[];
+      fournisseurExterne: string | null;
+      prixAchatExterne: number | null;
+    }[];
+  } | null> => ipcRenderer.invoke("factures:donneesPourModification", factureId),
   listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
-  listHistoriqueEnrichi: (): Promise<MouvementEnrichi[]> => ipcRenderer.invoke("historique:listEnrichi"),
+  listHistoriqueEnrichi: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("historique:listEnrichi"),
 
   getDashboardSummary: (): Promise<{
     stockTousDepots: number;
@@ -157,7 +179,7 @@ const maxiEquipApi = {
     stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
     topProduitsVendus: { label: string; quantite: number }[];
     produitsSousSeuilListe: { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
-    activiteRecente: MouvementEnrichi[];
+    activiteRecente: EvenementHistorique[];
     stockDepots: number;
     stockParEmplacementPourGerant: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
     mesVentesAujourdhui: number;

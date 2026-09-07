@@ -121,6 +121,9 @@ function SaleConfirmModal({
 
 export interface VentesScreenProps {
   session: { userId: string; nom: string };
+  /** Facture annulée à partir de laquelle préremplir une nouvelle vente (§4 de la correction : "Modifier" une facture annulée). */
+  factureAPreRemplir?: string | null;
+  onPreRemplissageConsomme?: () => void;
 }
 
 /**
@@ -133,7 +136,7 @@ export interface VentesScreenProps {
  * vérification par dépôt vient de VenteService, qui appelle lui-même
  * domain.stock.applySortie.
  */
-export function VentesScreen({ session }: VentesScreenProps) {
+export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageConsomme }: VentesScreenProps) {
   const { showSuccess, showWarning, showError } = useToast();
   const [produits, setProduits] = useState<Produit[]>([]);
   const [depots, setDepots] = useState<Emplacement[]>([]);
@@ -168,6 +171,38 @@ export function VentesScreen({ session }: VentesScreenProps) {
       await chargerStocks(seulsDepots);
     })();
   }, []);
+
+  // Préremplissage depuis une facture annulée (§4 : bouton "Modifier") —
+  // reconstruit intégralement le formulaire à partir des données déjà
+  // enregistrées ; la validation/soumission suit ensuite le circuit
+  // normal, qui crée une facture entièrement NEUVE (§5 : "gérée comme une
+  // nouvelle facture", l'ancienne reste la trace de l'erreur, inchangée).
+  useEffect(() => {
+    if (!factureAPreRemplir) return;
+    void (async () => {
+      const donnees = await window.maxiEquip.getDonneesPourModification(factureAPreRemplir);
+      if (!donnees) {
+        showError("Facture introuvable", "Impossible de récupérer les données de cette facture.");
+        onPreRemplissageConsomme?.();
+        return;
+      }
+      setClientNom(donnees.clientNom);
+      setClientTelephone(donnees.clientTelephone ?? "");
+      if (donnees.modeReglement) setModeReglement(donnees.modeReglement);
+      setLignes(
+        donnees.lignes.map((l) => ({
+          produitId: l.produitId ?? "",
+          quantite: String(l.quantite),
+          prixUnitaire: String(l.prixUnitaire),
+          allocations: Object.fromEntries(l.allocationsDepots.map((a) => [a.emplacementId, String(a.quantite)])),
+          fournisseurExterne: l.fournisseurExterne ?? "",
+          prixAchatExterne: l.prixAchatExterne !== null ? String(l.prixAchatExterne) : "",
+        }))
+      );
+      showSuccess("Vente reconstituée", "Corrigez les informations nécessaires puis validez pour générer une nouvelle facture.");
+      onPreRemplissageConsomme?.();
+    })();
+  }, [factureAPreRemplir]);
 
   function updateLigne(index: number, patch: Partial<LigneVenteForm>) {
     setLignes((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));

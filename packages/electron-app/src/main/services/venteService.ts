@@ -44,6 +44,7 @@ export interface VenteInput {
   vendeurUtilisateurId: string;
   vendeurCompteConnecteNom: string;
   vendeurNomManuel: string | null;
+  modeReglement: string | null;
   lignes: VenteLigneInput[];
 }
 
@@ -95,7 +96,7 @@ export class VenteService {
     const executer = this.db.transaction(() => {
       const lignesFacture: LigneFacture[] = [];
       const lignesReleveInterne: LigneReleveInterne[] = [];
-      const mouvementsAEnregistrer: { produitId: string; emplacementId: string; quantite: number }[] = [];
+      const mouvementsAEnregistrer: { produitId: string; emplacementId: string | null; quantite: number; note: string | null }[] = [];
 
       for (const ligne of input.lignes) {
         const produit = this.produitRepository.findById(ligne.produitId);
@@ -132,7 +133,7 @@ export class VenteService {
           const disponible = this.stockRepository.getQuantite(produit.id, allocation.emplacementId);
           const delta = domainStock.applySortie(allocation.emplacementId, disponible, allocation.quantite);
           this.stockRepository.applyDelta({ ...delta, produitId: produit.id });
-          mouvementsAEnregistrer.push({ produitId: produit.id, emplacementId: allocation.emplacementId, quantite: allocation.quantite });
+          mouvementsAEnregistrer.push({ produitId: produit.id, emplacementId: allocation.emplacementId, quantite: allocation.quantite, note: null });
         }
 
         const quantiteExterne = ligne.quantite - quantiteAllouee;
@@ -140,6 +141,23 @@ export class VenteService {
           throw new VenteValidationError(
             `Répartition incomplète pour "${produit.motif} ${produit.taille}" (${quantiteAllouee}/${ligne.quantite} couvert par les dépôts) — fournisseur et coût d'achat externes requis pour le complément.`
           );
+        }
+        if (quantiteExterne > 0) {
+          // BUG CORRIGÉ : une vente entièrement (ou partiellement) couverte
+          // par un fournisseur externe ne créait auparavant AUCUNE trace
+          // dans les mouvements — l'Historique n'affichant que des
+          // mouvements, une vente 100% externe y était invisible pour
+          // TOUT LE MONDE (jamais un problème de rôle : reproduit et
+          // confirmé en relisant le code, aucun filtrage par rôle
+          // n'existe dans ce service ni dans les requêtes de lecture).
+          // `emplacementId: null` — aucun dépôt réel n'est concerné,
+          // jamais de déduction de stock ici, uniquement une trace.
+          mouvementsAEnregistrer.push({
+            produitId: produit.id,
+            emplacementId: null,
+            quantite: quantiteExterne,
+            note: `Approvisionnement externe (${ligne.fournisseurExterne})`,
+          });
         }
 
         const ligneFacture = domainInvoicing.buildLigneFacture({
@@ -189,6 +207,7 @@ export class VenteService {
         clientAdresse: input.clientAdresse,
         vendeurUtilisateurId: input.vendeurUtilisateurId,
         vendeurNomManuel: vendeurEffectif.estPrecisionManuelle ? input.vendeurNomManuel : null,
+        modeReglement: input.modeReglement,
         lignes: lignesFacture,
         total,
       });
@@ -206,7 +225,7 @@ export class VenteService {
           date: now,
           factureId,
           utilisateurId: input.vendeurUtilisateurId,
-          note: null,
+          note: m.note,
         });
       }
 
@@ -214,5 +233,59 @@ export class VenteService {
     });
 
     return executer();
+  }
+
+  /**
+   * Annule une vente/facture (§5/§6/§21 de la correction) : suppression
+   * douce de la facture (jamais physique — reste consultable via
+   * l'historique avec son motif), restauration du stock réellement
+   * prélevé sur les dépôts. Aucune restauration pour la part externe
+   * (`emplacementId: null`) — rien n'avait été ajouté au stock MAXI EQUIP
+   * pour cette part, il n'y a donc rien à restaurer (§9 : "les 100
+   * provenant de l'extérieur ne deviennent jamais stock MAXI EQUIP").
+   *
+   * La restauration elle-même est enregistrée comme un mouvement
+   * d'entrée traçable, rattaché à la même facture — visible dans
+   * l'Historique, cohérent avec l'exigence de traçabilité (§16).
+   */
+  annulerVente(factureId: string, motif: string, annuleePar: string): void {
+    if (!motif || motif.trim().length === 0) {
+      throw new VenteValidationError("Un motif d'annulation est requis.");
+    }
+
+    const executer = this.db.transaction(() => {
+      const facture = this.factureRepository.findById(factureId);
+      if (!facture) {
+        throw new VenteValidationError("Facture introuvable.");
+      }
+      if (facture.annuleeLe) {
+        throw new VenteValidationError("Cette facture est déjà annulée.");
+      }
+
+      const mouvements = this.mouvementRepository.listParFacture(factureId);
+      const now = new Date().toISOString();
+
+      for (const m of mouvements) {
+        if (m.type !== "sortie" || !m.emplacementId) continue; // rien à restaurer pour la part externe
+        const delta = domainStock.applyEntree(m.emplacementId, m.quantite);
+        this.stockRepository.applyDelta({ ...delta, produitId: m.produitId });
+        this.mouvementRepository.create({
+          type: "entree",
+          produitId: m.produitId,
+          emplacementId: m.emplacementId,
+          emplacementSourceId: null,
+          emplacementDestinationId: null,
+          quantite: m.quantite,
+          date: now,
+          factureId,
+          utilisateurId: annuleePar,
+          note: `Restauration suite à l'annulation de la facture ${facture.numero}`,
+        });
+      }
+
+      this.factureRepository.annuler(factureId, motif.trim(), annuleePar);
+    });
+
+    executer();
   }
 }

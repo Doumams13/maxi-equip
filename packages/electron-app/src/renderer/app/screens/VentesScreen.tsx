@@ -142,6 +142,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
   const [clientNom, setClientNom] = useState("");
   const [clientTelephone, setClientTelephone] = useState("");
   const [vendeurNomManuel, setVendeurNomManuel] = useState("");
+  const [modeReglement, setModeReglement] = useState("Espèces");
   const [lignes, setLignes] = useState<LigneVenteForm[]>([ligneVide()]);
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -233,6 +234,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
         vendeurUtilisateurId: session.userId,
         vendeurCompteConnecteNom: session.nom,
         vendeurNomManuel: vendeurNomManuel.trim() || null,
+        modeReglement,
         lignes: lignesValides.map((l) => ({
           produitId: l.produitId,
           quantite: Number(l.quantite),
@@ -271,7 +273,7 @@ export function VentesScreen({ session }: VentesScreenProps) {
 
       <form onSubmit={(e) => void handleOuvrirVerification(e)}>
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Client</label>
               <input style={inputStyle} value={clientNom} onChange={(e) => setClientNom(e.target.value)} placeholder="Nom du client" />
@@ -287,6 +289,14 @@ export function VentesScreen({ session }: VentesScreenProps) {
                 placeholder="Ex. 077 12 34 56"
                 required
               />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Mode de règlement</label>
+              <select style={inputStyle} value={modeReglement} onChange={(e) => setModeReglement(e.target.value)}>
+                <option value="Espèces">Espèces</option>
+                <option value="Mobile Money">Mobile Money</option>
+                <option value="Virement">Virement</option>
+              </select>
             </div>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Vendeur (par défaut : {session.nom})</label>

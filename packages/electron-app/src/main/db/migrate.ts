@@ -14,6 +14,7 @@ export function runMigrations(db: Database.Database): void {
   fixReferenceUniqueConstraint(db);
   addLargeurHauteurColumnsIfMissing(db);
   addUtilisateurIdToMouvementsIfMissing(db);
+  migrateFacturesPourAnnulationEtLivraison(db);
 }
 
 /**
@@ -140,4 +141,82 @@ function addLargeurHauteurColumnsIfMissing(db: Database.Database): void {
   if (!columns.some((c) => c.name === "hauteur")) {
     db.exec("ALTER TABLE produits ADD COLUMN hauteur REAL");
   }
+}
+
+/**
+ * Correction "Facturation" (§5/§13/§14/§21) : ajoute les colonnes de
+ * statut de livraison, d'annulation (suppression douce) et de mode de
+ * règlement sur une base créée avant cette évolution, ET retire l'ancien
+ * `numero TEXT NOT NULL UNIQUE` (bloquerait la réutilisation du même
+ * numéro après une annulation+correction, §4 : "on conserve le même
+ * numéro associé à l'opération").
+ *
+ * Même précaution que pour `utilisateur_id` : l'index partiel n'est créé
+ * qu'APRÈS avoir garanti que les colonnes existent, jamais dans
+ * schema.sql lui-même (bug déjà rencontré et corrigé une fois).
+ */
+function migrateFacturesPourAnnulationEtLivraison(db: Database.Database): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'factures'").get() as
+    | { sql: string }
+    | undefined;
+  const ancienneContrainteUnique = row && /numero\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(row.sql);
+
+  if (ancienneContrainteUnique) {
+    db.pragma("foreign_keys = OFF");
+    try {
+      const migrer = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE factures_nouveau (
+            id                     TEXT PRIMARY KEY,
+            numero                 TEXT NOT NULL,
+            date                   TEXT NOT NULL,
+            emplacement_id         TEXT NOT NULL REFERENCES emplacements (id),
+            client_nom             TEXT NOT NULL,
+            client_telephone       TEXT,
+            client_adresse         TEXT,
+            vendeur_utilisateur_id TEXT NOT NULL REFERENCES utilisateurs (id),
+            vendeur_nom_manuel     TEXT,
+            mode_reglement         TEXT,
+            total                  INTEGER NOT NULL,
+            statut_livraison       TEXT NOT NULL DEFAULT 'en_attente' CHECK (statut_livraison IN ('en_attente', 'livree')),
+            livree_le              TEXT,
+            annulee_le             TEXT,
+            annulee_par            TEXT REFERENCES utilisateurs (id),
+            motif_annulation       TEXT,
+            created_at             TEXT NOT NULL,
+            updated_at             TEXT NOT NULL
+          );
+        `);
+        db.exec(`
+          INSERT INTO factures_nouveau
+            (id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse,
+             vendeur_utilisateur_id, vendeur_nom_manuel, total, created_at, updated_at)
+          SELECT id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse,
+                 vendeur_utilisateur_id, vendeur_nom_manuel, total, created_at, updated_at
+          FROM factures;
+        `);
+        db.exec("DROP TABLE factures;");
+        db.exec("ALTER TABLE factures_nouveau RENAME TO factures;");
+      });
+      migrer();
+    } finally {
+      db.pragma("foreign_keys = ON");
+    }
+  } else {
+    // Base déjà sans l'ancienne contrainte, mais peut-être créée avant
+    // l'ajout des colonnes de livraison/annulation/règlement — les
+    // ajouter individuellement si nécessaire (idempotent).
+    const columns = db.prepare("PRAGMA table_info(factures)").all() as { name: string }[];
+    const ajouterSiAbsente = (nom: string, definition: string) => {
+      if (!columns.some((c) => c.name === nom)) db.exec(`ALTER TABLE factures ADD COLUMN ${definition}`);
+    };
+    ajouterSiAbsente("mode_reglement", "mode_reglement TEXT");
+    ajouterSiAbsente("statut_livraison", "statut_livraison TEXT NOT NULL DEFAULT 'en_attente'");
+    ajouterSiAbsente("livree_le", "livree_le TEXT");
+    ajouterSiAbsente("annulee_le", "annulee_le TEXT");
+    ajouterSiAbsente("annulee_par", "annulee_par TEXT REFERENCES utilisateurs(id)");
+    ajouterSiAbsente("motif_annulation", "motif_annulation TEXT");
+  }
+
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_factures_numero_actif ON factures (numero) WHERE annulee_le IS NULL;");
 }

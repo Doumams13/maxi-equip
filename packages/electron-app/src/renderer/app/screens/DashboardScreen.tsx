@@ -156,11 +156,15 @@ const TYPE_LABELS_EVENEMENT: Record<EvenementHistorique["type"], string> = {
  * serveur l'a transmis — anonymisation déjà décidée côté Main.
  */
 function LigneActivite({ m, userId, onNaviguer }: { m: EvenementHistorique; userId: string; onNaviguer: (c: CibleOperation) => void }) {
-  const cible: CibleOperation = m.factureId ? { type: "facture", id: m.factureId } : { type: "mouvement", id: m.id };
+  // Toutes les opérations sont désormais cliquables (correction "Entrée
+  // de stock / Transferts" §12-§17) : entrée → Entrée de stock, transfert
+  // → Transferts, vente/annulation → Factures.
+  const cible: CibleOperation | null =
+    m.factureId !== null ? { type: "facture", id: m.factureId } : m.type === "entree" || m.type === "transfert" ? { type: m.type, id: m.id } : null;
   const estVenteOuAnnulation = m.type === "vente" || m.type === "annulation";
   return (
     <button
-      onClick={() => onNaviguer(cible)}
+      onClick={() => cible && onNaviguer(cible)}
       style={{
         display: "flex",
         justifyContent: "space-between",

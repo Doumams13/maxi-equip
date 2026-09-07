@@ -14,11 +14,11 @@ type Session = { userId: string; identifiant: string; nom: string; role: string 
 
 /**
  * Cible d'une navigation "cliquable" depuis l'Historique ou le Dashboard
- * (Consolidation §16-§21) — un type d'opération + son identifiant réel,
- * jamais une correspondance approximative par nom/date/montant (§19 :
- * "utiliser un identifiant unique et fiable").
+ * (Consolidation §16-§21, complétée par "Entrée de stock / Transferts"
+ * §12-§17) — un type d'opération + son identifiant réel, jamais une
+ * correspondance approximative par nom/date/montant.
  */
-export type CibleOperation = { type: "facture"; id: string } | { type: "mouvement"; id: string };
+export type CibleOperation = { type: "facture"; id: string } | { type: "entree"; id: string } | { type: "transfert"; id: string };
 
 export interface AppRootProps {
   onLoggedOut: () => void;
@@ -49,7 +49,8 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
    * une correspondance approximative par texte affiché.
    */
   function irVersOperation(cible: CibleOperation) {
-    setActiveScreen(cible.type === "facture" ? "factures" : "historique");
+    const ecran = cible.type === "facture" ? "factures" : cible.type === "entree" ? "stock" : "transferts";
+    setActiveScreen(ecran);
     setCibleSurbrillance(cible);
   }
 
@@ -92,9 +93,21 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       case "produits":
         return <ProduitsScreen session={{ userId: session!.userId }} />;
       case "stock":
-        return <StockScreen />;
+        return (
+          <StockScreen
+            session={{ userId: session!.userId }}
+            cibleSurbrillance={cibleSurbrillance?.type === "entree" ? cibleSurbrillance.id : null}
+            onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
+          />
+        );
       case "transferts":
-        return <TransfertsScreen />;
+        return (
+          <TransfertsScreen
+            session={{ userId: session!.userId }}
+            cibleSurbrillance={cibleSurbrillance?.type === "transfert" ? cibleSurbrillance.id : null}
+            onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
+          />
+        );
       case "ventes":
         return (
           <VentesScreen
@@ -120,7 +133,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
         return (
           <HistoriqueScreen
             session={{ userId: session!.userId }}
-            cibleSurbrillance={cibleSurbrillance?.type === "mouvement" ? cibleSurbrillance.id : null}
+            cibleSurbrillance={null}
             onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
             onNaviguerVersOperation={irVersOperation}
           />

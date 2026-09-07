@@ -42,6 +42,7 @@ export interface EvenementHistorique {
   quantite: number | null;
   produitMotif: string | null;
   produitTaille: string | null;
+  produitReference: string | null;
   emplacementNom: string | null;
   emplacementSourceNom: string | null;
   emplacementDestinationNom: string | null;
@@ -62,7 +63,7 @@ const SELECT_EVENEMENTS = `
     -- événement dans l'historique", jamais plusieurs lignes techniques).
     SELECT
       'facture:' || f.id || ':effectuee' as id, 'vente' as type, f.date as date,
-      NULL as quantite, NULL as produitMotif, NULL as produitTaille,
+      NULL as quantite, NULL as produitMotif, NULL as produitTaille, NULL as produitReference,
       NULL as emplacementNom, NULL as emplacementSourceNom, NULL as emplacementDestinationNom,
       f.id as factureId, f.numero as factureNumero, f.client_nom as clientNom, f.total as montant,
       NULL as motifAnnulation,
@@ -77,7 +78,7 @@ const SELECT_EVENEMENTS = `
     -- technique interne, non affiché séparément ici).
     SELECT
       'facture:' || f.id || ':annulee' as id, 'annulation' as type, f.annulee_le as date,
-      NULL, NULL, NULL, NULL, NULL, NULL,
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       f.id, f.numero, f.client_nom, f.total,
       f.motif_annulation,
       f.annulee_par, u2.nom, u2.role
@@ -91,7 +92,7 @@ const SELECT_EVENEMENTS = `
     -- jamais concernés par le regroupement ci-dessus.
     SELECT
       m.id, m.type, m.date,
-      m.quantite, p.motif, p.taille,
+      m.quantite, p.motif, p.taille, p.reference,
       e.nom, es.nom, ed.nom,
       NULL, NULL, NULL, NULL,
       NULL,
@@ -108,6 +109,16 @@ const SELECT_EVENEMENTS = `
 
 export class MouvementRepository {
   constructor(private readonly db: Database.Database) {}
+
+  /** Historique COMPLET des entrées de stock — jamais limité (correction "Entrée de stock / Transferts" §2 : "l'utilisateur doit pouvoir accéder à l'intégralité"). Pagination/recherche/tri gérés côté écran. */
+  listEntrees(): EvenementHistorique[] {
+    return this.db.prepare(`SELECT * FROM (${SELECT_EVENEMENTS}) WHERE type = 'entree' ORDER BY date DESC`).all() as EvenementHistorique[];
+  }
+
+  /** Historique COMPLET des transferts — même principe que listEntrees. */
+  listTransferts(): EvenementHistorique[] {
+    return this.db.prepare(`SELECT * FROM (${SELECT_EVENEMENTS}) WHERE type = 'transfert' ORDER BY date DESC`).all() as EvenementHistorique[];
+  }
 
   /** Historique le plus récent d'abord, limité (cahier des charges §14 — filtres de période à venir en Phase 3+). */
   list(limit = 100): Mouvement[] {

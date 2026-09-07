@@ -301,13 +301,22 @@ export function HistoriqueScreen({
               <tbody>
                 {tries.map((e) => {
                   const Icone = TYPE_ICONS[e.type];
-                  const cliquable = e.factureId !== null;
+                  // Toutes les opérations sont désormais cliquables — pas
+                  // seulement les ventes/annulations liées à une facture
+                  // (correction "Entrée de stock / Transferts" §12-§17 :
+                  // navigation complète depuis l'Historique général).
+                  const cible: CibleOperation | null =
+                    e.factureId !== null
+                      ? { type: "facture", id: e.factureId }
+                      : e.type === "entree" || e.type === "transfert"
+                        ? { type: e.type, id: e.id }
+                        : null;
                   return (
                     <tr
                       key={e.id}
                       data-operation-id={e.id}
-                      onClick={() => cliquable && onNaviguerVersOperation({ type: "facture", id: e.factureId! })}
-                      style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: cliquable ? "pointer" : "default", ...styleSurbrillance(e.id) }}
+                      onClick={() => cible && onNaviguerVersOperation(cible)}
+                      style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: cible ? "pointer" : "default", ...styleSurbrillance(e.id) }}
                     >
                       <td style={{ padding: "10px 16px", color: defaultTokens.colors.textSoft, whiteSpace: "nowrap" }}>{new Date(e.date).toLocaleString("fr-FR")}</td>
                       <td style={{ padding: "10px 16px" }}>

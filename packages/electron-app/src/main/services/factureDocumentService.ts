@@ -100,8 +100,10 @@ function dessinerFacture(doc: PDFKit.PDFDocument, { facture, nomMagasin, vendeur
   doc.font("Helvetica").fontSize(9).fillColor(NOIR).text(facture.numero, 400, 90.7, { width: MARGE_DROITE - 400, align: "right" });
   const dateAffichee = new Date(facture.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
   doc.text(`Date : ${dateAffichee}`, 400, 101.8, { width: MARGE_DROITE - 400, align: "right" });
-  const statutAffiche = facture.statutLivraison === "livree" ? "Payée / Livrée" : "Payée / En attente de livraison";
-  doc.font("Helvetica-Oblique").fontSize(8).text(`Statut : ${statutAffiche}`, 380, 118.4, { width: MARGE_DROITE - 380, align: "right" });
+  // Statut de livraison = uniquement une information interne à
+  // l'application (écran Factures) — jamais sur le document remis au
+  // client, qui affiche simplement "Payée".
+  doc.font("Helvetica-Oblique").fontSize(8).text("Statut : Payée", 380, 118.4, { width: MARGE_DROITE - 380, align: "right" });
 
   // --- Bloc informations légales MAXI EQUIP (gauche) ---
   doc.font("Helvetica").fontSize(7.6).fillColor(NOIR);

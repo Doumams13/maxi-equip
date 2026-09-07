@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { ipcMain, shell } from "electron";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
 import { StockRepository } from "../repositories/stockRepository.js";
@@ -9,6 +9,7 @@ import { VenteService, VenteValidationError, type VenteInput } from "../services
 import { ImageService } from "../services/imageService.js";
 import { SessionManager } from "../auth/sessionManager.js";
 import { anonymiserActivite, anonymiserFactures } from "../services/visibiliteService.js";
+import { genererFacturePdf } from "../services/factureDocumentService.js";
 import { stock as domainStock } from "@maxi-equip/domain";
 
 /**
@@ -152,6 +153,55 @@ export function registerMetierIpcHandlers(
     const session = sessionManager.get();
     const factures = factureRepository.listAvecVendeur();
     return session ? anonymiserFactures(factures, session) : factures;
+  });
+
+  ipcMain.handle("factures:resumeMois", () => factureRepository.sommeTotalMoisCourant());
+
+  /**
+   * Génère (ou régénère) le PDF de la facture et l'ouvre avec
+   * l'application par défaut du système — jamais une nouvelle facture ni
+   * un nouveau numéro (§3/§4 de la correction "Facturation" : "cliquer
+   * plusieurs fois ne doit pas créer de doublon"). Le fichier est
+   * réécrit à chaque appel à partir des données déjà enregistrées —
+   * cohérent même si le statut (livraison) a changé depuis la première
+   * génération.
+   */
+  ipcMain.handle("factures:ouvrirPdf", async (_e, factureId: string) => {
+    const facture = factureRepository.findByIdAvecVendeur(factureId);
+    if (!facture) return { success: false, message: "Facture introuvable." };
+    const emplacement = emplacementRepository.list().find((e) => e.id === facture.emplacementId);
+    const vendeurNomAffiche = facture.vendeurNomManuel ?? facture.vendeurNom ?? "—";
+    try {
+      const chemin = await genererFacturePdf({
+        facture,
+        nomMagasin: emplacement?.nom ?? "MAXI EQUIP",
+        vendeurNomAffiche,
+      });
+      const erreur = await shell.openPath(chemin);
+      if (erreur) return { success: false, message: erreur };
+      return { success: true, chemin };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[factures] génération PDF impossible :", err);
+      return { success: false, message: "Impossible de générer le document de la facture." };
+    }
+  });
+
+  ipcMain.handle("factures:marquerLivree", (_e, factureId: string) => {
+    factureRepository.marquerLivree(factureId);
+    return { success: true };
+  });
+
+  ipcMain.handle("factures:annuler", (_e, factureId: string, motif: string) => {
+    const session = sessionManager.get();
+    if (!session) return { success: false, message: "Session expirée." };
+    try {
+      venteService.annulerVente(factureId, motif, session.userId);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof VenteValidationError ? err.message : "Une erreur inattendue s'est produite.";
+      return { success: false, message };
+    }
   });
 
   // --- Historique ---

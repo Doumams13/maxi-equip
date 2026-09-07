@@ -1,5 +1,25 @@
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
+import { cpSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
+import type { Plugin } from "vite";
+
+/**
+ * Copie les images de la facture (logo + filigrane extraits du modèle
+ * officiel) vers dist-main/assets — nécessaires à l'exécution
+ * (factureDocumentService.ts y accède via un chemin relatif, pas un
+ * import Vite, car chargées dynamiquement par pdfkit à l'exécution).
+ */
+function copierAssetsFacture(): Plugin {
+  return {
+    name: "copier-assets-facture",
+    closeBundle() {
+      const source = resolve(__dirname, "src/main/assets");
+      const destination = resolve(__dirname, "dist-main/assets");
+      if (existsSync(source)) cpSync(source, destination, { recursive: true });
+    },
+  };
+}
 
 /**
  * Nos propres packages du monorepo (@maxi-equip/...) doivent être RÉELLEMENT
@@ -20,7 +40,7 @@ const EXCLUDE_FROM_EXTERNALIZATION = [
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: EXCLUDE_FROM_EXTERNALIZATION })],
+    plugins: [externalizeDepsPlugin({ exclude: EXCLUDE_FROM_EXTERNALIZATION }), copierAssetsFacture()],
     build: {
       outDir: "dist-main/main",
       rollupOptions: {

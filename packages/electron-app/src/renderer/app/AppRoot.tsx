@@ -102,6 +102,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
             session={{ userId: session!.userId, role: session!.role }}
             cibleSurbrillance={cibleSurbrillance?.type === "facture" ? cibleSurbrillance.id : null}
             onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
+            onNouvelleSortie={() => setActiveScreen("ventes")}
           />
         );
       case "historique":

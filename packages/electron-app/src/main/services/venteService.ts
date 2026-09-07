@@ -44,6 +44,7 @@ export interface VenteInput {
   vendeurUtilisateurId: string;
   vendeurCompteConnecteNom: string;
   vendeurNomManuel: string | null;
+  modeReglement: string | null;
   lignes: VenteLigneInput[];
 }
 
@@ -206,6 +207,7 @@ export class VenteService {
         clientAdresse: input.clientAdresse,
         vendeurUtilisateurId: input.vendeurUtilisateurId,
         vendeurNomManuel: vendeurEffectif.estPrecisionManuelle ? input.vendeurNomManuel : null,
+        modeReglement: input.modeReglement,
         lignes: lignesFacture,
         total,
       });
@@ -231,5 +233,59 @@ export class VenteService {
     });
 
     return executer();
+  }
+
+  /**
+   * Annule une vente/facture (§5/§6/§21 de la correction) : suppression
+   * douce de la facture (jamais physique — reste consultable via
+   * l'historique avec son motif), restauration du stock réellement
+   * prélevé sur les dépôts. Aucune restauration pour la part externe
+   * (`emplacementId: null`) — rien n'avait été ajouté au stock MAXI EQUIP
+   * pour cette part, il n'y a donc rien à restaurer (§9 : "les 100
+   * provenant de l'extérieur ne deviennent jamais stock MAXI EQUIP").
+   *
+   * La restauration elle-même est enregistrée comme un mouvement
+   * d'entrée traçable, rattaché à la même facture — visible dans
+   * l'Historique, cohérent avec l'exigence de traçabilité (§16).
+   */
+  annulerVente(factureId: string, motif: string, annuleePar: string): void {
+    if (!motif || motif.trim().length === 0) {
+      throw new VenteValidationError("Un motif d'annulation est requis.");
+    }
+
+    const executer = this.db.transaction(() => {
+      const facture = this.factureRepository.findById(factureId);
+      if (!facture) {
+        throw new VenteValidationError("Facture introuvable.");
+      }
+      if (facture.annuleeLe) {
+        throw new VenteValidationError("Cette facture est déjà annulée.");
+      }
+
+      const mouvements = this.mouvementRepository.listParFacture(factureId);
+      const now = new Date().toISOString();
+
+      for (const m of mouvements) {
+        if (m.type !== "sortie" || !m.emplacementId) continue; // rien à restaurer pour la part externe
+        const delta = domainStock.applyEntree(m.emplacementId, m.quantite);
+        this.stockRepository.applyDelta({ ...delta, produitId: m.produitId });
+        this.mouvementRepository.create({
+          type: "entree",
+          produitId: m.produitId,
+          emplacementId: m.emplacementId,
+          emplacementSourceId: null,
+          emplacementDestinationId: null,
+          quantite: m.quantite,
+          date: now,
+          factureId,
+          utilisateurId: annuleePar,
+          note: `Restauration suite à l'annulation de la facture ${facture.numero}`,
+        });
+      }
+
+      this.factureRepository.annuler(factureId, motif.trim(), annuleePar);
+    });
+
+    executer();
   }
 }

@@ -39,6 +39,12 @@ describe("shared-types (Phase 0 smoke test)", () => {
         { produitId: null, motif: "Marbre Blanc", taille: "60x60 cm", quantite: 30, prixUnitaire: 8500 },
       ],
       total: 255000,
+      modeReglement: "Espèces",
+      statutLivraison: "en_attente",
+      livreeLe: null,
+      annuleeLe: null,
+      annuleePar: null,
+      motifAnnulation: null,
     };
     // Vérifie à la compilation (et non seulement à l'exécution) qu'aucune
     // clé "fournisseur" ou "prixAchat" n'existe sur ce type.

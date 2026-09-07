@@ -50,6 +50,7 @@ describe("VenteService — correctif : traçabilité d'une vente entièrement ex
       vendeurUtilisateurId: "user-admin",
       vendeurCompteConnecteNom: "Administrateur",
       vendeurNomManuel: null,
+      modeReglement: "Espèces",
       lignes: [
         {
           produitId: "p1",
@@ -86,6 +87,7 @@ describe("VenteService — correctif : traçabilité d'une vente entièrement ex
       vendeurUtilisateurId: "user-gerant",
       vendeurCompteConnecteNom: "Gérant",
       vendeurNomManuel: null,
+      modeReglement: "Espèces",
       lignes: [
         {
           produitId: "p1",
@@ -115,6 +117,7 @@ describe("VenteService — correctif : traçabilité d'une vente entièrement ex
       vendeurUtilisateurId: "user-gerant",
       vendeurCompteConnecteNom: "Gérant",
       vendeurNomManuel: null,
+      modeReglement: "Espèces",
       lignes: [
         {
           produitId: "p1",
@@ -127,5 +130,56 @@ describe("VenteService — correctif : traçabilité d'une vente entièrement ex
 
     expect(mouvementsCrees).toHaveLength(1);
     expect(mouvementsCrees[0]).toMatchObject({ emplacementId: "akebe", quantite: 10 });
+  });
+});
+
+describe("VenteService — annulation d'une facture (restauration du stock)", () => {
+  it("restaure le stock UNIQUEMENT pour la part prélevée sur un dépôt, jamais pour la part externe", () => {
+    const mouvementsCrees: unknown[] = [];
+    const applyDelta = vi.fn();
+    const produitRepository = { findById: () => ({ id: "p1", motif: "Marbre", taille: "60 × 60 cm" }) };
+    const stockRepository = { getQuantite: () => 1000, applyDelta };
+    const mouvementRepository = {
+      create: (input: unknown) => {
+        mouvementsCrees.push(input);
+        return "m-" + mouvementsCrees.length;
+      },
+      // Simule une vente déjà enregistrée : 10 depuis Akébé + 5 en externe (aucun dépôt).
+      listParFacture: () => [
+        { id: "m1", type: "sortie", produitId: "p1", emplacementId: "akebe", quantite: 10, factureId: "f1" },
+        { id: "m2", type: "sortie", produitId: "p1", emplacementId: null, quantite: 5, factureId: "f1" },
+      ],
+    };
+    const factureRepository = {
+      findById: () => ({ id: "f1", numero: "FAC-2026-0001", annuleeLe: null }),
+      annuler: vi.fn(),
+    };
+    const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const service = new VenteService(fauxDb as any, produitRepository as any, stockRepository as any, mouvementRepository as any, factureRepository as any);
+
+    service.annulerVente("f1", "Erreur de saisie du client", "user-admin");
+
+    // Un seul mouvement de restauration créé — celui d'Akébé, jamais pour la part externe.
+    expect(mouvementsCrees).toHaveLength(1);
+    expect(mouvementsCrees[0]).toMatchObject({ type: "entree", emplacementId: "akebe", quantite: 10, utilisateurId: "user-admin" });
+    expect(applyDelta).toHaveBeenCalledTimes(1);
+    expect(factureRepository.annuler).toHaveBeenCalledWith("f1", "Erreur de saisie du client", "user-admin");
+  });
+
+  it("refuse d'annuler sans motif", () => {
+    const factureRepository = { findById: () => ({ id: "f1", annuleeLe: null }), annuler: vi.fn() };
+    const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any);
+    expect(() => service.annulerVente("f1", "", "user-admin")).toThrow();
+  });
+
+  it("refuse d'annuler une facture déjà annulée", () => {
+    const factureRepository = { findById: () => ({ id: "f1", annuleeLe: "2026-01-01T00:00:00Z" }), annuler: vi.fn() };
+    const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any);
+    expect(() => service.annulerVente("f1", "Motif", "user-admin")).toThrow();
   });
 });

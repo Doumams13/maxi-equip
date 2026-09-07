@@ -12,7 +12,13 @@ interface FactureRow {
   client_adresse: string | null;
   vendeur_utilisateur_id: string;
   vendeur_nom_manuel: string | null;
+  mode_reglement: string | null;
   total: number;
+  statut_livraison: "en_attente" | "livree";
+  livree_le: string | null;
+  annulee_le: string | null;
+  annulee_par: string | null;
+  motif_annulation: string | null;
 }
 
 function rowToFacture(row: FactureRow, lignes: LigneFacture[]): Facture {
@@ -26,8 +32,14 @@ function rowToFacture(row: FactureRow, lignes: LigneFacture[]): Facture {
     clientAdresse: row.client_adresse,
     vendeurUtilisateurId: row.vendeur_utilisateur_id,
     vendeurNomManuel: row.vendeur_nom_manuel,
+    modeReglement: row.mode_reglement,
     lignes,
     total: row.total,
+    statutLivraison: row.statut_livraison,
+    livreeLe: row.livree_le,
+    annuleeLe: row.annulee_le,
+    annuleePar: row.annulee_par,
+    motifAnnulation: row.motif_annulation,
     createdAt: "",
     updatedAt: "",
   };
@@ -47,31 +59,60 @@ export class FactureRepository {
     return `${prefix}${String(nextSeq).padStart(4, "0")}`;
   }
 
-  list(limit = 50): Facture[] {
-    const rows = this.db.prepare("SELECT * FROM factures ORDER BY date DESC LIMIT ?").all(limit) as FactureRow[];
+  /** Factures ACTIVES uniquement — une facture annulée n'apparaît plus ici (correction "Facturation" §17), seulement via l'historique. */
+  list(limit = 200): Facture[] {
+    const rows = this.db.prepare("SELECT * FROM factures WHERE annulee_le IS NULL ORDER BY date DESC LIMIT ?").all(limit) as FactureRow[];
     return rows.map((row) => rowToFacture(row, this.getLignes(row.id)));
   }
 
-  count(): number {
-    return (this.db.prepare("SELECT COUNT(*) as n FROM factures").get() as { n: number }).n;
+  findById(id: string): Facture | null {
+    const row = this.db.prepare("SELECT * FROM factures WHERE id = ?").get(id) as FactureRow | undefined;
+    return row ? rowToFacture(row, this.getLignes(row.id)) : null;
   }
 
-  /** Somme des totaux de toutes les factures — chiffre d'affaires total (dashboard §3/§13). */
+  /** Facture unique avec le nom/rôle du vendeur résolu — utilisé pour la génération du document PDF. */
+  findByIdAvecVendeur(id: string): (Facture & { vendeurNom: string | null; vendeurRole: string | null }) | null {
+    const facture = this.findById(id);
+    if (!facture) return null;
+    const u = this.db.prepare("SELECT nom, role FROM utilisateurs WHERE id = ?").get(facture.vendeurUtilisateurId) as
+      | { nom: string; role: string }
+      | undefined;
+    return { ...facture, vendeurNom: u?.nom ?? null, vendeurRole: u?.role ?? null };
+  }
+
+  count(): number {
+    return (this.db.prepare("SELECT COUNT(*) as n FROM factures WHERE annulee_le IS NULL").get() as { n: number }).n;
+  }
+
+  /** Somme des totaux des factures ACTIVES — chiffre d'affaires (dashboard §3/§13). Une facture annulée ne compte jamais dans le CA. */
   sommeTotal(): number {
-    return (this.db.prepare("SELECT COALESCE(SUM(total), 0) as s FROM factures").get() as { s: number }).s;
+    return (this.db.prepare("SELECT COALESCE(SUM(total), 0) as s FROM factures WHERE annulee_le IS NULL").get() as { s: number }).s;
+  }
+
+  /** Total facturé sur le mois en cours — bandeau d'en-tête de l'écran Factures ("N factures · X FCFA facturés ce mois-ci"). */
+  sommeTotalMoisCourant(): { nombre: number; total: number } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as nombre, COALESCE(SUM(total), 0) as total FROM factures
+         WHERE annulee_le IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')`
+      )
+      .get() as { nombre: number; total: number };
+    return row;
   }
 
   /**
-   * Produits les plus vendus, agrégés directement depuis les lignes de
-   * facture déjà enregistrées (§7/§13 de la correction) — la quantité
-   * comptée est celle de la ligne CLIENT (interne+externe déjà fusionnés
-   * par le domaine), jamais recalculée séparément.
+   * Produits les plus vendus, agrégés depuis les lignes de facture des
+   * factures ACTIVES uniquement (§7/§13 d'une correction précédente,
+   * complété pour exclure les ventes annulées).
    */
   topProduitsVendus(limite = 5): { label: string; quantite: number }[] {
     const rows = this.db
       .prepare(
-        `SELECT motif || ' — ' || taille as label, SUM(quantite) as quantite
-         FROM lignes_facture GROUP BY motif, taille ORDER BY quantite DESC LIMIT ?`
+        `SELECT lf.motif || ' — ' || lf.taille as label, SUM(lf.quantite) as quantite
+         FROM lignes_facture lf
+         JOIN factures f ON f.id = lf.facture_id
+         WHERE f.annulee_le IS NULL
+         GROUP BY lf.motif, lf.taille ORDER BY quantite DESC LIMIT ?`
       )
       .all(limite) as { label: string; quantite: number }[];
     return rows;
@@ -97,6 +138,7 @@ export class FactureRepository {
     clientAdresse: string | null;
     vendeurUtilisateurId: string;
     vendeurNomManuel: string | null;
+    modeReglement: string | null;
     lignes: LigneFacture[];
     total: number;
   }): string {
@@ -105,8 +147,8 @@ export class FactureRepository {
     this.db
       .prepare(
         `INSERT INTO factures
-         (id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse, vendeur_utilisateur_id, vendeur_nom_manuel, total, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse, vendeur_utilisateur_id, vendeur_nom_manuel, mode_reglement, total, statut_livraison, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?)`
       )
       .run(
         id,
@@ -118,6 +160,7 @@ export class FactureRepository {
         input.clientAdresse,
         input.vendeurUtilisateurId,
         input.vendeurNomManuel,
+        input.modeReglement,
         input.total,
         now,
         now
@@ -132,6 +175,27 @@ export class FactureRepository {
     }
 
     return id;
+  }
+
+  /** Marque une facture comme livrée (§14 de la correction) — jamais l'inverse depuis cet écran, un statut de livraison ne revient pas en arrière par erreur. */
+  marquerLivree(id: string): void {
+    const now = new Date().toISOString();
+    this.db.prepare("UPDATE factures SET statut_livraison = 'livree', livree_le = ?, updated_at = ? WHERE id = ?").run(now, now, id);
+  }
+
+  /**
+   * Annulation (§5/§6/§21) — suppression douce uniquement : la facture
+   * disparaît des factures actives (`list()` la filtre déjà), mais reste
+   * en base avec son motif, consultable via l'historique. Ne touche
+   * jamais aux mouvements de stock ni à leur restauration — cette
+   * responsabilité appartient à VenteService (règle métier, pas
+   * persistance pure).
+   */
+  annuler(id: string, motif: string, annuleePar: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE factures SET annulee_le = ?, annulee_par = ?, motif_annulation = ?, updated_at = ? WHERE id = ?")
+      .run(now, annuleePar, motif, now, id);
   }
 
   /**

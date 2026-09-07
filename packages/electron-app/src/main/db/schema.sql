@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_mouvements_date ON mouvements (date);
 -- ==========================================================
 CREATE TABLE IF NOT EXISTS factures (
   id                     TEXT PRIMARY KEY,
-  numero                 TEXT NOT NULL UNIQUE,
+  numero                 TEXT NOT NULL,
   date                   TEXT NOT NULL,
   emplacement_id         TEXT NOT NULL REFERENCES emplacements (id),
   client_nom             TEXT NOT NULL,
@@ -105,7 +105,17 @@ CREATE TABLE IF NOT EXISTS factures (
   client_adresse         TEXT,
   vendeur_utilisateur_id TEXT NOT NULL REFERENCES utilisateurs (id),
   vendeur_nom_manuel     TEXT,
+  mode_reglement         TEXT,
   total                  INTEGER NOT NULL,
+  -- "Facturation" : statut de livraison (jamais de statut "non payée" —
+  -- une facture n'existe qu'une fois le paiement confirmé, §13).
+  statut_livraison       TEXT NOT NULL DEFAULT 'en_attente' CHECK (statut_livraison IN ('en_attente', 'livree')),
+  livree_le              TEXT,
+  -- Annulation (§5/§6/§21) : suppression douce uniquement — jamais de
+  -- perte de données, la vente reste dans l'historique avec son motif.
+  annulee_le             TEXT,
+  annulee_par            TEXT REFERENCES utilisateurs (id),
+  motif_annulation       TEXT,
   created_at             TEXT NOT NULL,
   updated_at             TEXT NOT NULL
 );

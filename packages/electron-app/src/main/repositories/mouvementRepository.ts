@@ -182,4 +182,10 @@ export class MouvementRepository {
   activiteRecentePersonnelle(utilisateurId: string, limit = 8): MouvementEnrichi[] {
     return this.db.prepare(`${SELECT_ENRICHI} WHERE m.utilisateur_id = ? ORDER BY m.date DESC LIMIT ?`).all(utilisateurId, limit) as MouvementEnrichi[];
   }
+
+  /** Mouvements liés à une facture — nécessaire pour restaurer le stock lors d'une annulation (correction "Facturation" §5/§21). */
+  listParFacture(factureId: string): Mouvement[] {
+    const rows = this.db.prepare("SELECT * FROM mouvements WHERE facture_id = ?").all(factureId) as MouvementRow[];
+    return rows.map(rowToMouvement);
+  }
 }

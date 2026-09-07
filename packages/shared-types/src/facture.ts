@@ -32,6 +32,24 @@ export interface Facture extends MetierEntity {
 
   lignes: LigneFacture[];
   total: number;
+
+  /** Mode de règlement, saisi lors de la vente — figure sur le document facture (correction "Facturation" §21). */
+  modeReglement: string | null;
+
+  /**
+   * Statut de livraison — JAMAIS de statut "non payée" : une facture
+   * n'existe qu'une fois le paiement confirmé (§13 de la correction).
+   */
+  statutLivraison: "en_attente" | "livree";
+  livreeLe: ISODateTime | null;
+
+  /**
+   * Annulation (suppression douce, §5/§6/§21) — la facture disparaît des
+   * factures actives mais reste tracée : jamais une perte de donnée.
+   */
+  annuleeLe: ISODateTime | null;
+  annuleePar: UUID | null;
+  motifAnnulation: string | null;
 }
 
 export interface LigneFacture {

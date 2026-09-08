@@ -79,7 +79,15 @@ function createMainWindow(): BrowserWindow {
     });
   }
 
-  window.once("ready-to-show", () => window.show());
+  window.once("ready-to-show", () => {
+    // Démarre maximisée (correction : "l'écran de connexion était coupé
+    // au lancement" — 1280×720 fixe ne suffit pas sur tous les postes,
+    // notamment avec la barre des tâches Windows ou une mise à l'échelle
+    // différente de 100%). `show: false` + ce moment précis évitent tout
+    // scintillement (fenêtre visible directement dans sa taille finale).
+    window.maximize();
+    window.show();
+  });
 
   if (RENDERER_DEV_SERVER_URL) {
     void window.loadURL(RENDERER_DEV_SERVER_URL);

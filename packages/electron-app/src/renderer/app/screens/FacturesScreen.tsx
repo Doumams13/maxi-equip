@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil } from "lucide-react";
+import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Facture } from "@maxi-equip/shared-types";
 import { useSurbrillanceOperation } from "../highlight.js";
 
@@ -16,6 +16,8 @@ const inputStyle: React.CSSProperties = {
   fontFamily: defaultTokens.typography.body,
   fontSize: 13,
 };
+
+const TAILLE_PAGE = 10;
 
 function EnteteTriable({
   label,
@@ -223,7 +225,7 @@ export function FacturesScreen({
   const [chargementAction, setChargementAction] = useState<string | null>(null);
   const [factureAAnnuler, setFactureAAnnuler] = useState<FactureAvecVendeur | null>(null);
   const [documentInterne, setDocumentInterne] = useState<{ numero: string; lignes: Awaited<ReturnType<typeof window.maxiEquip.getDocumentInterneFacture>> } | null>(null);
-  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(cibleSurbrillance, onSurbrillanceAppliquee);
+  const [page, setPage] = useState(1);
 
   async function refresh() {
     const [liste, resume] = await Promise.all([window.maxiEquip.listFactures(), window.maxiEquip.getResumeFacturesMois()]);
@@ -287,12 +289,44 @@ export function FacturesScreen({
     return copie;
   }, [filtrees, tri]);
 
+  const totalPages = Math.max(1, Math.ceil(triees.length / TAILLE_PAGE));
+
+  // Calcule automatiquement la bonne page pour une navigation cliquable
+  // depuis l'Historique/le Dashboard (même logique fiable que pour les
+  // Entrées/Transferts, correction "Surbrillance des Factures" §2/§4) —
+  // dépend de la liste triée/filtrée complète, jamais de la page
+  // actuellement affichée.
+  useEffect(() => {
+    if (!cibleSurbrillance) return;
+    const index = triees.findIndex((f) => f.id === cibleSurbrillance);
+    if (index === -1) return;
+    setPage(Math.floor(index / TAILLE_PAGE) + 1);
+  }, [cibleSurbrillance, triees]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
+
+  const pageActuelle = triees.slice((page - 1) * TAILLE_PAGE, page * TAILLE_PAGE);
+
+  // LE CŒUR DU CORRECTIF : la cible n'est transmise au hook de
+  // surbrillance QUE si elle est réellement présente sur la page
+  // actuellement affichée. Avant ce correctif, la cible brute était
+  // transmise dès le montage du composant — avant même que `factures`
+  // (chargé de façon asynchrone) ne soit rempli —, ce qui faisait
+  // échouer la recherche de l'élément DOM et effaçait la cible avant
+  // même l'arrivée des données. C'est exactement ce que faisait déjà
+  // HistoriqueOperationsTable pour les Entrées/Transferts.
+  const cibleActive = cibleSurbrillance && pageActuelle.some((f) => f.id === cibleSurbrillance) ? cibleSurbrillance : null;
+  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(cibleActive, onSurbrillanceAppliquee);
+
   function handleTrier(colonne: ColonneTriable) {
     setTri((prev) => {
       if (prev.colonne !== colonne) return { colonne, direction: "asc" };
       if (prev.direction === "asc") return { colonne, direction: "desc" };
       return { colonne: null, direction: "asc" };
     });
+    setPage(1);
   }
 
   async function handleOuvrir(factureId: string) {
@@ -361,16 +395,16 @@ export function FacturesScreen({
               style={{ ...inputStyle, width: "100%", boxSizing: "border-box", paddingLeft: 34 }}
               placeholder="Rechercher par numéro ou client…"
               value={recherche}
-              onChange={(e) => setRecherche(e.target.value)}
+              onChange={(e) => { setRecherche(e.target.value); setPage(1); }}
             />
           </div>
-          <select style={inputStyle} value={statutFiltre} onChange={(e) => setStatutFiltre(e.target.value)}>
+          <select style={inputStyle} value={statutFiltre} onChange={(e) => { setStatutFiltre(e.target.value); setPage(1); }}>
             <option value="tous">Tous les statuts</option>
             <option value="livree">Payée — Livrée</option>
             <option value="en_attente">Payée — En attente</option>
             <option value="annulee">Annulée</option>
           </select>
-          <select style={inputStyle} value={vendeurFiltre} onChange={(e) => setVendeurFiltre(e.target.value)}>
+          <select style={inputStyle} value={vendeurFiltre} onChange={(e) => { setVendeurFiltre(e.target.value); setPage(1); }}>
             <option value="tous">Tous les vendeurs</option>
             {vendeursDisponibles.map((n) => (
               <option key={n} value={n}>
@@ -385,6 +419,7 @@ export function FacturesScreen({
         {triees.length === 0 ? (
           <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Aucune facture ne correspond à vos filtres.</p>
         ) : (
+          <>
           <div ref={conteneurRef} style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
@@ -411,7 +446,7 @@ export function FacturesScreen({
                 </tr>
               </thead>
               <tbody>
-                {triees.map((f) => {
+                {pageActuelle.map((f) => {
                   const nomAffiche = f.vendeurUtilisateurId === session.userId ? "Vous" : f.vendeurNom;
                   const enTraitement = chargementAction === f.id;
                   return (
@@ -467,6 +502,29 @@ export function FacturesScreen({
               </tbody>
             </table>
           </div>
+
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, padding: "14px 16px", borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: `1px solid ${defaultTokens.colors.border}`, borderRadius: defaultTokens.radius.sm, padding: "6px 12px", cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.5 : 1, fontSize: 12.5 }}
+            >
+              <ChevronLeft size={14} />
+              Précédent
+            </button>
+            <span style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+              Page {page} sur {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: `1px solid ${defaultTokens.colors.border}`, borderRadius: defaultTokens.radius.sm, padding: "6px 12px", cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.5 : 1, fontSize: 12.5 }}
+            >
+              Suivant
+              <ChevronRight size={14} />
+            </button>
+          </div>
+          </>
         )}
       </Card>
 

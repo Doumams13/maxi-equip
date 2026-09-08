@@ -3,7 +3,6 @@ import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system
 import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { Facture } from "@maxi-equip/shared-types";
 import { useSurbrillanceOperation } from "../highlight.js";
-import { PdfPreviewModal } from "../components/PdfPreviewModal.js";
 
 type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null };
 
@@ -172,7 +171,7 @@ export function FacturesScreen({
   const [tri, setTri] = useState<{ colonne: ColonneTriable | null; direction: Direction }>({ colonne: "date", direction: "desc" });
   const [chargementAction, setChargementAction] = useState<string | null>(null);
   const [factureAAnnuler, setFactureAAnnuler] = useState<FactureAvecVendeur | null>(null);
-  const [apercu, setApercu] = useState<{ chemin: string; nomSuggere: string; titre: string } | null>(null);
+
   const [page, setPage] = useState(1);
 
   async function refresh() {
@@ -287,12 +286,13 @@ export function FacturesScreen({
   async function handleVoir(factureId: string, numero: string) {
     setChargementAction(factureId);
     try {
-      const result = await window.maxiEquip.genererFacturePdf(factureId);
-      if (result.success && result.chemin) {
-        setApercu({ chemin: result.chemin, nomSuggere: result.nomSuggere ?? `${numero}.pdf`, titre: `Facture ${numero}` });
-      } else {
-        showError("Document indisponible", result.message ?? "Impossible de générer la facture.");
+      const genere = await window.maxiEquip.genererFacturePdf(factureId);
+      if (!genere.success || !genere.chemin) {
+        showError("Document indisponible", genere.message ?? "Impossible de générer la facture.");
+        return;
       }
+      const result = await window.maxiEquip.voir(genere.chemin, `Facture ${numero}`);
+      if (!result.success) showError("Aperçu indisponible", result.message ?? "Impossible d'afficher le document.");
     } finally {
       setChargementAction(null);
     }
@@ -359,19 +359,20 @@ export function FacturesScreen({
 
   /**
    * Document interne — mêmes principes (§4 de la correction) : "Voir"
-   * ouvre le même composant d'aperçu générique (PdfPreviewModal), dont
-   * les boutons Imprimer/Télécharger intégrés couvrent les deux autres
-   * actions sans dupliquer la logique.
+   * ouvre une fenêtre Electron dédiée affichant le PDF via le lecteur
+   * intégré de Chromium, qui fournit déjà nativement ses propres actions
+   * Imprimer/Télécharger — jamais de logique dupliquée.
    */
   async function handleVoirDocumentInterne(facture: FactureAvecVendeur) {
     setChargementAction(facture.id);
     try {
-      const result = await window.maxiEquip.genererDocumentInternePdf(facture.id);
-      if (result.success && result.chemin) {
-        setApercu({ chemin: result.chemin, nomSuggere: result.nomSuggere ?? `${facture.numero}-document-interne.pdf`, titre: `Document interne — ${facture.numero}` });
-      } else {
-        showError("Document indisponible", result.message ?? "Impossible de générer le document interne.");
+      const genere = await window.maxiEquip.genererDocumentInternePdf(facture.id);
+      if (!genere.success || !genere.chemin) {
+        showError("Document indisponible", genere.message ?? "Impossible de générer le document interne.");
+        return;
       }
+      const result = await window.maxiEquip.voir(genere.chemin, `Document interne — ${facture.numero}`);
+      if (!result.success) showError("Aperçu indisponible", result.message ?? "Impossible d'afficher le document.");
     } finally {
       setChargementAction(null);
     }
@@ -563,7 +564,6 @@ export function FacturesScreen({
         />
       )}
 
-      {apercu && <PdfPreviewModal chemin={apercu.chemin} nomSuggere={apercu.nomSuggere} titre={apercu.titre} onFermer={() => setApercu(null)} />}
     </div>
   );
 }

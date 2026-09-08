@@ -252,96 +252,52 @@ export function registerMetierIpcHandlers(
    * genererDocumentInternePdf) est utilisée pour Voir, Imprimer et
    * Télécharger — jamais une maquette recréée séparément.
    */
-  ipcMain.handle("documents:genererApercuImage", async (_e, chemin: string) => {
-    // Journalisation de diagnostic explicitement demandée — relayée vers
-    // le terminal de lancement (voir console-message dans main/index.ts)
-    // même sans ouvrir les outils de développement.
+  /**
+   * VOIR — Diagnostic complet effectué avant cette correction (voir
+   * échange précédent) : la cause exacte était `webPreferences.offscreen:
+   * true` combiné à `plugins: true` — le lecteur PDF intégré de Chromium
+   * (PDFium) ne se peint pas dans le pipeline de composition du rendu
+   * hors écran, quel que soit le mode de fenêtre essayé (show:false
+   * simple, fenêtre visible hors écran, puis offscreen+paint) : dans les
+   * trois cas, l'image obtenue était vide.
+   *
+   * `documents:imprimer` (ci-dessous), lui, n'a JAMAIS ce problème : il
+   * ne capture rien, il délègue directement à `webContents.print()`, qui
+   * n'a pas besoin que la page soit "peinte" et photographiée à part.
+   *
+   * Correction : abandonner toute capture. Réutiliser tel quel le même
+   * mécanisme fenêtre (plugins:true, sans offscreen) qu'à l'impression —
+   * mais RENDU VISIBLE, une vraie fenêtre Electron secondaire affichant
+   * le PDF directement. Reste "dans MAXI EQUIP" (jamais Adobe Reader ni
+   * Edge), et repose sur un fait déjà vérifié plutôt que sur une nouvelle
+   * hypothèse.
+   */
+  ipcMain.handle("documents:voir", async (_e, chemin: string, titre: string) => {
     try {
-      const stats = await stat(chemin);
-      // eslint-disable-next-line no-console
-      console.log(`[apercu] fichier existant : ${chemin} (${stats.size} octets)`);
+      await stat(chemin);
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error(`[apercu] FICHIER INTROUVABLE avant génération de l'aperçu : ${chemin}`, err);
+      console.error(`[apercu] FICHIER INTROUVABLE : ${chemin}`, err);
       return { success: false, message: "Le document généré est introuvable sur le disque." };
     }
 
-    const url = `${pathToFileURL(chemin).href}#toolbar=0`;
-    // eslint-disable-next-line no-console
-    console.log(`[apercu] URL utilisée pour charger le document : ${url}`);
-
-    // BUG TROUVÉ ET CORRIGÉ (journal : "success=true, taille base64=0
-    // caractères") : capturePage() sur une fenêtre jamais affichée à
-    // l'écran — même positionnée hors écran avec show:true — peut
-    // renvoyer une image totalement vide (0 octet une fois encodée en
-    // PNG), le compositeur GPU ne l'ayant jamais réellement composée.
-    // Remplacé par le VRAI mode de rendu hors écran d'Electron
-    // (webPreferences.offscreen), conçu précisément pour ce cas d'usage
-    // (générer des pixels sans jamais rien afficher) : chaque image
-    // rendue est livrée via l'évènement "paint", garanti même sans
-    // fenêtre visible — jamais un instantané de fenêtre après coup.
+    const url = pathToFileURL(chemin).href;
     const fenetreApercu = new BrowserWindow({
-      show: false,
       width: 900,
-      height: 1250,
-      webPreferences: { offscreen: true, plugins: true },
+      height: 1150,
+      title: titre,
+      webPreferences: { plugins: true },
+      autoHideMenuBar: true,
     });
-
-    return new Promise((resolve) => {
-      let derniereImage: Electron.NativeImage | null = null;
-      let resolu = false;
-
-      function terminer(resultat: { success: boolean; base64?: string; message?: string }) {
-        if (resolu) return;
-        resolu = true;
-        clearTimeout(delaiSecours);
-        fenetreApercu.webContents.stopPainting();
-        fenetreApercu.close();
-        resolve(resultat);
-      }
-
-      fenetreApercu.webContents.on("paint", (_event, _dirty, image) => {
-        derniereImage = image;
-      });
-
-      // Filet de sécurité : si "paint" ne s'est jamais déclenché (page
-      // en erreur, ressource manquante), ne jamais rester bloqué
-      // indéfiniment — renvoyer une erreur claire après 5 secondes.
-      const delaiSecours = setTimeout(() => {
-        // eslint-disable-next-line no-console
-        console.error("[apercu] délai dépassé — aucune image reçue de l'évènement 'paint'.");
-        terminer({ success: false, message: "La génération de l'aperçu a pris trop de temps." });
-      }, 5000);
-
-      fenetreApercu.webContents.setFrameRate(30);
-      fenetreApercu.webContents.startPainting();
-
-      fenetreApercu
-        .loadURL(url)
-        .then(() => {
-          // eslint-disable-next-line no-console
-          console.log("[apercu] loadURL résolu (did-finish-load) — attente du rendu du lecteur PDF intégré…");
-          // Laisse le lecteur PDF de Chromium terminer son rendu et
-          // produire au moins une image "paint" après le chargement.
-          setTimeout(() => {
-            if (!derniereImage || derniereImage.isEmpty()) {
-              // eslint-disable-next-line no-console
-              console.error("[apercu] image reçue vide malgré le rendu hors écran.");
-              terminer({ success: false, message: "Impossible de générer l'aperçu du document." });
-              return;
-            }
-            const buffer = derniereImage.toPNG();
-            // eslint-disable-next-line no-console
-            console.log(`[apercu] capture réalisée : ${buffer.length} octets PNG, dimensions ${JSON.stringify(derniereImage.getSize())}`);
-            terminer({ success: true, base64: buffer.toString("base64") });
-          }, 900);
-        })
-        .catch((err: unknown) => {
-          // eslint-disable-next-line no-console
-          console.error("[documents] génération de l'aperçu impossible :", err);
-          terminer({ success: false, message: "Impossible de générer l'aperçu du document." });
-        });
-    });
+    try {
+      await fenetreApercu.loadURL(url);
+      return { success: true };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[apercu] chargement impossible :", err);
+      fenetreApercu.close();
+      return { success: false, message: "Impossible d'afficher le document." };
+    }
   });
 
   /** IMPRIMER — boîte de dialogue native d'impression Windows, jamais une simple ouverture de fichier (§2). Même correction d'URL que "Voir" (pathToFileURL) — la boîte de dialogue apparaissait déjà avant ce correctif, mais rien ne garantit que la page imprimée contenait réellement le document tant que l'URL restait malformée. */

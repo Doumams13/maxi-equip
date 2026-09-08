@@ -28,10 +28,13 @@
 
         Le défilement est autorisé au niveau de <body> (overflow-y: auto)
         — nécessaire pour les écrans dont le contenu dépasse la fenêtre
-        (tableau de bord, futurs écrans métier) — et c'est l'écran de
-        connexion lui-même qui empêche son propre défilement localement
-        (voir LoginScreen.tsx : hauteur 100% + overflow hidden sur son
-        propre conteneur), pas une règle globale.
+        (tableau de bord, futurs écrans métier). L'écran de connexion
+        (LoginScreen.tsx) autorise désormais lui aussi son propre
+        défilement (overflow-y: auto, minHeight au lieu de height fixe) :
+        un ancien `overflow: hidden` local y coupait le bas de la carte
+        sur les fenêtres basses — corrigé avec une approche adaptative
+        (clamp() sur les espacements verticaux), le défilement ne servant
+        plus que de filet de sécurité ultime.
 
         IMPORTANT — `height: 100%` (pas `min-height`) sur body/#root :
         une deuxième correction a été nécessaire ici. `min-height: 100%`

@@ -1,4 +1,5 @@
-import { ipcMain, shell } from "electron";
+import { ipcMain, BrowserWindow, dialog } from "electron";
+import { readFile, copyFile } from "node:fs/promises";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
 import { StockRepository } from "../repositories/stockRepository.js";
@@ -11,6 +12,7 @@ import { ImageService } from "../services/imageService.js";
 import { SessionManager } from "../auth/sessionManager.js";
 import { anonymiserActivite, anonymiserFactures } from "../services/visibiliteService.js";
 import { genererFacturePdf } from "../services/factureDocumentService.js";
+import { genererDocumentInternePdf } from "../services/documentInterneDocumentService.js";
 import { stock as domainStock } from "@maxi-equip/domain";
 
 /**
@@ -168,7 +170,16 @@ export function registerMetierIpcHandlers(
    * cohérent même si le statut (livraison) a changé depuis la première
    * génération.
    */
-  ipcMain.handle("factures:ouvrirPdf", async (_e, factureId: string) => {
+  /**
+   * Génère (ou régénère) le PDF de la facture et retourne son CHEMIN
+   * seulement — plus aucune ouverture automatique ici (correction
+   * "Voir/Imprimer/Télécharger" : les trois actions sont désormais
+   * distinctes, cette fonction ne fait que préparer le fichier). Jamais
+   * une nouvelle facture ni un nouveau numéro (§3/§4 de la correction
+   * "Facturation" : "cliquer plusieurs fois ne doit pas créer de
+   * doublon").
+   */
+  ipcMain.handle("factures:genererPdf", async (_e, factureId: string) => {
     const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
     const vendeurNomAffiche = facture.vendeurNomManuel ?? facture.vendeurNom ?? "—";
@@ -177,20 +188,94 @@ export function registerMetierIpcHandlers(
         facture,
         // Correction "SHOP sur la facture" : le nom affiché vient
         // TOUJOURS de la configuration centralisée, jamais du nom
-        // interne de l'emplacement point-de-vente (qui reste "SHOP",
-        // un identifiant technique distinct du nom commercial affiché
-        // aux clients). Toute nouvelle facture reflète automatiquement
-        // un changement fait par l'Administrateur, sans toucher au code.
+        // interne de l'emplacement point-de-vente.
         nomMagasin: parametresRepository.getNomMagasin(),
         vendeurNomAffiche,
       });
-      const erreur = await shell.openPath(chemin);
-      if (erreur) return { success: false, message: erreur };
-      return { success: true, chemin };
+      return { success: true, chemin, nomSuggere: `${facture.numero}.pdf` };
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[factures] génération PDF impossible :", err);
       return { success: false, message: "Impossible de générer le document de la facture." };
+    }
+  });
+
+  /** Même principe que factures:genererPdf, pour le document interne d'approvisionnement (§4 de la correction). */
+  ipcMain.handle("factures:genererDocumentInternePdf", async (_e, factureId: string) => {
+    const facture = factureRepository.findById(factureId);
+    if (!facture) return { success: false, message: "Facture introuvable." };
+    try {
+      const lignes = factureRepository.getDocumentInterne(factureId);
+      const chemin = await genererDocumentInternePdf(facture.numero, lignes);
+      return { success: true, chemin, nomSuggere: `${facture.numero}-document-interne.pdf` };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[factures] génération document interne impossible :", err);
+      return { success: false, message: "Impossible de générer le document interne." };
+    }
+  });
+
+  /**
+   * Trois actions génériques, réutilisables pour n'importe quel PDF déjà
+   * généré (facture ou document interne, §4/§6 de la correction) — la
+   * logique d'aperçu/impression/enregistrement ne doit jamais être
+   * dupliquée entre les deux types de documents.
+   */
+
+  /** VOIR — lit les octets du PDF pour un aperçu intégré à l'application (pdfjs-dist), jamais le lecteur système (§1 : "ne pas utiliser shell.openPath pour cette action"). */
+  ipcMain.handle("documents:lireBase64", async (_e, chemin: string) => {
+    try {
+      const octets = await readFile(chemin);
+      return { success: true, base64: octets.toString("base64") };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[documents] lecture impossible :", err);
+      return { success: false, message: "Impossible de lire le document." };
+    }
+  });
+
+  /** IMPRIMER — boîte de dialogue native d'impression Windows, jamais une simple ouverture de fichier (§2). */
+  ipcMain.handle("documents:imprimer", async (_e, chemin: string) => {
+    return new Promise((resolve) => {
+      const fenetreImpression = new BrowserWindow({ show: false, webPreferences: { plugins: true } });
+      fenetreImpression
+        .loadURL(`file://${chemin}`)
+        .then(() => {
+          fenetreImpression.webContents.print({ silent: false }, (success, failureReason) => {
+            fenetreImpression.close();
+            resolve(success ? { success: true } : { success: false, message: failureReason });
+          });
+        })
+        .catch((err: unknown) => {
+          fenetreImpression.close();
+          const message = err instanceof Error ? err.message : "Impossible de préparer l'impression.";
+          resolve({ success: false, message });
+        });
+    });
+  });
+
+  /** TÉLÉCHARGER — "Enregistrer sous" natif, aucune ouverture automatique ensuite (§3 : "Ne PAS ouvrir automatiquement le PDF"). */
+  ipcMain.handle("documents:telecharger", async (_e, chemin: string, nomSuggere: string) => {
+    const fenetre = BrowserWindow.getFocusedWindow();
+    const result = fenetre
+      ? await dialog.showSaveDialog(fenetre, {
+          title: "Enregistrer le document",
+          defaultPath: nomSuggere,
+          filters: [{ name: "Document PDF", extensions: ["pdf"] }],
+        })
+      : await dialog.showSaveDialog({
+          title: "Enregistrer le document",
+          defaultPath: nomSuggere,
+          filters: [{ name: "Document PDF", extensions: ["pdf"] }],
+        });
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+    try {
+      await copyFile(chemin, result.filePath);
+      return { success: true, chemin: result.filePath };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[documents] enregistrement impossible :", err);
+      return { success: false, message: "Impossible d'enregistrer le document." };
     }
   });
 

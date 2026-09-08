@@ -137,8 +137,15 @@ const maxiEquipApi = {
 
   listFactures: (): Promise<(Facture & { vendeurNom: string | null; vendeurRole: string | null })[]> => ipcRenderer.invoke("factures:list"),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
-  ouvrirFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; message?: string }> =>
-    ipcRenderer.invoke("factures:ouvrirPdf", factureId),
+  genererFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
+    ipcRenderer.invoke("factures:genererPdf", factureId),
+  genererDocumentInternePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
+    ipcRenderer.invoke("factures:genererDocumentInternePdf", factureId),
+  lireDocumentBase64: (chemin: string): Promise<{ success: boolean; base64?: string; message?: string }> =>
+    ipcRenderer.invoke("documents:lireBase64", chemin),
+  imprimerDocument: (chemin: string): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("documents:imprimer", chemin),
+  telechargerDocument: (chemin: string, nomSuggere: string): Promise<{ success: boolean; canceled?: boolean; chemin?: string; message?: string }> =>
+    ipcRenderer.invoke("documents:telecharger", chemin, nomSuggere),
   marquerFactureLivree: (factureId: string): Promise<{ success: boolean }> => ipcRenderer.invoke("factures:marquerLivree", factureId),
   annulerFacture: (factureId: string, motif: string): Promise<{ success: boolean; message?: string }> =>
     ipcRenderer.invoke("factures:annuler", factureId, motif),

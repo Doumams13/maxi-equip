@@ -3,6 +3,7 @@ import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system
 import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { Facture } from "@maxi-equip/shared-types";
 import { useSurbrillanceOperation } from "../highlight.js";
+import { PdfPreviewModal } from "../components/PdfPreviewModal.js";
 
 type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null };
 
@@ -94,59 +95,6 @@ function StatutBadge({ facture }: { facture: Facture }) {
 }
 
 /**
- * Modale du document interne d'approvisionnement — accessible à tous,
- * sans distinction Admin/Gérant (§9 de la correction "Facturation").
- * Chargé à la demande (pas de coût pour les factures sans complément
- * externe, qui restent la majorité).
- */
-function DocumentInterneModal({
-  factureNumero,
-  lignes,
-  onFermer,
-}: {
-  factureNumero: string;
-  lignes: { motif: string; taille: string; quantiteTotale: number; quantiteInterne: number; quantiteExterne: number; fournisseur: string | null; prixAchat: number | null }[];
-  onFermer: () => void;
-}) {
-  const aDuExterne = lignes.some((l) => l.quantiteExterne > 0);
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
-      <Card elevated style={{ width: "min(560px, 92vw)", boxSizing: "border-box" }}>
-        <h2 style={{ margin: "0 0 4px", fontFamily: defaultTokens.typography.display, fontSize: 16.5 }}>Document interne — {factureNumero}</h2>
-        <p style={{ margin: "0 0 16px", fontSize: 12, color: defaultTokens.colors.textFaint }}>
-          Trace interne MAXI EQUIP, jamais transmise au client — provenance réelle des quantités.
-        </p>
-        {!aDuExterne ? (
-          <p style={{ fontSize: 13.5, color: defaultTokens.colors.textSoft }}>Cette vente a été entièrement couverte par le stock MAXI EQUIP — aucun complément externe.</p>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-            {lignes.map((l, i) => (
-              <div key={i} style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.sm, padding: 12 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                  {l.motif} — {l.taille} <span style={{ color: defaultTokens.colors.textSoft, fontWeight: 400 }}>({l.quantiteTotale} au total)</span>
-                </div>
-                <div style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft }}>MAXI EQUIP : {l.quantiteInterne}</div>
-                {l.quantiteExterne > 0 && (
-                  <>
-                    <div style={{ fontSize: 12.5, color: defaultTokens.colors.warning, fontWeight: 600 }}>Fournisseur externe : {l.quantiteExterne}</div>
-                    <div style={{ fontSize: 12, color: defaultTokens.colors.textFaint }}>
-                      {l.fournisseur} — coût d'achat unitaire : {l.prixAchat?.toLocaleString("fr-FR")} FCFA
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        <Button variant="secondary" onClick={onFermer} style={{ width: "100%" }}>
-          Fermer
-        </Button>
-      </Card>
-    </div>
-  );
-}
-
-/**
  * Modale d'annulation — n'utilise pas ConfirmDialog directement car un
  * motif obligatoire (texte libre) doit être saisi avant de pouvoir
  * confirmer (correction "Facturation" §5 : "une trace de l'erreur doit
@@ -224,7 +172,7 @@ export function FacturesScreen({
   const [tri, setTri] = useState<{ colonne: ColonneTriable | null; direction: Direction }>({ colonne: "date", direction: "desc" });
   const [chargementAction, setChargementAction] = useState<string | null>(null);
   const [factureAAnnuler, setFactureAAnnuler] = useState<FactureAvecVendeur | null>(null);
-  const [documentInterne, setDocumentInterne] = useState<{ numero: string; lignes: Awaited<ReturnType<typeof window.maxiEquip.getDocumentInterneFacture>> } | null>(null);
+  const [apercu, setApercu] = useState<{ chemin: string; nomSuggere: string; titre: string } | null>(null);
   const [page, setPage] = useState(1);
 
   async function refresh() {
@@ -329,11 +277,53 @@ export function FacturesScreen({
     setPage(1);
   }
 
-  async function handleOuvrir(factureId: string) {
+  /**
+   * Trois actions réellement distinctes (correction "Voir / Imprimer /
+   * Télécharger") — plus jamais une seule fonction partagée. Chacune
+   * régénère le PDF à partir des données actuelles (§ "cliquer plusieurs
+   * fois ne doit jamais créer de doublon" — la régénération n'a aucun
+   * effet de bord, seule la lecture/l'impression/l'enregistrement diffère).
+   */
+  async function handleVoir(factureId: string, numero: string) {
     setChargementAction(factureId);
     try {
-      const result = await window.maxiEquip.ouvrirFacturePdf(factureId);
-      if (!result.success) showError("Document indisponible", result.message ?? "Impossible d'ouvrir la facture.");
+      const result = await window.maxiEquip.genererFacturePdf(factureId);
+      if (result.success && result.chemin) {
+        setApercu({ chemin: result.chemin, nomSuggere: result.nomSuggere ?? `${numero}.pdf`, titre: `Facture ${numero}` });
+      } else {
+        showError("Document indisponible", result.message ?? "Impossible de générer la facture.");
+      }
+    } finally {
+      setChargementAction(null);
+    }
+  }
+
+  async function handleImprimer(factureId: string) {
+    setChargementAction(factureId);
+    try {
+      const genere = await window.maxiEquip.genererFacturePdf(factureId);
+      if (!genere.success || !genere.chemin) {
+        showError("Impression impossible", genere.message ?? "Impossible de générer la facture.");
+        return;
+      }
+      const result = await window.maxiEquip.imprimerDocument(genere.chemin);
+      if (!result.success && result.message) showError("Impression annulée", result.message);
+    } finally {
+      setChargementAction(null);
+    }
+  }
+
+  async function handleTelecharger(factureId: string, numero: string) {
+    setChargementAction(factureId);
+    try {
+      const genere = await window.maxiEquip.genererFacturePdf(factureId);
+      if (!genere.success || !genere.chemin) {
+        showError("Enregistrement impossible", genere.message ?? "Impossible de générer la facture.");
+        return;
+      }
+      const result = await window.maxiEquip.telechargerDocument(genere.chemin, genere.nomSuggere ?? `${numero}.pdf`);
+      if (result.success) showSuccess("Facture enregistrée", `Enregistrée sous ${result.chemin}`);
+      else if (!result.canceled) showError("Enregistrement impossible", result.message ?? "Une erreur inattendue s'est produite.");
     } finally {
       setChargementAction(null);
     }
@@ -367,9 +357,24 @@ export function FacturesScreen({
     }
   }
 
+  /**
+   * Document interne — mêmes principes (§4 de la correction) : "Voir"
+   * ouvre le même composant d'aperçu générique (PdfPreviewModal), dont
+   * les boutons Imprimer/Télécharger intégrés couvrent les deux autres
+   * actions sans dupliquer la logique.
+   */
   async function handleVoirDocumentInterne(facture: FactureAvecVendeur) {
-    const lignes = await window.maxiEquip.getDocumentInterneFacture(facture.id);
-    setDocumentInterne({ numero: facture.numero, lignes });
+    setChargementAction(facture.id);
+    try {
+      const result = await window.maxiEquip.genererDocumentInternePdf(facture.id);
+      if (result.success && result.chemin) {
+        setApercu({ chemin: result.chemin, nomSuggere: result.nomSuggere ?? `${facture.numero}-document-interne.pdf`, titre: `Document interne — ${facture.numero}` });
+      } else {
+        showError("Document indisponible", result.message ?? "Impossible de générer le document interne.");
+      }
+    } finally {
+      setChargementAction(null);
+    }
   }
 
   return (
@@ -484,13 +489,13 @@ export function FacturesScreen({
                         <StatutBadge facture={f} />
                       </td>
                       <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>
-                        <Button variant="ghost" onClick={() => void handleOuvrir(f.id)} loading={enTraitement} title="Voir">
+                        <Button variant="ghost" onClick={() => void handleVoir(f.id, f.numero)} loading={enTraitement} title="Voir">
                           <Eye size={15} />
                         </Button>
-                        <Button variant="ghost" onClick={() => void handleOuvrir(f.id)} title="Imprimer">
+                        <Button variant="ghost" onClick={() => void handleImprimer(f.id)} title="Imprimer">
                           <Printer size={15} />
                         </Button>
-                        <Button variant="ghost" onClick={() => void handleOuvrir(f.id)} title="Télécharger">
+                        <Button variant="ghost" onClick={() => void handleTelecharger(f.id, f.numero)} title="Télécharger">
                           <Download size={15} />
                         </Button>
                         <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Document interne (fournisseur externe éventuel)">
@@ -558,7 +563,7 @@ export function FacturesScreen({
         />
       )}
 
-      {documentInterne && <DocumentInterneModal factureNumero={documentInterne.numero} lignes={documentInterne.lignes} onFermer={() => setDocumentInterne(null)} />}
+      {apercu && <PdfPreviewModal chemin={apercu.chemin} nomSuggere={apercu.nomSuggere} titre={apercu.titre} onFermer={() => setApercu(null)} />}
     </div>
   );
 }

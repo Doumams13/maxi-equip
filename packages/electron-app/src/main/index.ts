@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, session } from "electron";
+import { app, BrowserWindow, dialog, session, Menu } from "electron";
 import { join } from "node:path";
 import { closeDatabase, openDatabase } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
@@ -110,6 +110,16 @@ function applyContentSecurityPolicy(): void {
 }
 
 app.whenReady().then(async () => {
+  // Retire le menu générique d'Electron ("File Edit View Window Help") —
+  // jamais voulu pour MAXI EQUIP, il n'a aucun rôle ici. En plus d'être
+  // hors charte graphique, sa hauteur n'était pas comptée dans le calcul
+  // de la fenêtre (min 680px), ce qui coupait le bas de l'écran de
+  // connexion (ex. bouton "Quitter l'application") sur une fenêtre
+  // réduite. `null` supprime la barre entièrement, sur toutes les
+  // fenêtres de l'application (Windows/Linux ; sans effet sur macOS où
+  // le menu vit dans la barre système, hors sujet ici).
+  Menu.setApplicationMenu(null);
+
   applyContentSecurityPolicy();
 
   let mainWindow: BrowserWindow;

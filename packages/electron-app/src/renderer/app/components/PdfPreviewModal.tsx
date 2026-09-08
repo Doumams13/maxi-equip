@@ -35,6 +35,8 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
       try {
         const result = await window.maxiEquip.genererApercuImage(chemin);
         if (annule) return;
+        // eslint-disable-next-line no-console
+        console.log(`[apercu-renderer] réponse reçue : success=${result.success}, taille base64=${result.base64?.length ?? 0} caractères`);
         if (result.success && result.base64) {
           setImageBase64(result.base64);
         } else {

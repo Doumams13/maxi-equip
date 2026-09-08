@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow, dialog } from "electron";
-import { copyFile } from "node:fs/promises";
+import { copyFile, stat } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
 import { StockRepository } from "../repositories/stockRepository.js";
@@ -222,40 +223,85 @@ export function registerMetierIpcHandlers(
    * dupliquée entre les deux types de documents.
    */
 
-  /** VOIR — lit les octets du PDF pour un aperçu intégré à l'application (pdfjs-dist), jamais le lecteur système (§1 : "ne pas utiliser shell.openPath pour cette action"). */
   /**
    * VOIR — remplace l'ancienne tentative avec pdfjs-dist (canvas resté
    * blanc, cause exacte non identifiable sans pouvoir exécuter Electron
    * pour déboguer). Réutilise à la place le SEUL mécanisme déjà confirmé
    * fonctionner sur le poste de l'utilisateur : la fenêtre cachée avec
-   * `plugins: true` qui sert aussi à l'impression — Chromium y affiche
-   * réellement le PDF (preuve : l'aperçu d'impression natif Windows
-   * montrait le contenu). On capture cette même fenêtre en image plutôt
-   * que de réimplémenter un second moteur de rendu PDF côté Renderer.
+   * `plugins: true` qui sert aussi à l'impression — capturée en image
+   * plutôt que de réimplémenter un second moteur de rendu PDF côté
+   * Renderer.
+   *
+   * BUG RÉEL TROUVÉ ET CORRIGÉ (aperçu gris uniforme, identique pour
+   * facture et document interne — donc bien un problème du système
+   * COMMUN, pas d'une facture précise) : l'URL était construite
+   * naïvement avec `file://${chemin}`. Sur Windows, un chemin contient
+   * des antislashs et une lettre de lecteur (ex. "C:\Users\...\FAC.pdf")
+   * — cette concaténation produit une URL malformée que Chromium échoue
+   * à charger SILENCIEUSEMENT (pas d'exception levée, la page reste
+   * vide) : `loadURL` se résout quand même, `capturePage()` capture donc
+   * le fond par défaut de la fenêtre, jamais le document. Corrigé avec
+   * `pathToFileURL()` de Node.js, la fonction standard recommandée par
+   * Electron précisément pour cette conversion chemin → URL fichier,
+   * qui gère correctement les spécificités de chaque plateforme.
    *
    * "#toolbar=0" masque la barre d'outils du lecteur PDF intégré de
-   * Chromium (zoom, imprimante, etc.) — seul le document doit apparaître
-   * dans l'aperçu MAXI EQUIP, pas les contrôles du lecteur système.
+   * Chromium — seul le document doit apparaître dans l'aperçu MAXI EQUIP.
    *
    * UNE MÊME SOURCE DE DOCUMENT (le fichier généré par genererFacturePdf/
    * genererDocumentInternePdf) est utilisée pour Voir, Imprimer et
    * Télécharger — jamais une maquette recréée séparément.
    */
   ipcMain.handle("documents:genererApercuImage", async (_e, chemin: string) => {
+    // Journalisation de diagnostic explicitement demandée — relayée vers
+    // le terminal de lancement (voir console-message dans main/index.ts)
+    // même sans ouvrir les outils de développement.
+    try {
+      const stats = await stat(chemin);
+      // eslint-disable-next-line no-console
+      console.log(`[apercu] fichier existant : ${chemin} (${stats.size} octets)`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[apercu] FICHIER INTROUVABLE avant génération de l'aperçu : ${chemin}`, err);
+      return { success: false, message: "Le document généré est introuvable sur le disque." };
+    }
+
+    const url = `${pathToFileURL(chemin).href}#toolbar=0`;
+    // eslint-disable-next-line no-console
+    console.log(`[apercu] URL utilisée pour charger le document : ${url}`);
+
     const fenetreApercu = new BrowserWindow({
-      show: false,
+      // "show: false" seul peut, sur certaines configurations Electron/
+      // GPU, empêcher la fenêtre d'être réellement composée — auquel cas
+      // capturePage() renvoie une image vide même si le contenu est
+      // correct (limitation Electron documentée, indépendante du bug
+      // d'URL corrigé ci-dessus). Fenêtre réellement affichée mais
+      // positionnée hors de l'écran visible : garantit une composition
+      // GPU réelle sans jamais rien montrer à l'utilisateur.
+      x: -3000,
+      y: -3000,
       width: 900,
       height: 1250,
+      show: true,
+      frame: false,
+      skipTaskbar: true,
       webPreferences: { plugins: true },
     });
     try {
-      await fenetreApercu.loadURL(`file://${chemin}#toolbar=0`);
+      await fenetreApercu.loadURL(url);
+      // eslint-disable-next-line no-console
+      console.log("[apercu] loadURL résolu (did-finish-load)");
       // Le lecteur PDF intégré de Chromium continue de se peindre juste
-      // après l'évènement "did-finish-load" — un court délai garantit
-      // que la capture ne se produit pas sur une page encore vide.
-      await new Promise((r) => setTimeout(r, 400));
+      // après l'évènement "did-finish-load" — un délai plus généreux que
+      // la première tentative (400ms) garantit que la capture ne se
+      // produit pas sur une page encore vide, notamment au tout premier
+      // chargement d'une fenêtre fraîchement créée.
+      await new Promise((r) => setTimeout(r, 900));
       const image = await fenetreApercu.webContents.capturePage();
-      return { success: true, base64: image.toPNG().toString("base64") };
+      const buffer = image.toPNG();
+      // eslint-disable-next-line no-console
+      console.log(`[apercu] capture réalisée : ${buffer.length} octets PNG, dimensions ${JSON.stringify(image.getSize())}`);
+      return { success: true, base64: buffer.toString("base64") };
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[documents] génération de l'aperçu impossible :", err);
@@ -265,12 +311,13 @@ export function registerMetierIpcHandlers(
     }
   });
 
-  /** IMPRIMER — boîte de dialogue native d'impression Windows, jamais une simple ouverture de fichier (§2). */
+  /** IMPRIMER — boîte de dialogue native d'impression Windows, jamais une simple ouverture de fichier (§2). Même correction d'URL que "Voir" (pathToFileURL) — la boîte de dialogue apparaissait déjà avant ce correctif, mais rien ne garantit que la page imprimée contenait réellement le document tant que l'URL restait malformée. */
   ipcMain.handle("documents:imprimer", async (_e, chemin: string) => {
+    const url = pathToFileURL(chemin).href;
     return new Promise((resolve) => {
       const fenetreImpression = new BrowserWindow({ show: false, webPreferences: { plugins: true } });
       fenetreImpression
-        .loadURL(`file://${chemin}`)
+        .loadURL(url)
         .then(() => {
           fenetreImpression.webContents.print({ silent: false }, (success, failureReason) => {
             fenetreImpression.close();

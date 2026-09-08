@@ -272,15 +272,10 @@ CREATE TABLE IF NOT EXISTS archive_factures_pdf (
   created_at   TEXT NOT NULL
 );
 
--- Configuration centralisée de l'entreprise — ligne UNIQUE (id fixe
--- 'principal'), jamais codée en dur ailleurs. Correction "SHOP sur la
--- facture" : le nom affiché sur les documents (facture PDF, etc.) doit
--- venir d'ici, jamais du nom interne de l'emplacement point-de-vente
--- (qui reste "SHOP", un identifiant technique, distinct du nom commercial
--- affiché aux clients). Si l'Administrateur change ce nom plus tard,
--- toute NOUVELLE facture générée l'utilise automatiquement.
-CREATE TABLE IF NOT EXISTS parametres_entreprise (
-  id          TEXT PRIMARY KEY CHECK (id = 'principal'),
-  nom_magasin TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
-);
+-- Correction "SHOP sur la facture" : le nom du magasin affiché sur les
+-- documents vient de la table `parametres_entreprise` définie ci-dessus
+-- (colonne `nom`, singleton id='singleton') — jamais du nom interne de
+-- l'emplacement point-de-vente ("SHOP", un identifiant technique
+-- distinct du nom commercial affiché aux clients). Aucune nouvelle table
+-- créée ici : une table dédiée existait déjà, la réutiliser était la
+-- bonne approche plutôt que d'en dupliquer une seconde.

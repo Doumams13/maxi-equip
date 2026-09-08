@@ -20,15 +20,19 @@ export function runMigrations(db: Database.Database): void {
 
 /**
  * Correction "SHOP sur la facture" : garantit qu'une ligne de
- * configuration existe toujours — sans écraser une valeur déjà
- * personnalisée par l'Administrateur (INSERT OR IGNORE, jamais UPDATE).
- * "MAXI-EQUIP" est la valeur par défaut demandée pour cette installation,
- * modifiable ensuite sans toucher au code (§ "configuration centralisée").
+ * configuration existe toujours dans la table `parametres_entreprise`
+ * (table déjà définie dans schema.sql — pas de nouvelle table créée) —
+ * sans écraser une valeur déjà personnalisée par l'Administrateur
+ * (INSERT OR IGNORE, jamais UPDATE). Les valeurs par défaut reprennent
+ * les informations légales déjà utilisées sur le modèle de facture
+ * officiel (packages/electron-app/src/main/services/factureDocumentService.ts),
+ * jamais inventées.
  */
 function seedParametresEntrepriseSiAbsent(db: Database.Database): void {
-  db.prepare("INSERT OR IGNORE INTO parametres_entreprise (id, nom_magasin, updated_at) VALUES ('principal', 'MAXI-EQUIP', ?)").run(
-    new Date().toISOString()
-  );
+  db.prepare(
+    `INSERT OR IGNORE INTO parametres_entreprise (id, nom, logo_url, adresse, ville, telephone, email, whatsapp, updated_at)
+     VALUES ('singleton', 'MAXI-EQUIP', NULL, 'Quartier Beaulieu (face à BATI-PLUS), Akanda', 'Libreville', '066 33 87 30', '', '', ?)`
+  ).run(new Date().toISOString());
 }
 
 /**

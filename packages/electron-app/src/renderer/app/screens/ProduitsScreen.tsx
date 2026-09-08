@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { Card, Button, Combobox, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle, ArrowUp, ArrowDown, ChevronsUpDown } from "lucide-react";
+import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle, ArrowUp, ArrowDown, ChevronsUpDown, RotateCcw } from "lucide-react";
 import type { ProduitAvecMiniature, StagedImage } from "../../../preload/index.js";
 import { ImagesModal } from "./ImagesModal.js";
 
@@ -529,9 +529,17 @@ export function ProduitsScreen({ session }: { session: { userId: string } }) {
               </p>
             )}
 
-            <Button type="submit" loading={saving}>
-              {editingId ? "Enregistrer les modifications" : "Enregistrer le produit"}
-            </Button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Button type="submit" loading={saving}>
+                {editingId ? "Enregistrer les modifications" : "Enregistrer le produit"}
+              </Button>
+              {!editingId && (
+                <Button type="button" variant="ghost" onClick={resetForm}>
+                  <RotateCcw size={14} />
+                  Réinitialiser
+                </Button>
+              )}
+            </div>
           </form>
         </Card>
       )}

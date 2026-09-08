@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, defaultTokens } from "@maxi-equip/design-system";
-import { ArrowUp, ArrowDown, ChevronsUpDown, Search, ChevronLeft, ChevronRight, User } from "lucide-react";
+import { ArrowUp, ArrowDown, ChevronsUpDown, Search, ChevronLeft, ChevronRight, User, X } from "lucide-react";
 import type { EvenementHistorique } from "../../../preload/index.js";
 import { useSurbrillanceOperation } from "../highlight.js";
 
@@ -208,6 +208,31 @@ export function HistoriqueOperationsTable({
               </option>
             ))}
           </select>
+          {(recherche || depotFiltre !== "tous") && (
+            <button
+              onClick={() => {
+                setRecherche("");
+                setDepotFiltre("tous");
+                setPage(1);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "7px 12px",
+                borderRadius: defaultTokens.radius.pill,
+                border: "none",
+                background: "none",
+                color: defaultTokens.colors.textSoft,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              <X size={13} />
+              Effacer les filtres
+            </button>
+          )}
         </div>
       </Card>
 

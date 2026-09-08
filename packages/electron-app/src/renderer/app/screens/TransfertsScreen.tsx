@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { ArrowLeftRight } from "lucide-react";
+import { ArrowLeftRight, RotateCcw } from "lucide-react";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
 import { ProduitSelector } from "../components/ProduitSelector.js";
 import { HistoriqueOperationsTable } from "../components/HistoriqueOperationsTable.js";
@@ -157,6 +157,19 @@ export function TransfertsScreen({
             />
           </div>
           <Button type="submit">Effectuer le transfert</Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setProduitId("");
+              setSourceId("");
+              setDestinationId("");
+              setQuantite("");
+            }}
+          >
+            <RotateCcw size={14} />
+            Réinitialiser
+          </Button>
         </form>
       </Card>
 

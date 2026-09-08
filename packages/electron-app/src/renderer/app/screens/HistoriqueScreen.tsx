@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, defaultTokens } from "@maxi-equip/design-system";
-import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowLeftRight, ShoppingCart, Ban, Search } from "lucide-react";
+import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowLeftRight, ShoppingCart, Ban, Search, X } from "lucide-react";
 import type { EvenementHistorique } from "../../../preload/index.js";
 import type { CibleOperation } from "../AppRoot.js";
 import { useSurbrillanceOperation } from "../highlight.js";
@@ -274,6 +274,33 @@ export function HistoriqueScreen({
               <span style={{ color: defaultTokens.colors.textFaint, fontSize: 12 }}>à</span>
               <input type="date" style={inputStyle} value={dateFin} onChange={(e) => setDateFin(e.target.value)} />
             </div>
+          )}
+          {(recherche || typeFiltre !== "tous" || periode !== "tout" || dateDebut || dateFin) && (
+            <button
+              onClick={() => {
+                setRecherche("");
+                setTypeFiltre("tous");
+                setPeriode("tout");
+                setDateDebut("");
+                setDateFin("");
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "7px 12px",
+                borderRadius: defaultTokens.radius.pill,
+                border: "none",
+                background: "none",
+                color: defaultTokens.colors.textSoft,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              <X size={13} />
+              Effacer les filtres
+            </button>
           )}
         </div>
       </Card>

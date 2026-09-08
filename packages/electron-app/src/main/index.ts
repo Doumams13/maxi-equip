@@ -69,6 +69,16 @@ function createMainWindow(): BrowserWindow {
 
   restrictNavigation(window);
 
+  // Raccourci manuel pour les outils de développement (F12 ou
+  // Ctrl/Cmd+Shift+I) — nécessaire depuis le retrait du menu générique
+  // d'Electron (Menu.setApplicationMenu(null)) : ce raccourci était
+  // auparavant fourni par l'entrée de menu "Affichage > Outils de
+  // développement" et a cessé de fonctionner en même temps que le menu.
+  window.webContents.on("before-input-event", (_event, input) => {
+    const combinaisonDevTools = input.key === "F12" || (input.control && input.shift && input.key.toLowerCase() === "i");
+    if (combinaisonDevTools) window.webContents.toggleDevTools();
+  });
+
   // Relaie les logs du Renderer vers la console du Main Process — utile en
   // développement pour diagnostiquer sans ouvrir les DevTools. Désactivé
   // en production (app empaquetée) pour ne jamais faire fuiter de contenu

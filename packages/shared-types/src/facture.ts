@@ -50,6 +50,13 @@ export interface Facture extends MetierEntity {
   annuleeLe: ISODateTime | null;
   annuleePar: UUID | null;
   motifAnnulation: string | null;
+
+  /**
+   * Renseigné UNIQUEMENT sur une facture annulée, une fois qu'elle a
+   * servi de base à une correction — empêche de proposer une seconde
+   * correction à partir de la même erreur déjà traitée.
+   */
+  corrigeeParFactureId: string | null;
 }
 
 export interface LigneFacture {

@@ -183,6 +183,7 @@ function migrateFacturesPourAnnulationEtLivraison(db: Database.Database): void {
             annulee_le             TEXT,
             annulee_par            TEXT REFERENCES utilisateurs (id),
             motif_annulation       TEXT,
+            corrigee_par_facture_id TEXT REFERENCES factures (id),
             created_at             TEXT NOT NULL,
             updated_at             TEXT NOT NULL
           );
@@ -216,6 +217,10 @@ function migrateFacturesPourAnnulationEtLivraison(db: Database.Database): void {
     ajouterSiAbsente("annulee_le", "annulee_le TEXT");
     ajouterSiAbsente("annulee_par", "annulee_par TEXT REFERENCES utilisateurs(id)");
     ajouterSiAbsente("motif_annulation", "motif_annulation TEXT");
+    // Correction : "une facture annulée déjà corrigée une fois ne doit
+    // plus proposer Modifier" — évite une seconde correction à partir de
+    // la même erreur déjà traitée.
+    ajouterSiAbsente("corrigee_par_facture_id", "corrigee_par_facture_id TEXT REFERENCES factures(id)");
   }
 
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_factures_numero_actif ON factures (numero) WHERE annulee_le IS NULL;");

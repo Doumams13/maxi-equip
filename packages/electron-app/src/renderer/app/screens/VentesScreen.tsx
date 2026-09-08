@@ -149,6 +149,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
   const [lignes, setLignes] = useState<LigneVenteForm[]>([ligneVide()]);
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [factureOrigineId, setFactureOrigineId] = useState<string | null>(null);
 
   async function chargerStocks(depotsListe: Emplacement[]) {
     const entries = await Promise.all(
@@ -189,6 +190,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
       setClientNom(donnees.clientNom);
       setClientTelephone(donnees.clientTelephone ?? "");
       if (donnees.modeReglement) setModeReglement(donnees.modeReglement);
+      setFactureOrigineId(factureAPreRemplir);
       setLignes(
         donnees.lignes.map((l) => ({
           produitId: l.produitId ?? "",
@@ -284,6 +286,14 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
 
       if (result.success) {
         showSuccess("Vente enregistrée", `Facture ${result.numero} créée avec succès.`);
+        // Marque l'ancienne facture annulée comme corrigée — UNIQUEMENT
+        // après le succès réel de la création, jamais avant. Empêche
+        // ensuite l'écran Factures de proposer une seconde correction à
+        // partir de la même erreur déjà traitée.
+        if (factureOrigineId && result.factureId) {
+          await window.maxiEquip.marquerFactureCorrigee(factureOrigineId, result.factureId);
+          setFactureOrigineId(null);
+        }
         setClientNom("");
         setClientTelephone("");
         setVendeurNomManuel("");

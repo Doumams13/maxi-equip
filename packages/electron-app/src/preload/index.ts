@@ -142,6 +142,8 @@ const maxiEquipApi = {
   marquerFactureLivree: (factureId: string): Promise<{ success: boolean }> => ipcRenderer.invoke("factures:marquerLivree", factureId),
   annulerFacture: (factureId: string, motif: string): Promise<{ success: boolean; message?: string }> =>
     ipcRenderer.invoke("factures:annuler", factureId, motif),
+  marquerFactureCorrigee: (factureOrigineId: string, nouvelleFactureId: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke("factures:marquerCorrigee", factureOrigineId, nouvelleFactureId),
   getDocumentInterneFacture: (
     factureId: string
   ): Promise<{ motif: string; taille: string; quantiteTotale: number; quantiteInterne: number; quantiteExterne: number; fournisseur: string | null; prixAchat: number | null }[]> =>

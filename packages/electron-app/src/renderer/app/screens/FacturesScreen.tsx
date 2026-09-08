@@ -487,9 +487,15 @@ export function FacturesScreen({
                           </Button>
                         )}
                         {f.annuleeLe ? (
-                          <Button variant="ghost" onClick={() => onModifierFacture(f.id)} title="Modifier (corriger l'erreur dans une nouvelle vente)">
-                            <Pencil size={15} color={defaultTokens.colors.accent} />
-                          </Button>
+                          // Le crayon disparaît une fois cette facture
+                          // déjà corrigée une fois — évite de proposer
+                          // une seconde correction à partir de la même
+                          // erreur déjà traitée.
+                          !f.corrigeeParFactureId && (
+                            <Button variant="ghost" onClick={() => onModifierFacture(f.id)} title="Modifier (corriger l'erreur dans une nouvelle vente)">
+                              <Pencil size={15} color={defaultTokens.colors.accent} />
+                            </Button>
+                          )
                         ) : (
                           <Button variant="ghost" onClick={() => setFactureAAnnuler(f)} title="Annuler">
                             <Ban size={15} color={defaultTokens.colors.danger} />

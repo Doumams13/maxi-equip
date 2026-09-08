@@ -106,15 +106,26 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       style={{
         position: "relative",
         width: "100%",
-        height: "100%",
-        overflow: "hidden",
+        // "minHeight" (jamais "height" fixe) : le contenu peut légitimement
+        // dépasser 100% sur une fenêtre très basse — dans ce cas, il pousse
+        // le conteneur à s'agrandir et devient défilable, jamais coupé.
+        minHeight: "100%",
+        // "overflow-y: auto" (jamais "hidden") — le <body> autorisait déjà
+        // le défilement, mais ce conteneur s'en empêchait lui-même : c'est
+        // exactement la cause du bas de carte coupé, corrigée ici. Le
+        // scroll reste un filet de sécurité ; l'objectif principal est que
+        // les espacements ci-dessous se réduisent AVANT d'en avoir besoin.
+        overflowY: "auto",
         background: defaultTokens.colors.bg,
         fontFamily: defaultTokens.typography.body,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: 24,
+        // Le padding vertical se réduit sur une fenêtre basse (jusqu'à
+        // 12px), reste confortable sur une fenêtre haute (jusqu'à 28px) —
+        // adaptation réelle à la hauteur disponible, pas une valeur fixe.
+        padding: "clamp(12px, 4vh, 28px) 24px",
         boxSizing: "border-box",
       }}
     >
@@ -122,14 +133,14 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
       <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", maxWidth: 420, width: "100%" }}>
         {/* Logo + identité — logo officiel utilisé tel quel, jamais modifié */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 22 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: "clamp(10px, 2.5vh, 22px)" }}>
           <Logo logoUrl={logoUrl} width={96} height={70} />
           <h1
             style={{
-              margin: "10px 0 2px",
+              margin: "clamp(6px, 1.2vh, 10px) 0 2px",
               fontFamily: defaultTokens.typography.display,
               fontWeight: 800,
-              fontSize: 26,
+              fontSize: "clamp(20px, 1.6vh + 14px, 26px)",
               letterSpacing: "0.02em",
               color: defaultTokens.colors.accent,
             }}
@@ -147,19 +158,19 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           >
             Quincaillerie · Vente de matériaux de construction
           </p>
-          <div style={{ width: 46, height: 2, background: defaultTokens.colors.accent, marginTop: 8, borderRadius: 2 }} />
+          <div style={{ width: 46, height: 2, background: defaultTokens.colors.accent, marginTop: "clamp(4px, 1vh, 8px)", borderRadius: 2 }} />
         </div>
 
         {/* Carte de connexion */}
-        <Card elevated padding={28} style={{ width: "100%", boxSizing: "border-box" }}>
-          <div style={{ textAlign: "center", marginBottom: 20 }}>
+        <Card elevated padding={0} style={{ width: "100%", boxSizing: "border-box", padding: "clamp(16px, 3.5vh, 28px)" }}>
+          <div style={{ textAlign: "center", marginBottom: "clamp(10px, 2.5vh, 20px)" }}>
             <h2 style={{ margin: 0, fontFamily: defaultTokens.typography.display, fontWeight: 800, fontSize: 21, color: defaultTokens.colors.text }}>
               Connexion
             </h2>
             <p style={{ margin: "4px 0 0", fontSize: 13, color: defaultTokens.colors.textSoft }}>Accédez à votre espace MAXI EQUIP</p>
           </div>
 
-          <form onSubmit={(e) => void handleSubmit(e)} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <form onSubmit={(e) => void handleSubmit(e)} style={{ display: "flex", flexDirection: "column", gap: "clamp(8px, 1.8vh, 14px)" }}>
             <div>
               <label
                 htmlFor="login-identifiant"

@@ -205,6 +205,18 @@ export function registerMetierIpcHandlers(
   });
 
   /**
+   * Marque une facture annulée comme corrigée — appelé uniquement APRÈS
+   * la création réussie d'une nouvelle facture via "Modifier" (jamais
+   * avant, jamais si la création échoue). Le bouton Modifier disparaît
+   * ensuite pour l'ancienne facture, évitant une seconde correction à
+   * partir de la même erreur déjà traitée.
+   */
+  ipcMain.handle("factures:marquerCorrigee", (_e, factureOrigineId: string, nouvelleFactureId: string) => {
+    factureRepository.marquerCorrigee(factureOrigineId, nouvelleFactureId);
+    return { success: true };
+  });
+
+  /**
    * Document interne d'approvisionnement — accessible à tous, sans
    * distinction Admin/Gérant (§9 de la correction "Facturation").
    */

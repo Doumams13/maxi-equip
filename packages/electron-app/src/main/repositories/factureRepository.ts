@@ -19,6 +19,7 @@ interface FactureRow {
   annulee_le: string | null;
   annulee_par: string | null;
   motif_annulation: string | null;
+  corrigee_par_facture_id: string | null;
 }
 
 function rowToFacture(row: FactureRow, lignes: LigneFacture[]): Facture {
@@ -40,6 +41,7 @@ function rowToFacture(row: FactureRow, lignes: LigneFacture[]): Facture {
     annuleeLe: row.annulee_le,
     annuleePar: row.annulee_par,
     motifAnnulation: row.motif_annulation,
+    corrigeeParFactureId: row.corrigee_par_facture_id,
     createdAt: "",
     updatedAt: "",
   };
@@ -202,6 +204,17 @@ export class FactureRepository {
     this.db
       .prepare("UPDATE factures SET annulee_le = ?, annulee_par = ?, motif_annulation = ?, updated_at = ? WHERE id = ?")
       .run(now, annuleePar, motif, now, id);
+  }
+
+  /**
+   * Marque une facture annulée comme "déjà corrigée" — empêche l'écran
+   * Factures de proposer une seconde correction à partir de la même
+   * erreur (le bouton Modifier disparaît une fois cet identifiant
+   * renseigné). Appelée uniquement APRÈS la création réussie de la
+   * nouvelle facture, jamais avant.
+   */
+  marquerCorrigee(factureOrigineId: string, nouvelleFactureId: string): void {
+    this.db.prepare("UPDATE factures SET corrigee_par_facture_id = ?, updated_at = ? WHERE id = ?").run(nouvelleFactureId, new Date().toISOString(), factureOrigineId);
   }
 
   /**

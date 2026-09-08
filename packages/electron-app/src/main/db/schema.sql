@@ -116,6 +116,10 @@ CREATE TABLE IF NOT EXISTS factures (
   annulee_le             TEXT,
   annulee_par            TEXT REFERENCES utilisateurs (id),
   motif_annulation       TEXT,
+  -- Renseigné UNIQUEMENT sur une facture annulée, une fois qu'elle a
+  -- servi de base à une correction via "Modifier" — empêche de proposer
+  -- une seconde correction à partir de la même erreur déjà traitée.
+  corrigee_par_facture_id TEXT REFERENCES factures (id),
   created_at             TEXT NOT NULL,
   updated_at             TEXT NOT NULL
 );

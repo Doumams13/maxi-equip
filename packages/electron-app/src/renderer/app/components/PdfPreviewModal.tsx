@@ -67,15 +67,23 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
     if (!docRef.current || !canvasRef.current) return;
     let annule = false;
     void (async () => {
-      const page = await docRef.current!.getPage(pageActuelle);
-      if (annule) return;
-      const viewport = page.getViewport({ scale: 1.3 });
-      const canvas = canvasRef.current!;
-      const contexte = canvas.getContext("2d");
-      if (!contexte) return;
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvasContext: contexte, viewport }).promise;
+      try {
+        const page = await docRef.current!.getPage(pageActuelle);
+        if (annule) return;
+        const viewport = page.getViewport({ scale: 1.3 });
+        const canvas = canvasRef.current!;
+        const contexte = canvas.getContext("2d");
+        if (!contexte) return;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: contexte, viewport }).promise;
+      } catch (err) {
+        // Le rendu ne doit JAMAIS échouer silencieusement — un canvas
+        // blanc sans message était exactement le symptôme signalé.
+        // eslint-disable-next-line no-console
+        console.error("[apercu-pdf] rendu de la page impossible :", err);
+        if (!annule) setErreur("Le rendu de l'aperçu a échoué. Réessayez, ou utilisez Télécharger.");
+      }
     })();
     return () => {
       annule = true;

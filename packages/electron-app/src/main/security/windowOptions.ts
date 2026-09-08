@@ -37,15 +37,11 @@ export function getSecureWebPreferences(
  * l'application — aucun contenu externe, uniquement le contenu local
  * empaqueté avec l'application (Synthèse §3).
  *
- * "wasm-unsafe-eval" (et non "unsafe-eval", plus permissif) est
- * nécessaire pour pdfjs-dist (aperçu intégré des factures/documents
- * internes, correction "Voir/Imprimer/Télécharger") : la bibliothèque
- * exécute du WebAssembly pour certains traitements internes (décodage
- * JPX/JBIG2, polices) — sans cette autorisation, le rendu échouait
- * silencieusement (canvas blanc, sans message d'erreur avant ce
- * correctif). Cette directive n'autorise QUE l'instanciation WASM, pas
- * eval()/new Function() sur du texte arbitraire — la restriction reste
- * bien plus stricte qu'un "unsafe-eval" général.
+ * Redevenue stricte : l'aperçu de document (Voir) n'utilise plus
+ * pdfjs-dist côté Renderer (rendu resté blanc, cause non identifiable
+ * sans pouvoir déboguer Electron directement) — remplacé par une
+ * capture d'écran générée côté Main, qui ne nécessite aucun
+ * assouplissement de cette politique.
  */
 export const CONTENT_SECURITY_POLICY =
-  "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https:; worker-src 'self' blob:;";
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https:;";

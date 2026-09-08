@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, dialog } from "electron";
-import { readFile, copyFile } from "node:fs/promises";
+import { copyFile } from "node:fs/promises";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
 import { StockRepository } from "../repositories/stockRepository.js";
@@ -223,14 +223,45 @@ export function registerMetierIpcHandlers(
    */
 
   /** VOIR — lit les octets du PDF pour un aperçu intégré à l'application (pdfjs-dist), jamais le lecteur système (§1 : "ne pas utiliser shell.openPath pour cette action"). */
-  ipcMain.handle("documents:lireBase64", async (_e, chemin: string) => {
+  /**
+   * VOIR — remplace l'ancienne tentative avec pdfjs-dist (canvas resté
+   * blanc, cause exacte non identifiable sans pouvoir exécuter Electron
+   * pour déboguer). Réutilise à la place le SEUL mécanisme déjà confirmé
+   * fonctionner sur le poste de l'utilisateur : la fenêtre cachée avec
+   * `plugins: true` qui sert aussi à l'impression — Chromium y affiche
+   * réellement le PDF (preuve : l'aperçu d'impression natif Windows
+   * montrait le contenu). On capture cette même fenêtre en image plutôt
+   * que de réimplémenter un second moteur de rendu PDF côté Renderer.
+   *
+   * "#toolbar=0" masque la barre d'outils du lecteur PDF intégré de
+   * Chromium (zoom, imprimante, etc.) — seul le document doit apparaître
+   * dans l'aperçu MAXI EQUIP, pas les contrôles du lecteur système.
+   *
+   * UNE MÊME SOURCE DE DOCUMENT (le fichier généré par genererFacturePdf/
+   * genererDocumentInternePdf) est utilisée pour Voir, Imprimer et
+   * Télécharger — jamais une maquette recréée séparément.
+   */
+  ipcMain.handle("documents:genererApercuImage", async (_e, chemin: string) => {
+    const fenetreApercu = new BrowserWindow({
+      show: false,
+      width: 900,
+      height: 1250,
+      webPreferences: { plugins: true },
+    });
     try {
-      const octets = await readFile(chemin);
-      return { success: true, base64: octets.toString("base64") };
+      await fenetreApercu.loadURL(`file://${chemin}#toolbar=0`);
+      // Le lecteur PDF intégré de Chromium continue de se peindre juste
+      // après l'évènement "did-finish-load" — un court délai garantit
+      // que la capture ne se produit pas sur une page encore vide.
+      await new Promise((r) => setTimeout(r, 400));
+      const image = await fenetreApercu.webContents.capturePage();
+      return { success: true, base64: image.toPNG().toString("base64") };
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[documents] lecture impossible :", err);
-      return { success: false, message: "Impossible de lire le document." };
+      console.error("[documents] génération de l'aperçu impossible :", err);
+      return { success: false, message: "Impossible de générer l'aperçu du document." };
+    } finally {
+      fenetreApercu.close();
     }
   });
 

@@ -141,8 +141,8 @@ const maxiEquipApi = {
     ipcRenderer.invoke("factures:genererPdf", factureId),
   genererDocumentInternePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererDocumentInternePdf", factureId),
-  lireDocumentBase64: (chemin: string): Promise<{ success: boolean; base64?: string; message?: string }> =>
-    ipcRenderer.invoke("documents:lireBase64", chemin),
+  genererApercuImage: (chemin: string): Promise<{ success: boolean; base64?: string; message?: string }> =>
+    ipcRenderer.invoke("documents:genererApercuImage", chemin),
   imprimerDocument: (chemin: string): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("documents:imprimer", chemin),
   telechargerDocument: (chemin: string, nomSuggere: string): Promise<{ success: boolean; canceled?: boolean; chemin?: string; message?: string }> =>
     ipcRenderer.invoke("documents:telecharger", chemin, nomSuggere),

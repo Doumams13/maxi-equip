@@ -87,9 +87,18 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
         if (annule) return;
         // eslint-disable-next-line no-console
         console.log("[PDF PREVIEW] page récupérée");
-        const viewport = page.getViewport({ scale: 1.3 });
+        // Rendu net quel que soit l'écran (correction lisibilité) : la
+        // résolution RÉELLE du canvas (sa "backing store") est multipliée
+        // par le devicePixelRatio de l'écran, alors que sa taille CSS
+        // affichée reste basée sur l'échelle logique — technique standard
+        // recommandée par pdf.js. Sans cela, le canvas était rendu à une
+        // résolution fixe puis étiré en CSS pour remplir la largeur de la
+        // fenêtre d'aperçu, d'où le flou signalé.
+        const echelleAffichage = 1.6;
+        const ratioEcran = window.devicePixelRatio || 1;
+        const viewport = page.getViewport({ scale: echelleAffichage });
         // eslint-disable-next-line no-console
-        console.log("[PDF PREVIEW] taille du viewport :", viewport.width, "×", viewport.height);
+        console.log("[PDF PREVIEW] taille du viewport :", viewport.width, "×", viewport.height, "(ratio écran :", ratioEcran, ")");
         const canvas = canvasRef.current;
         if (!canvas) {
           // eslint-disable-next-line no-console
@@ -104,11 +113,17 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
           setErreur("Erreur interne d'affichage (contexte canvas indisponible).");
           return;
         }
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        canvas.width = Math.floor(viewport.width * ratioEcran);
+        canvas.height = Math.floor(viewport.height * ratioEcran);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
         // eslint-disable-next-line no-console
         console.log("[PDF PREVIEW] début du rendu Canvas");
-        await page.render({ canvasContext: contexte, viewport }).promise;
+        await page.render({
+          canvasContext: contexte,
+          viewport,
+          transform: ratioEcran !== 1 ? [ratioEcran, 0, 0, ratioEcran, 0, 0] : undefined,
+        }).promise;
         // eslint-disable-next-line no-console
         console.log("[PDF PREVIEW] rendu terminé — taille réelle du canvas :", canvas.width, "×", canvas.height);
       } catch (err) {
@@ -134,13 +149,21 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
       try {
         const page = await docRef.current!.getPage(pageActuelle);
         if (annule) return;
-        const viewport = page.getViewport({ scale: 1.3 });
+        const echelleAffichage = 1.6;
+        const ratioEcran = window.devicePixelRatio || 1;
+        const viewport = page.getViewport({ scale: echelleAffichage });
         const canvas = canvasRef.current!;
         const contexte = canvas.getContext("2d");
         if (!contexte) return;
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        await page.render({ canvasContext: contexte, viewport }).promise;
+        canvas.width = Math.floor(viewport.width * ratioEcran);
+        canvas.height = Math.floor(viewport.height * ratioEcran);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        await page.render({
+          canvasContext: contexte,
+          viewport,
+          transform: ratioEcran !== 1 ? [ratioEcran, 0, 0, ratioEcran, 0, 0] : undefined,
+        }).promise;
         // eslint-disable-next-line no-console
         console.log(`[PDF PREVIEW] page ${pageActuelle} rendue sur le canvas (${viewport.width}×${viewport.height})`);
       } catch (err) {
@@ -214,7 +237,6 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
             style={{
               display: chargement || erreur ? "none" : "block",
               maxWidth: "100%",
-              height: "auto",
               boxShadow: defaultTokens.shadows.card,
               background: "#fff",
             }}

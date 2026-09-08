@@ -45,6 +45,7 @@ describe("shared-types (Phase 0 smoke test)", () => {
       annuleeLe: null,
       annuleePar: null,
       motifAnnulation: null,
+      corrigeeParFactureId: null,
     };
     // Vérifie à la compilation (et non seulement à l'exécution) qu'aucune
     // clé "fournisseur" ou "prixAchat" n'existe sur ce type.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, ChevronLeft, ChevronRight } from "lucide-react";
+import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { Facture } from "@maxi-equip/shared-types";
 import { useSurbrillanceOperation } from "../highlight.js";
 
@@ -412,6 +412,21 @@ export function FacturesScreen({
               </option>
             ))}
           </select>
+          {(recherche || statutFiltre !== "tous" || vendeurFiltre !== "tous") && (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setRecherche("");
+                setStatutFiltre("tous");
+                setVendeurFiltre("tous");
+                setPage(1);
+              }}
+            >
+              <X size={14} />
+              Effacer les filtres
+            </Button>
+          )}
         </div>
       </Card>
 

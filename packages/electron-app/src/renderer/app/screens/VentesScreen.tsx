@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Plus, Trash2, Pencil, CheckCircle2, X } from "lucide-react";
+import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
+import { Plus, Trash2, Pencil, CheckCircle2, X, RotateCcw } from "lucide-react";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
 import { ProduitSelector } from "../components/ProduitSelector.js";
 
@@ -150,6 +150,14 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [factureOrigineId, setFactureOrigineId] = useState<string | null>(null);
+  const [snapshotInitial, setSnapshotInitial] = useState<{
+    clientNom: string;
+    clientTelephone: string;
+    vendeurNomManuel: string;
+    modeReglement: string;
+    lignes: LigneVenteForm[];
+  } | null>(null);
+  const [showConfirmReset, setShowConfirmReset] = useState<"reset" | "revert" | null>(null);
 
   async function chargerStocks(depotsListe: Emplacement[]) {
     const entries = await Promise.all(
@@ -191,20 +199,67 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
       setClientTelephone(donnees.clientTelephone ?? "");
       if (donnees.modeReglement) setModeReglement(donnees.modeReglement);
       setFactureOrigineId(factureAPreRemplir);
-      setLignes(
-        donnees.lignes.map((l) => ({
-          produitId: l.produitId ?? "",
-          quantite: String(l.quantite),
-          prixUnitaire: String(l.prixUnitaire),
-          allocations: Object.fromEntries(l.allocationsDepots.map((a) => [a.emplacementId, String(a.quantite)])),
-          fournisseurExterne: l.fournisseurExterne ?? "",
-          prixAchatExterne: l.prixAchatExterne !== null ? String(l.prixAchatExterne) : "",
-        }))
-      );
+      const lignesChargees = donnees.lignes.map((l) => ({
+        produitId: l.produitId ?? "",
+        quantite: String(l.quantite),
+        prixUnitaire: String(l.prixUnitaire),
+        allocations: Object.fromEntries(l.allocationsDepots.map((a) => [a.emplacementId, String(a.quantite)])),
+        fournisseurExterne: l.fournisseurExterne ?? "",
+        prixAchatExterne: l.prixAchatExterne !== null ? String(l.prixAchatExterne) : "",
+      }));
+      setLignes(lignesChargees);
+      // Cliché des données telles que chargées initialement — jamais
+      // modifié ensuite, sert uniquement de référence pour "Revenir aux
+      // informations initiales" (§6 de la correction : distinct d'un
+      // "Réinitialiser" qui viderait tout).
+      setSnapshotInitial({
+        clientNom: donnees.clientNom,
+        clientTelephone: donnees.clientTelephone ?? "",
+        vendeurNomManuel: "",
+        modeReglement: donnees.modeReglement ?? "Espèces",
+        lignes: lignesChargees,
+      });
       showSuccess("Vente reconstituée", "Corrigez les informations nécessaires puis validez pour générer une nouvelle facture.");
       onPreRemplissageConsomme?.();
     })();
   }, [factureAPreRemplir]);
+
+  /**
+   * Réinitialise complètement le formulaire (§1 de la correction) —
+   * jamais une opération réelle : aucune vente enregistrée, aucun stock
+   * modifié, aucune trace créée. Utilisé quand il n'y a PAS de facture
+   * d'origine en cours de correction.
+   */
+  function reinitialiserVente() {
+    setClientNom("");
+    setClientTelephone("");
+    setVendeurNomManuel("");
+    setModeReglement("Espèces");
+    setLignes([ligneVide()]);
+    // Un "Réinitialiser" complet abandonne aussi une éventuelle correction
+    // de facture annulée en cours — le formulaire redevient une vente
+    // neuve et vide, sans lien résiduel (§1 : "aucune information
+    // temporaire liée à la vente" ne doit rester).
+    setFactureOrigineId(null);
+    setSnapshotInitial(null);
+    setShowConfirmReset(null);
+  }
+
+  /**
+   * Restaure les données telles qu'elles étaient au moment du chargement
+   * de la facture annulée à corriger (§6 de la correction) — ne vide
+   * jamais le formulaire, ramène seulement les modifications en cours à
+   * leur point de départ.
+   */
+  function revenirAuxInformationsInitiales() {
+    if (!snapshotInitial) return;
+    setClientNom(snapshotInitial.clientNom);
+    setClientTelephone(snapshotInitial.clientTelephone);
+    setVendeurNomManuel(snapshotInitial.vendeurNomManuel);
+    setModeReglement(snapshotInitial.modeReglement);
+    setLignes(snapshotInitial.lignes);
+    setShowConfirmReset(null);
+  }
 
   function updateLigne(index: number, patch: Partial<LigneVenteForm>) {
     setLignes((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
@@ -466,10 +521,50 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         </Card>
 
         <Card style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 16, fontWeight: 800, fontFamily: defaultTokens.typography.display }}>Total : {total.toLocaleString("fr-FR")} FCFA</div>
-          <Button type="submit">Vérifier la vente</Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, fontFamily: defaultTokens.typography.display }}>Total : {total.toLocaleString("fr-FR")} FCFA</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {snapshotInitial && (
+              <Button type="button" variant="ghost" onClick={() => setShowConfirmReset("revert")}>
+                <RotateCcw size={14} />
+                Revenir aux informations initiales
+              </Button>
+            )}
+            <Button type="button" variant="ghost" onClick={() => setShowConfirmReset("reset")}>
+              <RotateCcw size={14} />
+              Réinitialiser la vente
+            </Button>
+            <Button type="submit">Vérifier la vente</Button>
+          </div>
         </Card>
       </form>
+
+      {showConfirmReset === "reset" && (
+        <ConfirmDialog
+          title="Réinitialiser la vente ?"
+          resume={[
+            { label: "Conséquence", value: "Toutes les informations saisies pour cette vente seront perdues." },
+            { label: "Garantie", value: "Aucune vente ne sera enregistrée et aucun stock ne sera modifié." },
+          ]}
+          onAnnuler={() => setShowConfirmReset(null)}
+          onConfirmer={reinitialiserVente}
+          confirming={false}
+        />
+      )}
+
+      {showConfirmReset === "revert" && (
+        <ConfirmDialog
+          title="Revenir aux informations initiales ?"
+          resume={[
+            { label: "Conséquence", value: "Vos modifications en cours seront perdues." },
+            { label: "Résultat", value: "Le formulaire retrouvera les données de la facture annulée telles que chargées au départ." },
+          ]}
+          onAnnuler={() => setShowConfirmReset(null)}
+          onConfirmer={revenirAuxInformationsInitiales}
+          confirming={false}
+        />
+      )}
 
       {showConfirm && (
         <SaleConfirmModal

@@ -37,11 +37,16 @@ export function getSecureWebPreferences(
  * l'application — aucun contenu externe, uniquement le contenu local
  * empaqueté avec l'application (Synthèse §3).
  *
- * Redevenue stricte : l'aperçu de document (Voir) n'utilise plus
- * pdfjs-dist côté Renderer (rendu resté blanc, cause non identifiable
- * sans pouvoir déboguer Electron directement) — remplacé par une
- * capture d'écran générée côté Main, qui ne nécessite aucun
- * assouplissement de cette politique.
+ * "worker-src 'self' blob:" et "'wasm-unsafe-eval'" sont nécessaires à
+ * pdfjs-dist (aperçu de document intégré, "Voir"). Cause précise,
+ * identifiée en lisant le code source de pdfjs-dist : une page chargée
+ * via file:// a un `origin` littéralement égal à "null" (comportement
+ * documenté de Chromium) — pdfjs-dist détecte ceci comme "origine non
+ * identique" et bascule systématiquement sur un mécanisme de secours
+ * (un Worker instancié depuis un Blob contenant `await import(...)`),
+ * qui échoue silencieusement sans "worker-src blob:". "wasm-unsafe-eval"
+ * reste nécessaire pour certains traitements internes de la bibliothèque
+ * (jamais "unsafe-eval", plus permissif).
  */
 export const CONTENT_SECURITY_POLICY =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https:;";
+  "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https:; worker-src 'self' blob:;";

@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, dialog } from "electron";
-import { copyFile, stat } from "node:fs/promises";
+import { copyFile, readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
@@ -224,79 +224,28 @@ export function registerMetierIpcHandlers(
    */
 
   /**
-   * VOIR — remplace l'ancienne tentative avec pdfjs-dist (canvas resté
-   * blanc, cause exacte non identifiable sans pouvoir exécuter Electron
-   * pour déboguer). Réutilise à la place le SEUL mécanisme déjà confirmé
-   * fonctionner sur le poste de l'utilisateur : la fenêtre cachée avec
-   * `plugins: true` qui sert aussi à l'impression — capturée en image
-   * plutôt que de réimplémenter un second moteur de rendu PDF côté
-   * Renderer.
+   * VOIR — historique des tentatives précédentes, toutes basées sur le
+   * lecteur PDF intégré de Chromium, abandonnées après échecs confirmés :
+   * capturePage() sur fenêtre cachée (image vide), fenêtre visible hors
+   * écran (image vide), rendu offscreen+paint (le plugin PDF ne se peint
+   * pas dans ce pipeline), ouverture directe dans une fenêtre Electron
+   * visible (écran gris uniforme — cause jamais identifiée avec
+   * certitude, la piste Chromium a été abandonnée entièrement).
    *
-   * BUG RÉEL TROUVÉ ET CORRIGÉ (aperçu gris uniforme, identique pour
-   * facture et document interne — donc bien un problème du système
-   * COMMUN, pas d'une facture précise) : l'URL était construite
-   * naïvement avec `file://${chemin}`. Sur Windows, un chemin contient
-   * des antislashs et une lettre de lecteur (ex. "C:\Users\...\FAC.pdf")
-   * — cette concaténation produit une URL malformée que Chromium échoue
-   * à charger SILENCIEUSEMENT (pas d'exception levée, la page reste
-   * vide) : `loadURL` se résout quand même, `capturePage()` capture donc
-   * le fond par défaut de la fenêtre, jamais le document. Corrigé avec
-   * `pathToFileURL()` de Node.js, la fonction standard recommandée par
-   * Electron précisément pour cette conversion chemin → URL fichier,
-   * qui gère correctement les spécificités de chaque plateforme.
-   *
-   * "#toolbar=0" masque la barre d'outils du lecteur PDF intégré de
-   * Chromium — seul le document doit apparaître dans l'aperçu MAXI EQUIP.
-   *
-   * UNE MÊME SOURCE DE DOCUMENT (le fichier généré par genererFacturePdf/
-   * genererDocumentInternePdf) est utilisée pour Voir, Imprimer et
-   * Télécharger — jamais une maquette recréée séparément.
+   * Solution actuelle : pdfjs-dist, qui ne dépend d'AUCUN lecteur PDF de
+   * Chromium — uniquement lecture des octets du fichier puis rendu sur
+   * <canvas> côté Renderer (voir PdfPreviewModal.tsx). Cette fonction ne
+   * fait que lire le fichier déjà généré (même source que Imprimer/
+   * Télécharger) — aucune fenêtre, aucune capture.
    */
-  /**
-   * VOIR — Diagnostic complet effectué avant cette correction (voir
-   * échange précédent) : la cause exacte était `webPreferences.offscreen:
-   * true` combiné à `plugins: true` — le lecteur PDF intégré de Chromium
-   * (PDFium) ne se peint pas dans le pipeline de composition du rendu
-   * hors écran, quel que soit le mode de fenêtre essayé (show:false
-   * simple, fenêtre visible hors écran, puis offscreen+paint) : dans les
-   * trois cas, l'image obtenue était vide.
-   *
-   * `documents:imprimer` (ci-dessous), lui, n'a JAMAIS ce problème : il
-   * ne capture rien, il délègue directement à `webContents.print()`, qui
-   * n'a pas besoin que la page soit "peinte" et photographiée à part.
-   *
-   * Correction : abandonner toute capture. Réutiliser tel quel le même
-   * mécanisme fenêtre (plugins:true, sans offscreen) qu'à l'impression —
-   * mais RENDU VISIBLE, une vraie fenêtre Electron secondaire affichant
-   * le PDF directement. Reste "dans MAXI EQUIP" (jamais Adobe Reader ni
-   * Edge), et repose sur un fait déjà vérifié plutôt que sur une nouvelle
-   * hypothèse.
-   */
-  ipcMain.handle("documents:voir", async (_e, chemin: string, titre: string) => {
+  ipcMain.handle("documents:lireBase64", async (_e, chemin: string) => {
     try {
-      await stat(chemin);
+      const octets = await readFile(chemin);
+      return { success: true, base64: octets.toString("base64") };
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error(`[apercu] FICHIER INTROUVABLE : ${chemin}`, err);
-      return { success: false, message: "Le document généré est introuvable sur le disque." };
-    }
-
-    const url = pathToFileURL(chemin).href;
-    const fenetreApercu = new BrowserWindow({
-      width: 900,
-      height: 1150,
-      title: titre,
-      webPreferences: { plugins: true },
-      autoHideMenuBar: true,
-    });
-    try {
-      await fenetreApercu.loadURL(url);
-      return { success: true };
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("[apercu] chargement impossible :", err);
-      fenetreApercu.close();
-      return { success: false, message: "Impossible d'afficher le document." };
+      console.error("[documents] lecture impossible :", err);
+      return { success: false, message: "Impossible de lire le document." };
     }
   });
 

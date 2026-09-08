@@ -15,6 +15,20 @@ export function runMigrations(db: Database.Database): void {
   addLargeurHauteurColumnsIfMissing(db);
   addUtilisateurIdToMouvementsIfMissing(db);
   migrateFacturesPourAnnulationEtLivraison(db);
+  seedParametresEntrepriseSiAbsent(db);
+}
+
+/**
+ * Correction "SHOP sur la facture" : garantit qu'une ligne de
+ * configuration existe toujours — sans écraser une valeur déjà
+ * personnalisée par l'Administrateur (INSERT OR IGNORE, jamais UPDATE).
+ * "MAXI-EQUIP" est la valeur par défaut demandée pour cette installation,
+ * modifiable ensuite sans toucher au code (§ "configuration centralisée").
+ */
+function seedParametresEntrepriseSiAbsent(db: Database.Database): void {
+  db.prepare("INSERT OR IGNORE INTO parametres_entreprise (id, nom_magasin, updated_at) VALUES ('principal', 'MAXI-EQUIP', ?)").run(
+    new Date().toISOString()
+  );
 }
 
 /**

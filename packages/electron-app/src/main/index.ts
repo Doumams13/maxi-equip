@@ -16,6 +16,7 @@ import { ProduitRepository } from "./repositories/produitRepository.js";
 import { StockRepository } from "./repositories/stockRepository.js";
 import { MouvementRepository } from "./repositories/mouvementRepository.js";
 import { FactureRepository } from "./repositories/factureRepository.js";
+import { ParametresRepository } from "./repositories/parametresRepository.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
@@ -145,6 +146,7 @@ app.whenReady().then(async () => {
     const stockRepository = new StockRepository(db);
     const mouvementRepository = new MouvementRepository(db);
     const factureRepository = new FactureRepository(db);
+    const parametresRepository = new ParametresRepository(db);
     const stockService = new StockService(stockRepository, mouvementRepository);
     const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository);
 
@@ -162,6 +164,7 @@ app.whenReady().then(async () => {
       stockRepository,
       mouvementRepository,
       factureRepository,
+      parametresRepository,
       stockService,
       venteService,
       imageService,

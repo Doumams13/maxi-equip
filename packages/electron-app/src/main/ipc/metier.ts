@@ -4,6 +4,7 @@ import { EmplacementRepository } from "../repositories/emplacementRepository.js"
 import { StockRepository } from "../repositories/stockRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
 import { FactureRepository } from "../repositories/factureRepository.js";
+import { ParametresRepository } from "../repositories/parametresRepository.js";
 import { StockService } from "../services/stockService.js";
 import { VenteService, VenteValidationError, type VenteInput } from "../services/venteService.js";
 import { ImageService } from "../services/imageService.js";
@@ -32,6 +33,7 @@ export function registerMetierIpcHandlers(
   stockRepository: StockRepository,
   mouvementRepository: MouvementRepository,
   factureRepository: FactureRepository,
+  parametresRepository: ParametresRepository,
   stockService: StockService,
   venteService: VenteService,
   imageService: ImageService,
@@ -169,12 +171,17 @@ export function registerMetierIpcHandlers(
   ipcMain.handle("factures:ouvrirPdf", async (_e, factureId: string) => {
     const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
-    const emplacement = emplacementRepository.list().find((e) => e.id === facture.emplacementId);
     const vendeurNomAffiche = facture.vendeurNomManuel ?? facture.vendeurNom ?? "—";
     try {
       const chemin = await genererFacturePdf({
         facture,
-        nomMagasin: emplacement?.nom ?? "MAXI EQUIP",
+        // Correction "SHOP sur la facture" : le nom affiché vient
+        // TOUJOURS de la configuration centralisée, jamais du nom
+        // interne de l'emplacement point-de-vente (qui reste "SHOP",
+        // un identifiant technique distinct du nom commercial affiché
+        // aux clients). Toute nouvelle facture reflète automatiquement
+        // un changement fait par l'Administrateur, sans toucher au code.
+        nomMagasin: parametresRepository.getNomMagasin(),
         vendeurNomAffiche,
       });
       const erreur = await shell.openPath(chemin);
@@ -184,6 +191,25 @@ export function registerMetierIpcHandlers(
       // eslint-disable-next-line no-console
       console.error("[factures] génération PDF impossible :", err);
       return { success: false, message: "Impossible de générer le document de la facture." };
+    }
+  });
+
+  // --- Configuration centralisée de l'entreprise ---
+  ipcMain.handle("parametres:getNomMagasin", () => parametresRepository.getNomMagasin());
+
+  ipcMain.handle("parametres:setNomMagasin", (_e, nom: string) => {
+    const session = sessionManager.get();
+    // Seul l'Administrateur peut modifier cette configuration —
+    // vérifié ici, jamais uniquement masqué côté Renderer.
+    if (!session || session.role !== "administrateur") {
+      return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
+    }
+    try {
+      parametresRepository.setNomMagasin(nom);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
+      return { success: false, message };
     }
   });
 

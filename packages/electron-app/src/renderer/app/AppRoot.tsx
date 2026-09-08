@@ -9,6 +9,7 @@ import { TransfertsScreen } from "./screens/TransfertsScreen.js";
 import { VentesScreen } from "./screens/VentesScreen.js";
 import { FacturesScreen } from "./screens/FacturesScreen.js";
 import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
+import { ParametresScreen } from "./screens/ParametresScreen.js";
 
 type Session = { userId: string; identifiant: string; nom: string; role: string };
 
@@ -79,6 +80,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     { id: "ventes", label: "Vente", autorise: permissions.canOperateSales },
     { id: "factures", label: "Factures", autorise: permissions.canAccessHistory },
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
+    { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
   ];
 
   function renderScreen() {
@@ -138,6 +140,8 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
             onNaviguerVersOperation={irVersOperation}
           />
         );
+      case "parametres":
+        return <ParametresScreen />;
       default:
         return null;
     }

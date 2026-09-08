@@ -148,6 +148,8 @@ const maxiEquipApi = {
     factureId: string
   ): Promise<{ motif: string; taille: string; quantiteTotale: number; quantiteInterne: number; quantiteExterne: number; fournisseur: string | null; prixAchat: number | null }[]> =>
     ipcRenderer.invoke("factures:documentInterne", factureId),
+  getNomMagasin: (): Promise<string> => ipcRenderer.invoke("parametres:getNomMagasin"),
+  setNomMagasin: (nom: string): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("parametres:setNomMagasin", nom),
   getDonneesPourModification: (
     factureId: string
   ): Promise<{

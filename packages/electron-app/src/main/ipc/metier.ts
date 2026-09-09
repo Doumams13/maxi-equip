@@ -354,6 +354,60 @@ export function registerMetierIpcHandlers(
     }
   });
 
+  /** Création d'un nouveau point de vente/dépôt — correction "Points de vente dynamiques" §2. Toujours actif, toujours de type "depot" (jamais "shop"). */
+  ipcMain.handle("emplacements:creerDepot", (_e, nom: string) => {
+    const session = sessionManager.get();
+    if (!session || session.role !== "administrateur") {
+      return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
+    }
+    try {
+      const id = emplacementRepository.creerDepot(nom, "Libreville");
+      return { success: true, id };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
+      return { success: false, message };
+    }
+  });
+
+  /**
+   * Archivage — vérifie D'ABORD que le point de vente n'a plus de stock
+   * (§8 de la correction : "ne pas simplement faire disparaître le
+   * stock"). Renvoie le détail produit par produit si le stock n'est pas
+   * vide, pour l'avertissement clair demandé — jamais un archivage forcé.
+   */
+  ipcMain.handle("emplacements:archiver", (_e, id: string) => {
+    const session = sessionManager.get();
+    if (!session || session.role !== "administrateur") {
+      return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
+    }
+    const stockRestant = stockRepository
+      .listByEmplacement(id)
+      .filter((s) => s.quantite > 0)
+      .map((s) => ({ produit: produitRepository.findById(s.produitId), quantite: s.quantite }))
+      .filter((s) => s.produit !== null)
+      .map((s) => ({ motif: s.produit!.motif, taille: s.produit!.taille, quantite: s.quantite }));
+
+    if (stockRestant.length > 0) {
+      return {
+        success: false,
+        stockRestant,
+        message: "Ce point de vente possède encore du stock. Veuillez le transférer ou le gérer avant l'archivage.",
+      };
+    }
+
+    emplacementRepository.archiver(id);
+    return { success: true };
+  });
+
+  ipcMain.handle("emplacements:reactiver", (_e, id: string) => {
+    const session = sessionManager.get();
+    if (!session || session.role !== "administrateur") {
+      return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
+    }
+    emplacementRepository.reactiver(id);
+    return { success: true };
+  });
+
   ipcMain.handle("factures:marquerLivree", (_e, factureId: string) => {
     factureRepository.marquerLivree(factureId);
     return { success: true };

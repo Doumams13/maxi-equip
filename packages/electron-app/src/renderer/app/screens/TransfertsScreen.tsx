@@ -48,7 +48,7 @@ export function TransfertsScreen({
   const [showConfirm, setShowConfirm] = useState(false);
   const [transfertsComplets, setTransfertsComplets] = useState<EvenementHistorique[]>([]);
 
-  const depots = emplacements.filter((e) => !e.estPointDeVente);
+  const depots = emplacements.filter((e) => !e.estPointDeVente && e.actif);
 
   async function refreshHistorique() {
     setTransfertsComplets(await window.maxiEquip.listTransfertsComplets());

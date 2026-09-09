@@ -173,7 +173,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
     void (async () => {
       const [prods, emps] = await Promise.all([window.maxiEquip.listProduits(), window.maxiEquip.listEmplacements()]);
       setProduits(prods);
-      const seulsDepots = emps.filter((e) => !e.estPointDeVente);
+      const seulsDepots = emps.filter((e) => !e.estPointDeVente && e.actif);
       const shop = emps.find((e) => e.estPointDeVente) ?? null;
       setDepots(seulsDepots);
       if (shop) setPointDeVenteId(shop.id);

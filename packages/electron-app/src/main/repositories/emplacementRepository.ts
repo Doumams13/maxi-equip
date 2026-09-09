@@ -97,6 +97,47 @@ export class EmplacementRepository {
   reactiver(id: string): void {
     this.db.prepare("UPDATE emplacements SET actif = 1, updated_at = ? WHERE id = ?").run(new Date().toISOString(), id);
   }
+
+  /**
+   * Un point de vente peut être supprimé DÉFINITIVEMENT uniquement s'il
+   * n'a jamais été utilisé dans une donnée réelle de l'application —
+   * correction "Suppression vs Archivage" §1/§3/§6. Vérifie les TROIS
+   * tables qui référencent réellement `emplacements` (analyse du schéma
+   * effectuée avant d'implémenter, comme demandé) :
+   * - `stocks` (quantités en stock à cet emplacement) ;
+   * - `mouvements` (entrées/sorties/transferts — colonnes
+   *   emplacement_id, emplacement_source_id, emplacement_destination_id) ;
+   * - `factures` (point de vente d'une facture).
+   * Les deux premières impliquent en pratique la troisième pour un
+   * emplacement de type "depot" (une facture n'est jamais liée qu'au
+   * point de vente SHOP), mais les trois sont vérifiées explicitement
+   * pour rester correct même si cela changeait plus tard.
+   */
+  peutEtreSupprimeDefinitivement(id: string): boolean {
+    const stocks = (this.db.prepare("SELECT COUNT(*) as n FROM stocks WHERE emplacement_id = ?").get(id) as { n: number }).n;
+    const mouvements = (
+      this.db
+        .prepare("SELECT COUNT(*) as n FROM mouvements WHERE emplacement_id = ? OR emplacement_source_id = ? OR emplacement_destination_id = ?")
+        .get(id, id, id) as { n: number }
+    ).n;
+    const factures = (this.db.prepare("SELECT COUNT(*) as n FROM factures WHERE emplacement_id = ?").get(id) as { n: number }).n;
+    return stocks === 0 && mouvements === 0 && factures === 0;
+  }
+
+  /**
+   * Suppression physique — jamais appelée sans revérifier
+   * `peutEtreSupprimeDefinitivement` juste avant (défense en profondeur :
+   * ne jamais faire confiance à une vérification faite plus tôt côté
+   * Renderer, qui pourrait être périmée si une opération a eu lieu entre
+   * temps). Lève une erreur explicite plutôt que de supprimer une
+   * donnée déjà référencée.
+   */
+  supprimerDefinitivement(id: string): void {
+    if (!this.peutEtreSupprimeDefinitivement(id)) {
+      throw new Error("Ce point de vente ne peut pas être supprimé car il est déjà utilisé dans des données de l'application. Vous pouvez l'archiver.");
+    }
+    this.db.prepare("DELETE FROM emplacements WHERE id = ?").run(id);
+  }
 }
 
 /**

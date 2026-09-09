@@ -43,12 +43,14 @@ export function ParametresScreen() {
   const [telephones, setTelephones] = useState<string[]>([""]);
 
   const [depots, setDepots] = useState<Emplacement[]>([]);
+  const [suppressibles, setSuppressibles] = useState<Record<string, boolean>>({});
   const [ajoutOuvert, setAjoutOuvert] = useState(false);
   const [nouveauNom, setNouveauNom] = useState("");
   const [ajoutEnCours, setAjoutEnCours] = useState(false);
   const [renommageId, setRenommageId] = useState<string | null>(null);
   const [renommageValeur, setRenommageValeur] = useState("");
   const [archivageCible, setArchivageCible] = useState<Emplacement | null>(null);
+  const [suppressionCible, setSuppressionCible] = useState<Emplacement | null>(null);
   const [stockBloquant, setStockBloquant] = useState<{ nom: string; lignes: { motif: string; taille: string; quantite: number }[] } | null>(null);
   const [actionEnCours, setActionEnCours] = useState<string | null>(null);
 
@@ -58,7 +60,14 @@ export function ParametresScreen() {
     setAdresse(identite.adresse);
     setQuartier(identite.quartier);
     setTelephones(identite.telephones.length > 0 ? identite.telephones : [""]);
-    setDepots(emplacements.filter((e) => !e.estPointDeVente));
+    const seulsDepots = emplacements.filter((e) => !e.estPointDeVente);
+    setDepots(seulsDepots);
+    // Correction "Suppression vs Archivage" §3 : vérifié automatiquement
+    // à chaque chargement — jamais figé, une opération ultérieure (ex.
+    // une entrée de stock) peut rendre un point de vente non suppressible.
+    if (seulsDepots.length > 0) {
+      setSuppressibles(await window.maxiEquip.verifierEmplacementsSuppressibles(seulsDepots.map((d) => d.id)));
+    }
   }
 
   useEffect(() => {
@@ -158,6 +167,28 @@ export function ParametresScreen() {
     }
   }
 
+  async function confirmerSuppression() {
+    if (!suppressionCible) return;
+    setActionEnCours(suppressionCible.id);
+    try {
+      const result = await window.maxiEquip.supprimerEmplacementDefinitivement(suppressionCible.id);
+      if (result.success) {
+        showSuccess("Point de vente supprimé", `« ${suppressionCible.nom} » a été définitivement supprimé.`);
+        setSuppressionCible(null);
+        await chargerTout();
+      } else {
+        // La vérification côté serveur a été refaite (défense en
+        // profondeur) — une opération a pu avoir lieu entre l'affichage
+        // du bouton et le clic. Message exact demandé (§3).
+        showError("Suppression impossible", result.message ?? "Ce point de vente ne peut pas être supprimé car il est déjà utilisé dans des données de l'application. Vous pouvez l'archiver.");
+        setSuppressionCible(null);
+        await chargerTout();
+      }
+    } finally {
+      setActionEnCours(null);
+    }
+  }
+
   async function handleReactiver(depot: Emplacement) {
     setActionEnCours(depot.id);
     try {
@@ -221,9 +252,15 @@ export function ParametresScreen() {
               <Button variant="ghost" onClick={() => commencerRenommage(depot)} title="Renommer">
                 <Pencil size={15} />
               </Button>
-              <Button variant="ghost" onClick={() => setArchivageCible(depot)} title="Archiver">
-                <Archive size={15} color={defaultTokens.colors.warning} />
-              </Button>
+              {suppressibles[depot.id] ? (
+                <Button variant="ghost" onClick={() => setSuppressionCible(depot)} title="Supprimer définitivement (jamais utilisé)">
+                  <Trash2 size={15} color={defaultTokens.colors.danger} />
+                </Button>
+              ) : (
+                <Button variant="ghost" onClick={() => setArchivageCible(depot)} title="Archiver">
+                  <Archive size={15} color={defaultTokens.colors.warning} />
+                </Button>
+              )}
             </>
           ) : (
             <Button variant="ghost" onClick={() => void handleReactiver(depot)} loading={enCours} title="Réactiver">
@@ -394,6 +431,29 @@ export function ParametresScreen() {
             <Button variant="secondary" onClick={() => setStockBloquant(null)} style={{ width: "100%" }}>
               Fermer
             </Button>
+          </Card>
+        </div>
+      )}
+
+      {suppressionCible && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 250 }}>
+          <Card elevated style={{ width: "min(440px, 92vw)", boxSizing: "border-box" }}>
+            <h2 style={{ margin: "0 0 10px", fontFamily: defaultTokens.typography.display, fontSize: 16, color: defaultTokens.colors.danger }}>
+              Supprimer définitivement le point de vente ?
+            </h2>
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: defaultTokens.colors.textSoft }}>
+              Supprimer définitivement le point de vente « {suppressionCible.nom} » ?
+              <br />
+              <strong>Cette action est irréversible.</strong>
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button variant="secondary" onClick={() => setSuppressionCible(null)} disabled={actionEnCours === suppressionCible.id} style={{ flex: 1 }}>
+                Annuler
+              </Button>
+              <Button variant="danger" onClick={() => void confirmerSuppression()} loading={actionEnCours === suppressionCible.id} style={{ flex: 1 }}>
+                Supprimer
+              </Button>
+            </div>
           </Card>
         </div>
       )}

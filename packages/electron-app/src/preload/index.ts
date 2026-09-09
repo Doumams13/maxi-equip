@@ -174,6 +174,10 @@ const maxiEquipApi = {
   ): Promise<{ success: boolean; message?: string; stockRestant?: { motif: string; taille: string; quantite: number }[] }> =>
     ipcRenderer.invoke("emplacements:archiver", id),
   reactiverEmplacement: (id: string): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("emplacements:reactiver", id),
+  verifierEmplacementsSuppressibles: (ids: string[]): Promise<Record<string, boolean>> =>
+    ipcRenderer.invoke("emplacements:verifierSuppressibles", ids),
+  supprimerEmplacementDefinitivement: (id: string): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("emplacements:supprimerDefinitivement", id),
   getDonneesPourModification: (
     factureId: string
   ): Promise<{

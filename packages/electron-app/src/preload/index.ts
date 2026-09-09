@@ -136,7 +136,8 @@ const maxiEquipApi = {
   enregistrerVente: (input: VenteInput): Promise<StockOperationResult & { factureId?: string; numero?: string; total?: number }> =>
     ipcRenderer.invoke("ventes:create", input),
 
-  listFactures: (): Promise<(Facture & { vendeurNom: string | null; vendeurRole: string | null })[]> => ipcRenderer.invoke("factures:list"),
+  listFactures: (): Promise<(Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean })[]> =>
+    ipcRenderer.invoke("factures:list"),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
   genererFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererPdf", factureId),

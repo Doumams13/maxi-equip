@@ -5,7 +5,7 @@ import type { Facture } from "@maxi-equip/shared-types";
 import { useSurbrillanceOperation } from "../highlight.js";
 import { PdfPreviewModal } from "../components/PdfPreviewModal.js";
 
-type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null };
+type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean };
 
 type ColonneTriable = "numero" | "date" | "client" | "vendeur" | "montant" | "statut";
 type Direction = "asc" | "desc";
@@ -499,9 +499,16 @@ export function FacturesScreen({
                         <Button variant="ghost" onClick={() => void handleTelecharger(f.id, f.numero)} title="Télécharger">
                           <Download size={15} />
                         </Button>
-                        <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Document interne (fournisseur externe éventuel)">
-                          <FileText size={15} />
-                        </Button>
+                        {/* Correction "Document interne — réservé aux
+                            achats extérieurs" §1 : n'apparaît que si
+                            cette facture a réellement un relevé
+                            d'approvisionnement externe associé — plus
+                            jamais affiché sans condition. */}
+                        {f.aAchatExterieur && (
+                          <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Document interne — Achat extérieur">
+                            <FileText size={15} />
+                          </Button>
+                        )}
                         {!f.annuleeLe && f.statutLivraison === "en_attente" && (
                           <Button variant="ghost" onClick={() => void handleMarquerLivree(f.id)} title="Marquer comme livrée">
                             <Truck size={15} color={defaultTokens.colors.success} />

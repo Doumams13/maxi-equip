@@ -1,7 +1,7 @@
 import type { auth } from "@maxi-equip/domain";
 import type { Facture } from "@maxi-equip/shared-types";
 
-type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null };
+type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean };
 interface AvecAuteur {
   utilisateurId: string | null;
   utilisateurNom: string | null;

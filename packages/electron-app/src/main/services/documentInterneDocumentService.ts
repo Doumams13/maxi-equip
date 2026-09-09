@@ -11,6 +11,7 @@ import {
   GRIS_LABEL,
   FOND_BOITE,
   NOIR,
+  formaterMontant,
   dessinerEnTeteEtIdentite,
   dessinerPiedDePage,
 } from "./factureDocumentService.js";
@@ -33,25 +34,25 @@ export interface DocumentInterneInput {
 }
 
 /**
- * Document interne d'approvisionnement — REFONTE (correction "Refonte du
- * document interne") : reprend désormais EXACTEMENT l'identité visuelle
- * de la facture officielle (logo, filigrane, en-tête, bloc légal, boîtes
- * d'informations, style de tableau, pied de page — via les fonctions
- * partagées dessinerEnTeteEtIdentite/dessinerPiedDePage, extraites de
- * factureDocumentService.ts sans aucune modification de la facture
- * elle-même, vérifié par un rendu réel comparé à l'ancien). Seuls
- * changent : le titre ("DOCUMENT INTERNE" au lieu de "FACTURE"), les
- * colonnes du tableau (ajout d'une colonne Provenance), et l'absence de
- * prix côté client (remplacé par une quantité totale).
+ * Document interne — RÉSERVÉ AUX ACHATS EXTÉRIEURS (correction "Document
+ * interne — réservé aux achats extérieurs") : n'a de sens et n'est
+ * proposé (voir FacturesScreen.tsx, condition `f.aAchatExterieur`) que
+ * lorsqu'au moins une ligne de la vente a nécessité un complément
+ * fournisseur externe. Ne montre donc plus que les lignes de provenance
+ * EXTERNE (jamais la part MAXI EQUIP, qui n'a pas de "prix d'achat" à
+ * documenter ici) — exactement ce que montre l'exemple du prompt : deux
+ * lignes de fournisseurs différents, jamais de ligne "MAXI-EQUIP".
+ *
+ * Reprend l'identité visuelle de la facture officielle (logo, filigrane,
+ * en-tête, bloc légal, style de tableau, pied de page — via les
+ * fonctions partagées dessinerEnTeteEtIdentite/dessinerPiedDePage,
+ * jamais un nouveau design inventé).
  *
  * LIMITE CONNUE, signalée pour transparence : le modèle de vente actuel
  * (VenteInput/venteService) ne permet qu'UN SEUL fournisseur externe par
  * ligne de produit. Le cas "plusieurs fournisseurs pour un même produit"
- * décrit dans la correction n'est donc pas représentable avec les
- * données réellement enregistrées aujourd'hui — le rendu ci-dessous
- * gère correctement 1 ligne "provenance MAXI EQUIP" + 1 ligne
- * "provenance fournisseur" par produit, ce qui couvre tous les cas
- * réellement possibles avec le modèle de données actuel.
+ * n'est donc pas représentable avec les données réellement enregistrées
+ * aujourd'hui.
  */
 export async function genererDocumentInternePdf(input: DocumentInterneInput): Promise<string> {
   const dossier = join(app.getPath("userData"), "documents-internes-generes");
@@ -71,36 +72,49 @@ export async function genererDocumentInternePdf(input: DocumentInterneInput): Pr
   });
 }
 
+interface LigneAchatExterieur {
+  motif: string;
+  taille: string;
+  quantite: number;
+  provenance: string;
+  prixUnitaire: number;
+  total: number;
+}
+
 /**
- * Éclate chaque ligne de vente en lignes de provenance (une par origine
- * réelle : MAXI EQUIP et/ou fournisseur externe) — jamais mélangées,
- * jamais fusionnées, exactement l'exigence "ne pas mélanger les
- * fournisseurs".
+ * Ne conserve QUE les lignes ayant réellement un complément externe
+ * (quantiteExterne > 0) — la part MAXI EQUIP n'apparaît plus sur ce
+ * document, désormais dédié exclusivement au suivi financier des achats
+ * extérieurs (§1/§5 de la correction). Le prix unitaire et le total
+ * viennent directement du relevé d'approvisionnement réellement
+ * enregistré lors de la vente — jamais inventés (§9 : "vérifier toute la
+ * chaîne").
  */
-function eclaterParProvenance(lignes: LigneDocumentInterne[], nomMagasin: string) {
-  const resultat: { motif: string; taille: string; quantite: number; provenance: string }[] = [];
-  for (const ligne of lignes) {
-    if (ligne.quantiteInterne > 0) {
-      resultat.push({ motif: ligne.motif, taille: ligne.taille, quantite: ligne.quantiteInterne, provenance: nomMagasin });
-    }
-    if (ligne.quantiteExterne > 0) {
-      resultat.push({ motif: ligne.motif, taille: ligne.taille, quantite: ligne.quantiteExterne, provenance: ligne.fournisseur ?? "—" });
-    }
-  }
-  return resultat;
+function extraireLignesAchatExterieur(lignes: LigneDocumentInterne[]): LigneAchatExterieur[] {
+  return lignes
+    .filter((l) => l.quantiteExterne > 0)
+    .map((l) => ({
+      motif: l.motif,
+      taille: l.taille,
+      quantite: l.quantiteExterne,
+      provenance: l.fournisseur ?? "—",
+      prixUnitaire: l.prixAchat ?? 0,
+      total: l.quantiteExterne * (l.prixAchat ?? 0),
+    }));
 }
 
 function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche, lignes }: DocumentInterneInput): void {
   const dateAffichee = new Date(facture.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
   dessinerEnTeteEtIdentite(doc, identite, {
     titre: "DOCUMENT INTERNE",
-    ligneReference: `Facture liée : ${facture.numero}`,
+    // Indique clairement qu'il s'agit d'un achat extérieur (§6) — jamais
+    // confondu avec la facture client dont il est issu.
+    ligneReference: `Achat extérieur — Facture liée : ${facture.numero}`,
     dateAffichee,
   });
 
   // --- Deux boîtes : FACTURÉ À / DÉTAILS DE VENTE — mêmes libellés,
-  // mêmes positions, même style que la facture (§ "reprendre les
-  // informations générales... la présentation doit rester identique"). ---
+  // mêmes positions, même style que la facture. ---
   doc.rect(45.2, 255.5, 259.4, 78.7).fill(FOND_BOITE);
   doc.rect(304.9, 255.5, 259.2, 78.7).fill(FOND_BOITE);
 
@@ -120,31 +134,33 @@ function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, v
   doc.text(`Vendeur : ${vendeurNomAffiche}`, 314.7, 316.1);
 
   // --- Tableau — même style visuel que la facture (bordures, en-tête,
-  // hauteur de ligne), colonnes adaptées : Désignation / Taille /
-  // Quantité / Provenance (au lieu de Prix unitaire / Total, qui n'ont
-  // pas de sens pour ce document strictement interne). ---
+  // hauteur de ligne). Colonnes (§3) : Désignation / Taille / Quantité /
+  // Provenance / Prix unitaire / Total — les informations financières ne
+  // remplacent jamais la provenance, les deux coexistent (§5). ---
   const colonnes = [
-    { x: 45.5, largeur: 216.4, titre: "DESIGNATION" },
-    { x: 262.4, largeur: 74.3, titre: "TAILLE" },
-    { x: 337.2, largeur: 74.3, titre: "QUANTITÉ" },
-    { x: 412.0, largeur: 164.1, titre: "PROVENANCE" },
+    { x: 45.5, largeur: 141.6, titre: "DÉSIGNATION" },
+    { x: 187.1, largeur: 58.9, titre: "TAILLE" },
+    { x: 246.0, largeur: 51.5, titre: "QUANTITÉ" },
+    { x: 297.5, largeur: 98.1, titre: "PROVENANCE" },
+    { x: 395.6, largeur: 82.5, titre: "PRIX UNITAIRE" },
+    { x: 478.1, largeur: 98, titre: "TOTAL" },
   ];
   const tableTop = 369.9;
   const headerHeight = 17.7;
   const rowHeight = 21;
 
   doc.rect(45, tableTop, 531.1, headerHeight).fillAndStroke("#ffffff", "#cccccc");
-  doc.font("Helvetica-Bold").fontSize(9).fillColor(NOIR);
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(NOIR);
   for (const col of colonnes) {
-    doc.text(col.titre, col.x + 6, tableTop + 5, { width: col.largeur - 10 });
+    doc.text(col.titre, col.x + 5, tableTop + 5.5, { width: col.largeur - 8 });
   }
 
-  const lignesProvenance = eclaterParProvenance(lignes, identite.nom);
+  const lignesAchat = extraireLignesAchatExterieur(lignes);
   let ligneY = tableTop + headerHeight;
-  const nombreLignesAffichees = Math.max(lignesProvenance.length, 8); // au moins 8 lignes visibles, comme le modèle de facture
+  const nombreLignesAffichees = Math.max(lignesAchat.length, 8); // au moins 8 lignes visibles, comme le modèle de facture
   doc.font("Helvetica").fontSize(9);
   for (let i = 0; i < nombreLignesAffichees; i++) {
-    const ligne = lignesProvenance[i];
+    const ligne = lignesAchat[i];
     doc.rect(45, ligneY, 531.1, rowHeight).strokeColor("#cccccc").lineWidth(0.5).stroke();
     for (const col of colonnes) {
       doc
@@ -155,27 +171,28 @@ function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, v
         .stroke();
     }
     if (ligne) {
+      doc.fillColor(NOIR).font("Helvetica").fontSize(8.5);
+      doc.text(ligne.motif, colonnes[0]!.x + 5, ligneY + 6, { width: colonnes[0]!.largeur - 8 });
+      doc.text(ligne.taille, colonnes[1]!.x + 5, ligneY + 6, { width: colonnes[1]!.largeur - 8 });
+      doc.text(String(ligne.quantite), colonnes[2]!.x + 5, ligneY + 6, { width: colonnes[2]!.largeur - 8 });
+      // La provenance externe reste mise en évidence (couleur d'accent) —
+      // jamais visible sur la facture client.
+      doc.fillColor("#b8860b");
+      doc.text(ligne.provenance, colonnes[3]!.x + 5, ligneY + 6, { width: colonnes[3]!.largeur - 8 });
       doc.fillColor(NOIR);
-      doc.text(ligne.motif, colonnes[0]!.x + 6, ligneY + 6, { width: colonnes[0]!.largeur - 10 });
-      doc.text(ligne.taille, colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10 });
-      doc.text(String(ligne.quantite), colonnes[2]!.x + 6, ligneY + 6, { width: colonnes[2]!.largeur - 10 });
-      // La provenance externe est mise en évidence (même couleur d'accent
-      // que le reste de l'application pour signaler un complément
-      // fournisseur) — jamais visible sur la facture client.
-      doc.fillColor(ligne.provenance === identite.nom ? NOIR : "#b8860b");
-      doc.text(ligne.provenance, colonnes[3]!.x + 6, ligneY + 6, { width: colonnes[3]!.largeur - 10 });
-      doc.fillColor(NOIR);
+      doc.text(`${formaterMontant(ligne.prixUnitaire)} FCFA`, colonnes[4]!.x + 5, ligneY + 6, { width: colonnes[4]!.largeur - 8 });
+      doc.text(`${formaterMontant(ligne.total)} FCFA`, colonnes[5]!.x + 5, ligneY + 6, { width: colonnes[5]!.largeur - 8 });
     }
     ligneY += rowHeight;
   }
 
-  // --- Quantité totale (même présentation visuelle que "Total à payer"
-  // de la facture, adaptée : aucun prix n'a de sens sur ce document,
-  // jamais un calcul inventé — uniquement la somme réelle des quantités). ---
-  const quantiteTotale = lignesProvenance.reduce((somme, l) => somme + l.quantite, 0);
+  // --- TOTAL GÉNÉRAL — même présentation visuelle que "Total à payer"
+  // de la facture. Somme réelle des totaux de ligne, jamais un calcul
+  // inventé (§3/§9 : "les calculs doivent être corrects"). ---
+  const totalGeneral = lignesAchat.reduce((somme, l) => somme + l.total, 0);
   doc.font("Helvetica-Bold").fontSize(11).fillColor(NOIR);
-  doc.text("Quantité totale", 380, ligneY + 20);
-  doc.text(String(quantiteTotale), 480, ligneY + 20, { width: MARGE_DROITE - 480, align: "right" });
+  doc.text("TOTAL GÉNÉRAL", 360, ligneY + 20);
+  doc.text(`${formaterMontant(totalGeneral)} FCFA`, 460, ligneY + 20, { width: MARGE_DROITE - 460, align: "right" });
 
   dessinerPiedDePage(doc);
 }

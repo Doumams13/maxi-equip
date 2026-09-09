@@ -245,7 +245,7 @@ export class FactureRepository {
    * anonymisée pour le Gérant au niveau IPC (jamais ici — ce dépôt ne
    * fait que fournir la donnée brute).
    */
-  listAvecVendeur(limit = 50): (Facture & { vendeurNom: string | null; vendeurRole: string | null })[] {
+  listAvecVendeur(limit = 50): (Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean })[] {
     const factures = this.list(limit);
     if (factures.length === 0) return [];
     const placeholders = factures.map(() => "?").join(",");
@@ -253,9 +253,21 @@ export class FactureRepository {
       .prepare(`SELECT id, nom, role FROM utilisateurs WHERE id IN (${placeholders})`)
       .all(...factures.map((f) => f.vendeurUtilisateurId)) as { id: string; nom: string; role: string }[];
     const parId = new Map(utilisateurs.map((u) => [u.id, u]));
+    // Correction "Document interne — réservé aux achats extérieurs" §1 :
+    // une seule requête groupée (jamais une par facture) pour savoir
+    // lesquelles ont réellement un relevé d'approvisionnement externe —
+    // c'est la SEULE source de vérité pour "achat extérieur", la même
+    // que celle utilisée par getDocumentInterne() plus bas.
+    const facturesAvecReleve = new Set(
+      (
+        this.db
+          .prepare(`SELECT DISTINCT facture_id as factureId FROM releves_internes_approvisionnement WHERE facture_id IN (${placeholders})`)
+          .all(...factures.map((f) => f.id)) as { factureId: string }[]
+      ).map((r) => r.factureId)
+    );
     return factures.map((f) => {
       const u = parId.get(f.vendeurUtilisateurId);
-      return { ...f, vendeurNom: u?.nom ?? null, vendeurRole: u?.role ?? null };
+      return { ...f, vendeurNom: u?.nom ?? null, vendeurRole: u?.role ?? null, aAchatExterieur: facturesAvecReleve.has(f.id) };
     });
   }
 

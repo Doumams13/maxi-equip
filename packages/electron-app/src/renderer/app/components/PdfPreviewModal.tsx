@@ -38,6 +38,7 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
   const [telechargeant, setTelechargeant] = useState(false);
   const docRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const [docPret, setDocPret] = useState(false);
+  const [pourcentageSaisi, setPourcentageSaisi] = useState(String(Math.round((ECHELLE_PAR_DEFAUT / ECHELLE_PAR_DEFAUT) * 100)));
 
   useEffect(() => {
     let annule = false;
@@ -127,6 +128,26 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
     };
   }, [docPret, pageActuelle, echelle]);
 
+  // Synchronise le champ de saisie du pourcentage avec l'échelle réelle,
+  // quelle que soit sa source (boutons +/-, Largeur, Page, ou une
+  // validation de saisie manuelle) — jamais pendant la frappe elle-même,
+  // qui ne modifie qu'un état local séparé (pourcentageSaisi) tant que
+  // l'utilisateur n'a pas validé.
+  useEffect(() => {
+    setPourcentageSaisi(String(Math.round((echelle / ECHELLE_PAR_DEFAUT) * 100)));
+  }, [echelle]);
+
+  /** Applique un pourcentage saisi manuellement — corrige aussi le problème signalé : impossible de revenir exactement à 100% via +/- après Largeur/Page. */
+  function appliquerPourcentageSaisi() {
+    const valeur = parseInt(pourcentageSaisi, 10);
+    if (Number.isNaN(valeur)) {
+      setPourcentageSaisi(String(Math.round((echelle / ECHELLE_PAR_DEFAUT) * 100)));
+      return;
+    }
+    const pourcentageClamp = Math.max((ECHELLE_MIN / ECHELLE_PAR_DEFAUT) * 100, Math.min((ECHELLE_MAX / ECHELLE_PAR_DEFAUT) * 100, valeur));
+    setEchelle((pourcentageClamp / 100) * ECHELLE_PAR_DEFAUT);
+  }
+
   function zoomAvant() {
     setEchelle((e) => Math.min(ECHELLE_MAX, +(e + PAS_ZOOM).toFixed(2)));
   }
@@ -210,8 +231,32 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
           <Button variant="ghost" onClick={zoomArriere} disabled={zoomDesactive || echelle <= ECHELLE_MIN} title="Zoom arrière">
             <ZoomOut size={15} />
           </Button>
-          <span style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft, minWidth: 42, textAlign: "center" }}>
-            {Math.round((echelle / ECHELLE_PAR_DEFAUT) * 100)}%
+          <span style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={pourcentageSaisi}
+              onChange={(e) => setPourcentageSaisi(e.target.value.replace(/[^0-9]/g, ""))}
+              onBlur={appliquerPourcentageSaisi}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                }
+              }}
+              disabled={zoomDesactive}
+              title="Saisir un pourcentage de zoom précis"
+              style={{
+                width: 40,
+                textAlign: "center",
+                border: `1px solid ${defaultTokens.colors.border}`,
+                borderRadius: defaultTokens.radius.sm,
+                padding: "3px 2px",
+                fontSize: 12.5,
+                fontFamily: "inherit",
+                color: defaultTokens.colors.textSoft,
+              }}
+            />
+            %
           </span>
           <Button variant="ghost" onClick={zoomAvant} disabled={zoomDesactive || echelle >= ECHELLE_MAX} title="Zoom avant">
             <ZoomIn size={15} />
@@ -229,11 +274,19 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
 
         <div
           ref={conteneurRef}
-          style={{ flex: 1, overflow: "auto", background: defaultTokens.colors.surfaceAlt, borderRadius: defaultTokens.radius.md, display: "flex", justifyContent: "center", padding: 16 }}
+          style={{ flex: 1, overflow: "auto", background: defaultTokens.colors.surfaceAlt, borderRadius: defaultTokens.radius.md, padding: 16 }}
         >
-          {chargement && <p style={{ color: defaultTokens.colors.textSoft, margin: "auto" }}>Chargement de l'aperçu…</p>}
+          {/* BUG CORRIGÉ (signalé : "une partie de la facture n'est pas
+              visible même en scrollant") : "display:flex,
+              justifyContent:center" empêchait d'atteindre le DÉBUT du
+              contenu en scrollant dès que le canvas dépassait la largeur
+              du conteneur — comportement documenté de la combinaison
+              flexbox+centrage+débordement. Remplacé par un centrage par
+              bloc classique (margin:auto), qui reste défilable
+              correctement dans les deux sens quel que soit le zoom. */}
+          {chargement && <p style={{ color: defaultTokens.colors.textSoft, textAlign: "center", marginTop: 60 }}>Chargement de l'aperçu…</p>}
           {erreur && (
-            <p style={{ color: defaultTokens.colors.danger, margin: "auto", textAlign: "center", maxWidth: 380 }}>
+            <p style={{ color: defaultTokens.colors.danger, textAlign: "center", maxWidth: 380, margin: "60px auto" }}>
               {erreur}
               <br />
               <span style={{ fontSize: 12, color: defaultTokens.colors.textFaint }}>Vous pouvez tout de même Imprimer ou Télécharger ci-dessus.</span>
@@ -245,7 +298,7 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
               display: chargement || erreur ? "none" : "block",
               boxShadow: defaultTokens.shadows.card,
               background: "#fff",
-              margin: "auto",
+              margin: "0 auto",
             }}
           />
         </div>

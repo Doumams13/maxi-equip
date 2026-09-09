@@ -23,6 +23,8 @@ import { registerMetierIpcHandlers } from "./ipc/metier.js";
 import { ImageProduitRepository } from "./repositories/imageProduitRepository.js";
 import { ImageService } from "./services/imageService.js";
 import { registerImageIpcHandlers } from "./ipc/images.js";
+import { executerResetDonneesTest } from "./maintenance/resetDonneesTest.js";
+import { executerGenerationDonneesTest } from "./maintenance/genererDonneesTest.js";
 
 // Le processus principal est construit en CommonJS (voir electron.vite.config.ts)
 // — __dirname est donc nativement disponible, pas besoin de la variante ESM
@@ -121,6 +123,47 @@ function applyContentSecurityPolicy(): void {
 }
 
 app.whenReady().then(async () => {
+  // --- Mode maintenance (correction "Tests réels Phase 2") ---
+  // Jamais une fonctionnalité de l'application elle-même : aucun menu,
+  // aucun bouton, aucune trace dans l'interface normale. Activé
+  // UNIQUEMENT par un drapeau de ligne de commande explicite, pour
+  // permettre de réinitialiser/générer des données de test sans ouvrir
+  // de fenêtre. Le démarrage normal de l'application n'emprunte jamais
+  // ce chemin (aucun de ces drapeaux n'est présent en usage normal).
+  const argMaintenance = process.argv.find((a) => a.startsWith("--maintenance="));
+  if (argMaintenance) {
+    const mode = argMaintenance.split("=")[1];
+    const db = openDatabase();
+    runMigrations(db);
+    try {
+      if (mode === "reset-donnees-test") {
+        const confirmer = process.argv.includes("--confirmer");
+        const inclureProduits = process.argv.includes("--inclure-produits");
+        const resultat = executerResetDonneesTest(db, { confirmer, inclureProduits });
+        // eslint-disable-next-line no-console
+        console.log(JSON.stringify(resultat, null, 2));
+        if (resultat.simulation) {
+          // eslint-disable-next-line no-console
+          console.log("\nSIMULATION UNIQUEMENT — aucune donnée supprimée. Relancer avec --confirmer pour supprimer réellement.");
+        }
+      } else if (mode === "generer-donnees-test") {
+        const resultat = executerGenerationDonneesTest(db);
+        // eslint-disable-next-line no-console
+        console.log(JSON.stringify(resultat, null, 2));
+      } else {
+        // eslint-disable-next-line no-console
+        console.error(`Mode maintenance inconnu : "${mode}". Modes valides : reset-donnees-test, generer-donnees-test.`);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Échec de l'opération de maintenance :", err);
+    } finally {
+      closeDatabase();
+      app.quit();
+    }
+    return;
+  }
+
   // Retire le menu générique d'Electron ("File Edit View Window Help") —
   // jamais voulu pour MAXI EQUIP, il n'a aucun rôle ici. En plus d'être
   // hors charte graphique, sa hauteur n'était pas comptée dans le calcul

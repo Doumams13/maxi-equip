@@ -263,9 +263,20 @@ export function ParametresScreen() {
               )}
             </>
           ) : (
-            <Button variant="ghost" onClick={() => void handleReactiver(depot)} loading={enCours} title="Réactiver">
-              <RotateCcw size={15} color={defaultTokens.colors.accent} />
-            </Button>
+            <>
+              <Button variant="ghost" onClick={() => void handleReactiver(depot)} loading={enCours} title="Réactiver">
+                <RotateCcw size={15} color={defaultTokens.colors.accent} />
+              </Button>
+              {/* Correction "Finaliser Paramètres" §H : un point de vente
+                  archivé sans aucune donnée métier associée (créé puis
+                  archivé par erreur, jamais utilisé) peut aussi être
+                  supprimé définitivement — jamais uniquement Restaurer. */}
+              {suppressibles[depot.id] && (
+                <Button variant="ghost" onClick={() => setSuppressionCible(depot)} title="Supprimer définitivement (jamais utilisé)">
+                  <Trash2 size={15} color={defaultTokens.colors.danger} />
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>

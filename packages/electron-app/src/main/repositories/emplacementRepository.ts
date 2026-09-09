@@ -82,14 +82,28 @@ export class EmplacementRepository {
     this.db.prepare("UPDATE emplacements SET nom = ?, updated_at = ? WHERE id = ?").run(valeur, new Date().toISOString(), id);
   }
 
+  /** Nombre de dépôts actifs (jamais SHOP, qui n'est pas un "point de vente" au sens de cet écran) — utilisé pour la protection du dernier point de vente actif (§G). */
+  compterDepotsActifs(): number {
+    return (this.db.prepare("SELECT COUNT(*) as n FROM emplacements WHERE type = 'depot' AND actif = 1").get() as { n: number }).n;
+  }
+
   /**
    * Archive (jamais une suppression physique, §5/§9) — le point de vente
    * n'est plus proposé pour de nouvelles opérations, mais tout son
    * historique reste intact et consultable. La vérification "possède
    * encore du stock" est une décision métier, prise dans le service
    * appelant (jamais ici — ce dépôt reste une pure couche de persistance).
+   *
+   * Correction "Finaliser Paramètres" §G : protection du dernier point
+   * de vente actif — l'application ne doit jamais se retrouver sans
+   * aucun point de vente actif. Vérifié ici (pas seulement côté
+   * Renderer) pour rester valable même en cas d'appel direct.
    */
   archiver(id: string): void {
+    const emplacement = this.findById(id);
+    if (emplacement?.actif && this.compterDepotsActifs() <= 1) {
+      throw new Error("Impossible d'archiver le dernier point de vente actif. L'application doit conserver au moins un point de vente actif.");
+    }
     this.db.prepare("UPDATE emplacements SET actif = 0, updated_at = ? WHERE id = ?").run(new Date().toISOString(), id);
   }
 
@@ -132,9 +146,26 @@ export class EmplacementRepository {
    * temps). Lève une erreur explicite plutôt que de supprimer une
    * donnée déjà référencée.
    */
+  /**
+   * Suppression physique — jamais appelée sans revérifier
+   * `peutEtreSupprimeDefinitivement` juste avant (défense en profondeur :
+   * ne jamais faire confiance à une vérification faite plus tôt côté
+   * Renderer, qui pourrait être périmée si une opération a eu lieu entre
+   * temps). Lève une erreur explicite plutôt que de supprimer une
+   * donnée déjà référencée.
+   *
+   * Correction "Finaliser Paramètres" §G : même protection du dernier
+   * point de vente actif que pour l'archivage — supprimer le dernier
+   * dépôt actif laisserait l'application sans aucun point de vente
+   * disponible pour de nouvelles opérations.
+   */
   supprimerDefinitivement(id: string): void {
     if (!this.peutEtreSupprimeDefinitivement(id)) {
       throw new Error("Ce point de vente ne peut pas être supprimé car il est déjà utilisé dans des données de l'application. Vous pouvez l'archiver.");
+    }
+    const emplacement = this.findById(id);
+    if (emplacement?.actif && this.compterDepotsActifs() <= 1) {
+      throw new Error("Impossible de supprimer le dernier point de vente actif. L'application doit conserver au moins un point de vente actif.");
     }
     this.db.prepare("DELETE FROM emplacements WHERE id = ?").run(id);
   }

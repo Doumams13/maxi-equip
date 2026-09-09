@@ -208,13 +208,23 @@ function LigneActivite({ m, userId, onNaviguer }: { m: EvenementHistorique; user
   );
 }
 
-function DashboardAdmin({ summary, userId, onNaviguer }: { summary: Summary; userId: string; onNaviguer: (c: CibleOperation) => void }) {
+function DashboardAdmin({
+  summary,
+  userId,
+  onNaviguer,
+  nomMagasin,
+}: {
+  summary: Summary;
+  userId: string;
+  onNaviguer: (c: CibleOperation) => void;
+  nomMagasin: string;
+}) {
   return (
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0, marginBottom: 2 }}>
         Tableau de bord — Administration
       </h1>
-      <p style={{ marginTop: 0, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Vue globale de l'entreprise MAXI EQUIP</p>
+      <p style={{ marginTop: 0, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Vue globale de l'entreprise {nomMagasin}</p>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 16 }}>
         <KpiCard icon={Boxes} label="Stock total (Akébé + Akanda)" value={summary.stockTousDepots.toLocaleString("fr-FR")} tone="accent" />
@@ -318,13 +328,25 @@ function DashboardAdmin({ summary, userId, onNaviguer }: { summary: Summary; use
   );
 }
 
-function DashboardVendeur({ nom, summary, userId, onNaviguer }: { nom: string; summary: Summary; userId: string; onNaviguer: (c: CibleOperation) => void }) {
+function DashboardVendeur({
+  nom,
+  summary,
+  userId,
+  onNaviguer,
+  nomMagasin,
+}: {
+  nom: string;
+  summary: Summary;
+  userId: string;
+  onNaviguer: (c: CibleOperation) => void;
+  nomMagasin: string;
+}) {
   return (
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Tableau de bord</h1>
       <p style={{ marginTop: -8, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Bienvenue {nom}</p>
 
-      <TitreBloc>Stock global MAXI EQUIP</TitreBloc>
+      <TitreBloc>Stock global {nomMagasin}</TitreBloc>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 20 }}>
         {summary.stockParEmplacementPourGerant.map((d) => (
           <KpiCard key={d.emplacementId} icon={Building2} label={`Stock ${d.nom}`} value={`${d.cartons.toLocaleString("fr-FR")} ct.`} tone="accent" />
@@ -373,13 +395,18 @@ export interface DashboardScreenProps {
 export function DashboardScreen({ session, onNaviguerVersOperation }: DashboardScreenProps) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Correction "Finaliser Paramètres" §3/§4 : plus de "MAXI EQUIP" codé
+  // en dur ici — vient de la configuration centralisée, comme sur les
+  // factures et documents internes.
+  const [nomMagasin, setNomMagasin] = useState("MAXI-EQUIP");
 
   useEffect(() => {
     void (async () => {
       try {
-        const result = await window.maxiEquip.getDashboardSummary();
+        const [result, nom] = await Promise.all([window.maxiEquip.getDashboardSummary(), window.maxiEquip.getNomMagasin()]);
         if (!result) throw new Error("Session expirée.");
         setSummary(result);
+        setNomMagasin(nom);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -399,8 +426,8 @@ export function DashboardScreen({ session, onNaviguerVersOperation }: DashboardS
   if (!summary) return null;
 
   return session.role === "administrateur" ? (
-    <DashboardAdmin summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} />
+    <DashboardAdmin summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} nomMagasin={nomMagasin} />
   ) : (
-    <DashboardVendeur nom={session.nom} summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} />
+    <DashboardVendeur nom={session.nom} summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} nomMagasin={nomMagasin} />
   );
 }

@@ -1,26 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { X, Printer, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Printer, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, StretchHorizontal, RectangleVertical } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+const ECHELLE_MIN = 0.5;
+const ECHELLE_MAX = 3;
+const ECHELLE_PAR_DEFAUT = 1.6;
+const PAS_ZOOM = 0.2;
+
 /**
- * Aperçu de document intégré à l'application, via pdfjs-dist — jamais le
- * lecteur PDF de Chromium (plusieurs tentatives basées dessus ont toutes
- * échoué : capturePage sur fenêtre cachée, fenêtre hors écran, rendu
- * offscreen+paint, ouverture directe dans une fenêtre Electron visible).
- *
- * CAUSE RÉELLE du premier échec de pdfjs-dist, identifiée en lisant le
- * code source de la bibliothèque (node_modules/pdfjs-dist/build/pdf.mjs)
- * : une page chargée via file:// a un `origin` égal à la chaîne "null"
- * (comportement documenté de Chromium). pdfjs-dist détecte ceci comme
- * "origine différente" et bascule sur un mécanisme de secours interne
- * (Worker instancié depuis un Blob contenant `await import(...)`), qui
- * nécessite que la CSP autorise `worker-src blob:` — assoupli à cet
- * effet dans windowOptions.ts. Cette piste avait été abandonnée
- * précédemment avant même d'avoir pu être retestée avec ce correctif.
+ * Aperçu de document intégré à l'application, via pdfjs-dist. Historique
+ * complet dans les commits précédents (plusieurs approches basées sur le
+ * lecteur PDF de Chromium ont échoué ; deux bugs React réels ont ensuite
+ * empêché le rendu de s'exécuter ; la netteté a été corrigée avec le
+ * devicePixelRatio). Cette version ajoute les contrôles de zoom demandés
+ * — architecture de rendu consolidée pour rester fiable en ajoutant ce
+ * nouveau paramètre (l'échelle) sans réintroduire le bug des dépendances
+ * de useEffect qui ne changent jamais de valeur.
  *
  * Réutilisable pour n'importe quel PDF déjà généré (facture cliente OU
  * document interne d'approvisionnement) — même fichier que celui utilisé
@@ -29,29 +28,21 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemin: string; nomSuggere: string; titre: string; onFermer: () => void }) {
   const { showSuccess, showError } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const conteneurRef = useRef<HTMLDivElement>(null);
   const [pageActuelle, setPageActuelle] = useState(1);
   const [nombrePages, setNombrePages] = useState(0);
+  const [echelle, setEchelle] = useState(ECHELLE_PAR_DEFAUT);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState<string | null>(null);
   const [imprimant, setImprimant] = useState(false);
   const [telechargeant, setTelechargeant] = useState(false);
   const docRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [docPret, setDocPret] = useState(false);
 
-  // BUG RÉEL TROUVÉ ET CORRIGÉ (diagnostic demandé, sans supposition) :
-  // pageActuelle et nombrePages étaient tous deux initialisés à 1 ; pour
-  // une facture MAXI EQUIP, toujours sur UNE SEULE page, le code
-  // appelait ensuite setNombrePages(1)/setPageActuelle(1) — EXACTEMENT
-  // les mêmes valeurs. React ne redéclenche un effet que si une valeur
-  // de son tableau de dépendances a RÉELLEMENT changé (Object.is) : ici
-  // rien ne changeait jamais, donc le second useEffect (celui qui
-  // appelait canvas/render()) n'était JAMAIS exécuté après le chargement
-  // — aucune erreur, juste un canvas jamais dessiné. Corrigé en gardant
-  // TOUT le chargement + le premier rendu dans UN SEUL effet, déclenché
-  // uniquement par `chemin` (qui change bien à chaque ouverture) ; la
-  // navigation entre pages reste un second effet séparé, déclenché
-  // seulement par un changement RÉEL de pageActuelle (2, 3, ...).
   useEffect(() => {
     let annule = false;
+    docRef.current = null;
+    setDocPret(false);
     void (async () => {
       setChargement(true);
       setErreur(null);
@@ -72,40 +63,39 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
         const doc = await pdfjsLib.getDocument({ data: octets }).promise;
         if (annule) return;
         // eslint-disable-next-line no-console
-        console.log("[PDF PREVIEW] document chargé");
-        // eslint-disable-next-line no-console
-        console.log("[PDF PREVIEW] nombre de pages :", doc.numPages);
+        console.log("[PDF PREVIEW] document chargé, nombre de pages :", doc.numPages);
         docRef.current = doc;
         setNombrePages(doc.numPages);
         setPageActuelle(1);
+        setEchelle(ECHELLE_PAR_DEFAUT);
+        setDocPret(true);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[PDF PREVIEW] ERREUR COMPLÈTE :", err);
+        if (!annule) setErreur(err instanceof Error ? `Le document n'a pas pu être affiché : ${err.message}` : "Le document n'a pas pu être affiché.");
+      } finally {
+        if (!annule) setChargement(false);
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+  }, [chemin]);
 
-        // Rendu de la première page effectué ICI, dans le même effet —
-        // jamais délégué à un second effet dont les dépendances
-        // pourraient ne pas changer de valeur (c'est précisément le bug
-        // corrigé ci-dessus).
-        const page = await doc.getPage(1);
+  useEffect(() => {
+    if (!docPret || !docRef.current || !canvasRef.current) return;
+    let annule = false;
+    void (async () => {
+      try {
+        const page = await docRef.current!.getPage(pageActuelle);
         if (annule) return;
         // eslint-disable-next-line no-console
-        console.log("[PDF PREVIEW] page récupérée");
-        // Rendu net quel que soit l'écran (correction lisibilité) : la
-        // résolution RÉELLE du canvas (sa "backing store") est multipliée
-        // par le devicePixelRatio de l'écran, alors que sa taille CSS
-        // affichée reste basée sur l'échelle logique — technique standard
-        // recommandée par pdf.js. Sans cela, le canvas était rendu à une
-        // résolution fixe puis étiré en CSS pour remplir la largeur de la
-        // fenêtre d'aperçu, d'où le flou signalé.
-        const echelleAffichage = 1.6;
+        console.log("[PDF PREVIEW] page récupérée, échelle :", echelle);
         const ratioEcran = window.devicePixelRatio || 1;
-        const viewport = page.getViewport({ scale: echelleAffichage });
+        const viewport = page.getViewport({ scale: echelle });
         // eslint-disable-next-line no-console
-        console.log("[PDF PREVIEW] taille du viewport :", viewport.width, "×", viewport.height, "(ratio écran :", ratioEcran, ")");
-        const canvas = canvasRef.current;
-        if (!canvas) {
-          // eslint-disable-next-line no-console
-          console.error("[PDF PREVIEW] ERREUR : élément <canvas> introuvable dans le DOM au moment du rendu.");
-          setErreur("Erreur interne d'affichage (canvas introuvable).");
-          return;
-        }
+        console.log("[PDF PREVIEW] taille du viewport :", viewport.width, "×", viewport.height);
+        const canvas = canvasRef.current!;
         const contexte = canvas.getContext("2d");
         if (!contexte) {
           // eslint-disable-next-line no-console
@@ -128,46 +118,6 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
         console.log("[PDF PREVIEW] rendu terminé — taille réelle du canvas :", canvas.width, "×", canvas.height);
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.error("[PDF PREVIEW] ERREUR COMPLÈTE :", err);
-        if (!annule) setErreur(err instanceof Error ? `Le document n'a pas pu être affiché : ${err.message}` : "Le document n'a pas pu être affiché.");
-      } finally {
-        if (!annule) setChargement(false);
-      }
-    })();
-    return () => {
-      annule = true;
-    };
-  }, [chemin]);
-
-  // Navigation entre pages UNIQUEMENT (déclenché seulement par un
-  // changement réel de pageActuelle, ex. 1 → 2 via les boutons
-  // suivant/précédent — jamais par le chargement initial, géré ci-dessus).
-  useEffect(() => {
-    if (pageActuelle === 1 || !docRef.current || !canvasRef.current) return;
-    let annule = false;
-    void (async () => {
-      try {
-        const page = await docRef.current!.getPage(pageActuelle);
-        if (annule) return;
-        const echelleAffichage = 1.6;
-        const ratioEcran = window.devicePixelRatio || 1;
-        const viewport = page.getViewport({ scale: echelleAffichage });
-        const canvas = canvasRef.current!;
-        const contexte = canvas.getContext("2d");
-        if (!contexte) return;
-        canvas.width = Math.floor(viewport.width * ratioEcran);
-        canvas.height = Math.floor(viewport.height * ratioEcran);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
-        await page.render({
-          canvasContext: contexte,
-          viewport,
-          transform: ratioEcran !== 1 ? [ratioEcran, 0, 0, ratioEcran, 0, 0] : undefined,
-        }).promise;
-        // eslint-disable-next-line no-console
-        console.log(`[PDF PREVIEW] page ${pageActuelle} rendue sur le canvas (${viewport.width}×${viewport.height})`);
-      } catch (err) {
-        // eslint-disable-next-line no-console
         console.error("[PDF PREVIEW] rendu de la page impossible :", err);
         if (!annule) setErreur("Le rendu de l'aperçu a échoué. Réessayez, ou utilisez Télécharger.");
       }
@@ -175,7 +125,33 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
     return () => {
       annule = true;
     };
-  }, [pageActuelle]);
+  }, [docPret, pageActuelle, echelle]);
+
+  function zoomAvant() {
+    setEchelle((e) => Math.min(ECHELLE_MAX, +(e + PAS_ZOOM).toFixed(2)));
+  }
+
+  function zoomArriere() {
+    setEchelle((e) => Math.max(ECHELLE_MIN, +(e - PAS_ZOOM).toFixed(2)));
+  }
+
+  async function ajusterALaLargeur() {
+    if (!docRef.current || !conteneurRef.current) return;
+    const page = await docRef.current.getPage(pageActuelle);
+    const largeurIntrinseque = page.getViewport({ scale: 1 }).width;
+    const largeurDisponible = conteneurRef.current.clientWidth - 32;
+    setEchelle(Math.max(ECHELLE_MIN, Math.min(ECHELLE_MAX, largeurDisponible / largeurIntrinseque)));
+  }
+
+  async function ajusterALaPage() {
+    if (!docRef.current || !conteneurRef.current) return;
+    const page = await docRef.current.getPage(pageActuelle);
+    const viewportBase = page.getViewport({ scale: 1 });
+    const largeurDisponible = conteneurRef.current.clientWidth - 32;
+    const hauteurDisponible = conteneurRef.current.clientHeight - 32;
+    const echelleCalculee = Math.min(largeurDisponible / viewportBase.width, hauteurDisponible / viewportBase.height);
+    setEchelle(Math.max(ECHELLE_MIN, Math.min(ECHELLE_MAX, echelleCalculee)));
+  }
 
   async function handleImprimer() {
     setImprimant(true);
@@ -198,10 +174,12 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
     }
   }
 
+  const zoomDesactive = chargement || !!erreur;
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300 }}>
-      <Card elevated style={{ width: "min(720px, 94vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexShrink: 0 }}>
+      <Card elevated style={{ width: "min(760px, 94vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexShrink: 0 }}>
           <h2 style={{ margin: 0, fontFamily: defaultTokens.typography.display, fontSize: 16.5 }}>{titre}</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Button variant="ghost" onClick={() => void handleImprimer()} loading={imprimant} title="Imprimer">
@@ -216,7 +194,43 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
           </div>
         </div>
 
-        <div style={{ flex: 1, overflow: "auto", background: defaultTokens.colors.surfaceAlt, borderRadius: defaultTokens.radius.md, display: "flex", justifyContent: "center", padding: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+            padding: "6px 8px",
+            marginBottom: 10,
+            background: defaultTokens.colors.surfaceAlt,
+            borderRadius: defaultTokens.radius.sm,
+            flexShrink: 0,
+          }}
+        >
+          <Button variant="ghost" onClick={zoomArriere} disabled={zoomDesactive || echelle <= ECHELLE_MIN} title="Zoom arrière">
+            <ZoomOut size={15} />
+          </Button>
+          <span style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft, minWidth: 42, textAlign: "center" }}>
+            {Math.round((echelle / ECHELLE_PAR_DEFAUT) * 100)}%
+          </span>
+          <Button variant="ghost" onClick={zoomAvant} disabled={zoomDesactive || echelle >= ECHELLE_MAX} title="Zoom avant">
+            <ZoomIn size={15} />
+          </Button>
+          <div style={{ width: 1, height: 20, background: defaultTokens.colors.borderSoft, margin: "0 4px" }} />
+          <Button variant="ghost" onClick={() => void ajusterALaLargeur()} disabled={zoomDesactive} title="Ajuster à la largeur">
+            <StretchHorizontal size={15} />
+            <span style={{ fontSize: 12.5 }}>Largeur</span>
+          </Button>
+          <Button variant="ghost" onClick={() => void ajusterALaPage()} disabled={zoomDesactive} title="Ajuster à la page">
+            <RectangleVertical size={15} />
+            <span style={{ fontSize: 12.5 }}>Page</span>
+          </Button>
+        </div>
+
+        <div
+          ref={conteneurRef}
+          style={{ flex: 1, overflow: "auto", background: defaultTokens.colors.surfaceAlt, borderRadius: defaultTokens.radius.md, display: "flex", justifyContent: "center", padding: 16 }}
+        >
           {chargement && <p style={{ color: defaultTokens.colors.textSoft, margin: "auto" }}>Chargement de l'aperçu…</p>}
           {erreur && (
             <p style={{ color: defaultTokens.colors.danger, margin: "auto", textAlign: "center", maxWidth: 380 }}>
@@ -225,20 +239,13 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
               <span style={{ fontSize: 12, color: defaultTokens.colors.textFaint }}>Vous pouvez tout de même Imprimer ou Télécharger ci-dessus.</span>
             </p>
           )}
-          {/* Le canvas reste TOUJOURS monté dans le DOM (jamais retiré
-              conditionnellement) — corrige un second bug du même type
-              que celui des dépendances d'effet : dessiner sur un canvas
-              qui n'existe pas encore dans le DOM ne produit aucune
-              erreur visible, juste un rendu qui ne s'affiche nulle part.
-              Simplement masqué visuellement tant que le chargement n'est
-              pas terminé ou qu'une erreur est survenue. */}
           <canvas
             ref={canvasRef}
             style={{
               display: chargement || erreur ? "none" : "block",
-              maxWidth: "100%",
               boxShadow: defaultTokens.shadows.card,
               background: "#fff",
+              margin: "auto",
             }}
           />
         </div>

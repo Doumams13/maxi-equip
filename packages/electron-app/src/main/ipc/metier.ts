@@ -210,7 +210,7 @@ export function registerMetierIpcHandlers(
     if (!facture) return { success: false, message: "Facture introuvable." };
     try {
       const lignes = factureRepository.getDocumentInterne(factureId);
-      const chemin = await genererDocumentInternePdf(facture.numero, lignes);
+      const chemin = await genererDocumentInternePdf(facture.numero, lignes, parametresRepository.getNomMagasin());
       return { success: true, chemin, nomSuggere: `${facture.numero}-document-interne.pdf` };
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -395,8 +395,19 @@ export function registerMetierIpcHandlers(
       };
     }
 
-    emplacementRepository.archiver(id);
-    return { success: true };
+    // Correction "Finaliser Paramètres" §G : archiver() peut désormais
+    // lever une erreur (protection du dernier point de vente actif) —
+    // BUG TROUVÉ ET CORRIGÉ en l'ajoutant : cet appel n'était pas protégé
+    // par un try/catch, l'erreur serait remontée de façon non gérée
+    // plutôt que sous la forme { success: false, message } attendue par
+    // l'interface.
+    try {
+      emplacementRepository.archiver(id);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
+      return { success: false, message };
+    }
   });
 
   ipcMain.handle("emplacements:reactiver", (_e, id: string) => {

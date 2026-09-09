@@ -26,7 +26,7 @@ function formaterMontant(n: number): string {
  * facture, aucun modèle officiel n'impose sa mise en page — un document
  * simple, clair, suffit.
  */
-export async function genererDocumentInternePdf(factureNumero: string, lignes: LigneDocumentInterne[]): Promise<string> {
+export async function genererDocumentInternePdf(factureNumero: string, lignes: LigneDocumentInterne[], nomMagasin: string): Promise<string> {
   const dossier = join(app.getPath("userData"), "documents-internes-generes");
   if (!existsSync(dossier)) mkdirSync(dossier, { recursive: true });
   const chemin = join(dossier, `${factureNumero}-document-interne.pdf`);
@@ -50,7 +50,7 @@ export async function genererDocumentInternePdf(factureNumero: string, lignes: L
       doc.font("Helvetica-Bold").fontSize(12).fillColor("#1a1a1a").text(`${ligne.motif} — ${ligne.taille}`);
       doc.font("Helvetica").fontSize(10.5).fillColor("#333");
       doc.text(`Quantité totale (facturée au client) : ${ligne.quantiteTotale}`);
-      doc.text(`Provenance stock MAXI EQUIP : ${ligne.quantiteInterne}`);
+      doc.text(`Provenance stock ${nomMagasin} : ${ligne.quantiteInterne}`);
       if (ligne.quantiteExterne > 0) {
         doc.fillColor("#b8860b");
         doc.text(`Provenance fournisseur externe : ${ligne.quantiteExterne}`);
@@ -62,7 +62,7 @@ export async function genererDocumentInternePdf(factureNumero: string, lignes: L
     }
 
     if (lignes.every((l) => l.quantiteExterne === 0)) {
-      doc.font("Helvetica-Oblique").fontSize(11).fillColor("#666").text("Cette vente a été entièrement couverte par le stock MAXI EQUIP — aucun complément externe.");
+      doc.font("Helvetica-Oblique").fontSize(11).fillColor("#666").text(`Cette vente a été entièrement couverte par le stock ${nomMagasin} — aucun complément externe.`);
     }
 
     doc.end();

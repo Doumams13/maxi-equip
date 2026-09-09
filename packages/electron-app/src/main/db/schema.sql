@@ -238,6 +238,20 @@ CREATE TABLE IF NOT EXISTS parametres_entreprise (
   updated_at TEXT NOT NULL
 );
 
+-- Numéros de téléphone de l'entreprise — plusieurs possibles (correction
+-- "Paramètres" §Identité : "je ne veux pas limiter l'entreprise à un seul
+-- numéro"). Table séparée plutôt qu'une colonne unique sur
+-- parametres_entreprise, qui ne gardait qu'un seul numéro (`telephone`,
+-- conservée telle quelle pour ne rien casser, mais plus utilisée en
+-- écriture après cette correction — voir migration).
+CREATE TABLE IF NOT EXISTS telephones_entreprise (
+  id         TEXT PRIMARY KEY,
+  numero     TEXT NOT NULL,
+  ordre      INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- ==========================================================
 -- Tables TECHNIQUES — locales uniquement, jamais répliquées au cloud
 -- (Synthèse §6/§7, Corrections §3)

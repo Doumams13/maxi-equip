@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3-multiple-ciphers";
+import { randomUUID } from "node:crypto";
 // Importé comme texte brut par le bundler (Vite/electron-vite) — voir electron.vite.config.ts.
 import schemaSql from "./schema.sql?raw";
 
@@ -16,6 +17,7 @@ export function runMigrations(db: Database.Database): void {
   addUtilisateurIdToMouvementsIfMissing(db);
   migrateFacturesPourAnnulationEtLivraison(db);
   seedParametresEntrepriseSiAbsent(db);
+  migrerTelephoneUniqueVersTable(db);
 }
 
 /**
@@ -33,6 +35,28 @@ function seedParametresEntrepriseSiAbsent(db: Database.Database): void {
     `INSERT OR IGNORE INTO parametres_entreprise (id, nom, logo_url, adresse, ville, telephone, email, whatsapp, updated_at)
      VALUES ('singleton', 'MAXI-EQUIP', NULL, 'Quartier Beaulieu (face à BATI-PLUS), Akanda', 'Libreville', '066 33 87 30', '', '', ?)`
   ).run(new Date().toISOString());
+}
+
+/**
+ * Correction "Paramètres" §Identité : plusieurs numéros de téléphone
+ * doivent être possibles. Si `telephones_entreprise` est encore vide,
+ * reprend l'ancien numéro unique (`parametres_entreprise.telephone`,
+ * jamais supprimé) comme première entrée — aucune donnée perdue. Ne
+ * s'exécute qu'une seule fois (table déjà non vide ensuite).
+ */
+function migrerTelephoneUniqueVersTable(db: Database.Database): void {
+  const dejaMigre = (db.prepare("SELECT COUNT(*) as n FROM telephones_entreprise").get() as { n: number }).n > 0;
+  if (dejaMigre) return;
+
+  const ancien = db.prepare("SELECT telephone FROM parametres_entreprise WHERE id = 'singleton'").get() as { telephone: string } | undefined;
+  if (ancien?.telephone) {
+    db.prepare("INSERT INTO telephones_entreprise (id, numero, ordre, created_at, updated_at) VALUES (?, ?, 0, ?, ?)").run(
+      randomUUID(),
+      ancien.telephone,
+      new Date().toISOString(),
+      new Date().toISOString()
+    );
+  }
 }
 
 /**

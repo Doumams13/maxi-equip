@@ -211,6 +211,85 @@ export class MouvementRepository {
     return this.db.prepare(`${SELECT_EVENEMENTS} WHERE utilisateurId = ? ORDER BY date DESC LIMIT ?`).all(utilisateurId, limit) as EvenementHistorique[];
   }
 
+  /**
+   * Correction "Audit Phase 2 — pagination Historique" : remplace le
+   * plafond fixe de listEvenements(300) — utilisé par l'Historique
+   * général — par une vraie pagination BASE DE DONNÉES. Recherche, type
+   * d'opération et période sont appliqués en SQL AVANT de découper en
+   * pages (LIMIT/OFFSET), jamais l'inverse — aucune ancienne opération
+   * ne devient invisible, quel que soit le nombre total d'événements.
+   *
+   * `listEvenements(limit)` (ci-dessus) reste INCHANGÉE et continue de
+   * servir le Tableau de bord (limite volontaire de 10 pour "activité
+   * récente" — un besoin différent, jamais concerné par cette
+   * correction).
+   *
+   * Les bornes de période (dateDebutIso/dateFinIso) sont calculées côté
+   * appelant à partir des mêmes règles que l'ancien filtre côté Renderer
+   * (jour/semaine/mois/personnalisé), jamais recalculées différemment
+   * ici — évite tout risque de divergence de fuseau horaire entre une
+   * fonction SQL de date et l'ancien calcul JavaScript.
+   */
+  listEvenementsPagine(filtres: {
+    recherche: string;
+    typeFiltre: "tous" | "vente" | "annulation" | "entree" | "transfert";
+    dateDebutIso: string | null;
+    dateFinIso: string | null;
+    colonneTri: "date" | "type" | "montant" | null;
+    direction: "asc" | "desc";
+    page: number;
+    tailleParPage: number;
+  }): { resultats: EvenementHistorique[]; totalResultats: number; compteurs: Record<string, number> } {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
+    const q = filtres.recherche.trim();
+    if (q) {
+      conditions.push("(factureNumero LIKE ? OR clientNom LIKE ? OR produitMotif LIKE ? OR produitTaille LIKE ?)");
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+    }
+    if (filtres.typeFiltre !== "tous") {
+      conditions.push("type = ?");
+      params.push(filtres.typeFiltre);
+    }
+    if (filtres.dateDebutIso) {
+      conditions.push("date >= ?");
+      params.push(filtres.dateDebutIso);
+    }
+    if (filtres.dateFinIso) {
+      conditions.push("date <= ?");
+      params.push(filtres.dateFinIso);
+    }
+    const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const colonnesTri: Record<string, string> = {
+      date: "date",
+      type: "type",
+      montant: "COALESCE(montant, 0)",
+    };
+    const ordreSql = filtres.colonneTri ? colonnesTri[filtres.colonneTri] : "date";
+    const directionSql = filtres.direction === "asc" ? "ASC" : "DESC";
+
+    const totalResultats = (
+      this.db.prepare(`SELECT COUNT(*) as n FROM (${SELECT_EVENEMENTS}) ${whereSql}`).get(...params) as { n: number }
+    ).n;
+
+    // Répartition par type sur l'ENSEMBLE des résultats filtrés (pas
+    // seulement la page affichée) — une requête d'agrégation légère
+    // (COUNT groupé), jamais un rechargement de toutes les lignes.
+    const lignesCompteurs = this.db
+      .prepare(`SELECT type, COUNT(*) as n FROM (${SELECT_EVENEMENTS}) ${whereSql} GROUP BY type`)
+      .all(...params) as { type: string; n: number }[];
+    const compteurs = Object.fromEntries(lignesCompteurs.map((l) => [l.type, l.n]));
+
+    const offset = (filtres.page - 1) * filtres.tailleParPage;
+    const resultats = this.db
+      .prepare(`SELECT * FROM (${SELECT_EVENEMENTS}) ${whereSql} ORDER BY ${ordreSql} ${directionSql} LIMIT ? OFFSET ?`)
+      .all(...params, filtres.tailleParPage, offset) as EvenementHistorique[];
+
+    return { resultats, totalResultats, compteurs };
+  }
+
   /** Mouvements liés à une facture — nécessaire pour restaurer le stock lors d'une annulation (correction "Facturation" §5/§21). */
   listParFacture(factureId: string): Mouvement[] {
     const rows = this.db.prepare("SELECT * FROM mouvements WHERE facture_id = ?").all(factureId) as MouvementRow[];

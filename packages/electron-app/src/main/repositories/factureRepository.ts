@@ -245,30 +245,146 @@ export class FactureRepository {
    * anonymisée pour le Gérant au niveau IPC (jamais ici — ce dépôt ne
    * fait que fournir la donnée brute).
    */
-  listAvecVendeur(limit = 50): (Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean })[] {
-    const factures = this.list(limit);
-    if (factures.length === 0) return [];
-    const placeholders = factures.map(() => "?").join(",");
-    const utilisateurs = this.db
-      .prepare(`SELECT id, nom, role FROM utilisateurs WHERE id IN (${placeholders})`)
-      .all(...factures.map((f) => f.vendeurUtilisateurId)) as { id: string; nom: string; role: string }[];
-    const parId = new Map(utilisateurs.map((u) => [u.id, u]));
-    // Correction "Document interne — réservé aux achats extérieurs" §1 :
-    // une seule requête groupée (jamais une par facture) pour savoir
-    // lesquelles ont réellement un relevé d'approvisionnement externe —
-    // c'est la SEULE source de vérité pour "achat extérieur", la même
-    // que celle utilisée par getDocumentInterne() plus bas.
-    const facturesAvecReleve = new Set(
-      (
-        this.db
-          .prepare(`SELECT DISTINCT facture_id as factureId FROM releves_internes_approvisionnement WHERE facture_id IN (${placeholders})`)
-          .all(...factures.map((f) => f.id)) as { factureId: string }[]
-      ).map((r) => r.factureId)
-    );
-    return factures.map((f) => {
-      const u = parId.get(f.vendeurUtilisateurId);
-      return { ...f, vendeurNom: u?.nom ?? null, vendeurRole: u?.role ?? null, aAchatExterieur: facturesAvecReleve.has(f.id) };
-    });
+  /**
+   * Correction "Audit Phase 2 — pagination Factures" : remplace le
+   * plafond fixe de listAvecVendeur(50) par une vraie pagination
+   * BASE DE DONNÉES — recherche, filtre de statut, filtre de vendeur et
+   * tri appliqués en SQL AVANT de découper en pages (LIMIT/OFFSET),
+   * jamais l'inverse. Seules les 10 lignes de la page demandée sont
+   * chargées en mémoire, quel que soit le nombre total de factures.
+   *
+   * Le filtrage par vendeur se fait par `vendeur_utilisateur_id` (jamais
+   * par un nom affiché, qui dépend de l'anonymisation — une préoccupation
+   * d'affichage, pas de données) : la décision de savoir QUELS vendeurs
+   * un utilisateur a le droit de filtrer reste prise plus haut (IPC),
+   * jamais ici.
+   *
+   * Limite connue et assumée : la recherche texte utilise `LIKE` en
+   * SQLite, qui ne met en minuscules correctement que les caractères
+   * ASCII (contrairement à l'ancien `.toLowerCase()` JavaScript,
+   * pleinement Unicode). Une recherche sur un nom de client accentué
+   * dans une casse différente de celle enregistrée pourrait ne pas
+   * matcher parfaitement — cas limite rare, signalé ici plutôt que
+   * masqué.
+   */
+  listAvecVendeurPagine(filtres: {
+    recherche: string;
+    statutFiltre: "tous" | "annulee" | "en_attente" | "livree";
+    vendeurUtilisateurId: string | null;
+    colonneTri: "numero" | "date" | "client" | "vendeur" | "montant" | "statut" | null;
+    direction: "asc" | "desc";
+    page: number;
+    tailleParPage: number;
+  }): { resultats: (Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean })[]; totalResultats: number } {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
+    const q = filtres.recherche.trim();
+    if (q) {
+      conditions.push("(f.numero LIKE ? OR f.client_nom LIKE ?)");
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    if (filtres.statutFiltre === "annulee") {
+      conditions.push("f.annulee_le IS NOT NULL");
+    } else if (filtres.statutFiltre === "en_attente" || filtres.statutFiltre === "livree") {
+      conditions.push("f.annulee_le IS NULL AND f.statut_livraison = ?");
+      params.push(filtres.statutFiltre);
+    }
+    if (filtres.vendeurUtilisateurId) {
+      conditions.push("f.vendeur_utilisateur_id = ?");
+      params.push(filtres.vendeurUtilisateurId);
+    }
+    const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const colonnesTri: Record<string, string> = {
+      numero: "f.numero",
+      date: "f.date",
+      client: "f.client_nom",
+      vendeur: "COALESCE(u.nom, '')",
+      montant: "f.total",
+      // Reproduit l'ordre "annulée avant/après les autres statuts" tel
+      // que trié côté client auparavant (comparaison alphabétique de la
+      // valeur affichée : 'annulee' vs 'en_attente'/'livree').
+      statut: "CASE WHEN f.annulee_le IS NOT NULL THEN 'annulee' ELSE f.statut_livraison END",
+    };
+    const ordreSql = filtres.colonneTri ? colonnesTri[filtres.colonneTri] : "f.date";
+    const directionSql = filtres.direction === "asc" ? "ASC" : "DESC";
+
+    const totalResultats = (
+      this.db
+        .prepare(
+          `SELECT COUNT(*) as n FROM factures f LEFT JOIN utilisateurs u ON u.id = f.vendeur_utilisateur_id ${whereSql}`
+        )
+        .get(...params) as { n: number }
+    ).n;
+
+    const offset = (filtres.page - 1) * filtres.tailleParPage;
+    const rows = this.db
+      .prepare(
+        `SELECT f.*, u.nom as vendeurNom, u.role as vendeurRole
+         FROM factures f
+         LEFT JOIN utilisateurs u ON u.id = f.vendeur_utilisateur_id
+         ${whereSql}
+         ORDER BY ${ordreSql} ${directionSql}
+         LIMIT ? OFFSET ?`
+      )
+      .all(...params, filtres.tailleParPage, offset) as (FactureRow & { vendeurNom: string | null; vendeurRole: string | null })[];
+
+    const factures = rows.map((row) => ({ ...rowToFacture(row, this.getLignes(row.id)), vendeurNom: row.vendeurNom, vendeurRole: row.vendeurRole }));
+
+    // Même logique que listAvecVendeur — une seule requête groupée,
+    // appliquée uniquement aux factures de LA PAGE (10 au maximum),
+    // jamais à l'ensemble de la base.
+    let facturesAvecReleve = new Set<string>();
+    if (factures.length > 0) {
+      const placeholders = factures.map(() => "?").join(",");
+      facturesAvecReleve = new Set(
+        (
+          this.db
+            .prepare(`SELECT DISTINCT facture_id as factureId FROM releves_internes_approvisionnement WHERE facture_id IN (${placeholders})`)
+            .all(...factures.map((f) => f.id)) as { factureId: string }[]
+        ).map((r) => r.factureId)
+      );
+    }
+
+    return {
+      resultats: factures.map((f) => ({ ...f, aAchatExterieur: facturesAvecReleve.has(f.id) })),
+      totalResultats,
+    };
+  }
+
+  /**
+   * Détermine la page (tri par défaut : date décroissante, aucun filtre)
+   * où se trouve une facture donnée — nécessaire pour la navigation
+   * cliquable depuis l'Historique/le Tableau de bord (correction "Audit
+   * Phase 2 — pagination Factures") : puisqu'une seule page est chargée
+   * à la fois, il n'est plus possible de calculer cette page côté
+   * Renderer à partir de la liste complète (elle n'existe plus en
+   * mémoire). Calcule le rang réel via une requête `COUNT`, jamais en
+   * rechargeant toutes les factures pour les compter côté client.
+   */
+  trouverPageParDefaut(factureId: string, tailleParPage: number): number | null {
+    const facture = this.db.prepare("SELECT date FROM factures WHERE id = ?").get(factureId) as { date: string } | undefined;
+    if (!facture) return null;
+    const rang = (this.db.prepare("SELECT COUNT(*) as n FROM factures WHERE date > ?").get(facture.date) as { n: number }).n;
+    return Math.floor(rang / tailleParPage) + 1;
+  }
+
+  /**
+   * Liste des vendeurs ayant réellement enregistré au moins une facture —
+   * utilisée pour peupler le filtre "Vendeur" côté Admin uniquement (la
+   * décision de qui a le droit de voir cette liste complète reste prise
+   * dans l'IPC, jamais ici : un Gérant ne doit voir que lui-même).
+   */
+  listVendeursDistincts(): { id: string; nom: string }[] {
+    return this.db
+      .prepare(
+        `SELECT DISTINCT u.id, u.nom
+         FROM factures f
+         JOIN utilisateurs u ON u.id = f.vendeur_utilisateur_id
+         ORDER BY u.nom`
+      )
+      .all() as { id: string; nom: string }[];
   }
 
   /**

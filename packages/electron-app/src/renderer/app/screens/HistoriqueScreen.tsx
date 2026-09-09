@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, defaultTokens } from "@maxi-equip/design-system";
-import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowLeftRight, ShoppingCart, Ban, Search, X } from "lucide-react";
+import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowLeftRight, ShoppingCart, Ban, Search, X, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EvenementHistorique } from "../../../preload/index.js";
 import type { CibleOperation } from "../AppRoot.js";
 import { useSurbrillanceOperation } from "../highlight.js";
@@ -8,6 +8,8 @@ import { useSurbrillanceOperation } from "../highlight.js";
 type Periode = "jour" | "semaine" | "mois" | "personnalise" | "tout";
 type ColonneTriable = "date" | "type" | "montant";
 type Direction = "asc" | "desc";
+
+const TAILLE_PAGE = 10;
 
 const TYPE_LABELS: Record<EvenementHistorique["type"], string> = {
   vente: "Vente effectuée",
@@ -27,18 +29,6 @@ const TYPE_ICONS: Record<EvenementHistorique["type"], typeof ArrowDownToLine> = 
   entree: ArrowDownToLine,
   transfert: ArrowLeftRight,
 };
-
-function debutPeriode(periode: Periode): Date | null {
-  const now = new Date();
-  if (periode === "jour") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (periode === "semaine") {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 7);
-    return d;
-  }
-  if (periode === "mois") return new Date(now.getFullYear(), now.getMonth(), 1);
-  return null;
-}
 
 function nomEmplacement(e: EvenementHistorique): string {
   if (e.type === "transfert") return `${e.emplacementSourceNom ?? "?"} → ${e.emplacementDestinationNom ?? "?"}`;
@@ -123,10 +113,14 @@ function KpiMini({ icon: Icon, value, label, tone }: { icon: typeof ArrowDownToL
  * l'historique" (correction §1/§2/§16) : les mouvements techniques
  * (répartition par dépôt, complément externe, restauration lors d'une
  * annulation) ne sont plus affichés comme des opérations indépendantes.
- * Une vente produit UNE ligne "Vente effectuée" ; son annulation produit
- * UNE ligne supplémentaire "Facture annulée" — jamais une fausse
- * "Entrée de stock". Les entrées/transferts manuels restent affichés
- * individuellement, n'étant jamais rattachés à une facture.
+ *
+ * Correction "Audit Phase 2 — pagination Historique" : plus de plafond
+ * de 300 événements chargés en une fois, et vraie pagination à 10/page
+ * (elle n'existait pas du tout auparavant — tout s'affichait dans un
+ * seul tableau sans fin). Recherche, filtre de type, période et tri sont
+ * envoyés au Main, qui interroge la base de données directement
+ * (LIMIT/OFFSET) — seules les 10 lignes de la page demandée transitent
+ * par IPC, quel que soit le nombre total d'événements enregistrés.
  */
 export function HistoriqueScreen({
   session,
@@ -140,66 +134,75 @@ export function HistoriqueScreen({
   onNaviguerVersOperation: (cible: CibleOperation) => void;
 }) {
   const [evenements, setEvenements] = useState<EvenementHistorique[]>([]);
+  const [totalResultats, setTotalResultats] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [compteurs, setCompteurs] = useState<Record<string, number>>({});
+  const [chargementListe, setChargementListe] = useState(true);
   const [recherche, setRecherche] = useState("");
-  const [typeFiltre, setTypeFiltre] = useState<string>("tous");
+  const [rechercheDebattue, setRechercheDebattue] = useState("");
+  const [typeFiltre, setTypeFiltre] = useState<"tous" | "vente" | "annulation" | "entree" | "transfert">("tous");
   const [periode, setPeriode] = useState<Periode>("tout");
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
   const [tri, setTri] = useState<{ colonne: ColonneTriable | null; direction: Direction }>({ colonne: "date", direction: "desc" });
-  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(cibleSurbrillance, onSurbrillanceAppliquee);
+  const [page, setPage] = useState(1);
+  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(
+    cibleSurbrillance && evenements.some((e) => e.id === cibleSurbrillance) ? cibleSurbrillance : null,
+    onSurbrillanceAppliquee
+  );
+
+  async function chargerPage() {
+    setChargementListe(true);
+    try {
+      const result = await window.maxiEquip.listHistoriqueEnrichiPagine({
+        recherche: rechercheDebattue,
+        typeFiltre,
+        periode,
+        dateDebut,
+        dateFin,
+        colonneTri: tri.colonne,
+        direction: tri.direction,
+        page,
+        tailleParPage: TAILLE_PAGE,
+      });
+      setEvenements(result.resultats);
+      setTotalResultats(result.totalResultats);
+      setTotalPages(result.totalPages);
+      setCompteurs(result.compteurs);
+    } finally {
+      setChargementListe(false);
+    }
+  }
 
   useEffect(() => {
-    void window.maxiEquip.listHistoriqueEnrichi().then(setEvenements);
-  }, []);
+    void chargerPage();
+  }, [rechercheDebattue, typeFiltre, periode, dateDebut, dateFin, tri, page]);
+
+  // Anti-rebond léger sur la recherche (§ Performance de la correction)
+  // — évite une requête base de données à chaque frappe.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setRechercheDebattue(recherche);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [recherche]);
 
   useEffect(() => {
     if (!cibleSurbrillance) return;
     setRecherche("");
+    setRechercheDebattue("");
     setTypeFiltre("tous");
     setPeriode("tout");
+    setDateDebut("");
+    setDateFin("");
+    setTri({ colonne: "date", direction: "desc" });
+    setPage(1);
   }, [cibleSurbrillance]);
 
-  const filtres = useMemo(() => {
-    const q = recherche.trim().toLowerCase();
-    return evenements.filter((e) => {
-      const matchRecherche =
-        !q ||
-        (e.factureNumero ?? "").toLowerCase().includes(q) ||
-        (e.clientNom ?? "").toLowerCase().includes(q) ||
-        (e.produitMotif ?? "").toLowerCase().includes(q) ||
-        (e.produitTaille ?? "").toLowerCase().includes(q);
-      const matchType = typeFiltre === "tous" || e.type === typeFiltre;
-      let matchPeriode = true;
-      if (periode === "personnalise") {
-        const d = new Date(e.date);
-        if (dateDebut && d < new Date(dateDebut)) matchPeriode = false;
-        if (dateFin && d > new Date(new Date(dateFin).setHours(23, 59, 59, 999))) matchPeriode = false;
-      } else {
-        const debut = debutPeriode(periode);
-        if (debut && new Date(e.date) < debut) matchPeriode = false;
-      }
-      return matchRecherche && matchType && matchPeriode;
-    });
-  }, [evenements, recherche, typeFiltre, periode, dateDebut, dateFin]);
-
-  const tries = useMemo(() => {
-    if (!tri.colonne) return filtres;
-    const sens = tri.direction === "asc" ? 1 : -1;
-    const copie = [...filtres];
-    copie.sort((a, b) => {
-      switch (tri.colonne) {
-        case "date":
-          return sens * (new Date(a.date).getTime() - new Date(b.date).getTime());
-        case "type":
-          return sens * a.type.localeCompare(b.type, "fr");
-        case "montant":
-          return sens * ((a.montant ?? 0) - (b.montant ?? 0));
-        default:
-          return 0;
-      }
-    });
-    return copie;
-  }, [filtres, tri]);
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
 
   function handleTrier(colonne: ColonneTriable) {
     setTri((prev) => {
@@ -207,16 +210,17 @@ export function HistoriqueScreen({
       if (prev.direction === "asc") return { colonne, direction: "desc" };
       return { colonne: null, direction: "asc" };
     });
+    setPage(1);
   }
 
-  const totalVentes = filtres.filter((e) => e.type === "vente").length;
-  const totalAnnulations = filtres.filter((e) => e.type === "annulation").length;
-  const totalMouvementsManuels = filtres.filter((e) => e.type === "entree" || e.type === "transfert").length;
+  const totalVentes = compteurs.vente ?? 0;
+  const totalAnnulations = compteurs.annulation ?? 0;
+  const totalMouvementsManuels = (compteurs.entree ?? 0) + (compteurs.transfert ?? 0);
 
   return (
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0, marginBottom: 2 }}>Historique</h1>
-      <p style={{ marginTop: 0, marginBottom: 18, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>{evenements.length} événement(s) enregistré(s)</p>
+      <p style={{ marginTop: 0, marginBottom: 18, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>{totalResultats} événement(s) enregistré(s)</p>
 
       <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
         <KpiMini icon={ShoppingCart} value={totalVentes} label="Ventes effectuées" tone="success" />
@@ -235,7 +239,14 @@ export function HistoriqueScreen({
               onChange={(e) => setRecherche(e.target.value)}
             />
           </div>
-          <select style={inputStyle} value={typeFiltre} onChange={(e) => setTypeFiltre(e.target.value)}>
+          <select
+            style={inputStyle}
+            value={typeFiltre}
+            onChange={(e) => {
+              setTypeFiltre(e.target.value as "tous" | "vente" | "annulation" | "entree" | "transfert");
+              setPage(1);
+            }}
+          >
             <option value="tous">Tous les types</option>
             <option value="vente">Ventes</option>
             <option value="annulation">Annulations</option>
@@ -253,7 +264,10 @@ export function HistoriqueScreen({
           ).map(([value, label]) => (
             <button
               key={value}
-              onClick={() => setPeriode(value)}
+              onClick={() => {
+                setPeriode(value);
+                setPage(1);
+              }}
               style={{
                 padding: "7px 12px",
                 borderRadius: defaultTokens.radius.pill,
@@ -270,19 +284,37 @@ export function HistoriqueScreen({
           ))}
           {periode === "personnalise" && (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input type="date" style={inputStyle} value={dateDebut} onChange={(e) => setDateDebut(e.target.value)} />
+              <input
+                type="date"
+                style={inputStyle}
+                value={dateDebut}
+                onChange={(e) => {
+                  setDateDebut(e.target.value);
+                  setPage(1);
+                }}
+              />
               <span style={{ color: defaultTokens.colors.textFaint, fontSize: 12 }}>à</span>
-              <input type="date" style={inputStyle} value={dateFin} onChange={(e) => setDateFin(e.target.value)} />
+              <input
+                type="date"
+                style={inputStyle}
+                value={dateFin}
+                onChange={(e) => {
+                  setDateFin(e.target.value);
+                  setPage(1);
+                }}
+              />
             </div>
           )}
           {(recherche || typeFiltre !== "tous" || periode !== "tout" || dateDebut || dateFin) && (
             <button
               onClick={() => {
                 setRecherche("");
+                setRechercheDebattue("");
                 setTypeFiltre("tous");
                 setPeriode("tout");
                 setDateDebut("");
                 setDateFin("");
+                setPage(1);
               }}
               style={{
                 display: "flex",
@@ -306,85 +338,130 @@ export function HistoriqueScreen({
       </Card>
 
       <Card padding={0}>
-        {tries.length === 0 ? (
+        {chargementListe ? (
+          <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Chargement…</p>
+        ) : evenements.length === 0 ? (
           <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Aucun événement ne correspond à vos filtres.</p>
         ) : (
-          <div ref={conteneurRef} style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
-                  <th style={{ padding: "10px 16px" }}>
-                    <EnteteTriable label="Date" colonne="date" tri={tri} onTrier={handleTrier} />
-                  </th>
-                  <th style={{ padding: "10px 16px" }}>
-                    <EnteteTriable label="Type" colonne="type" tri={tri} onTrier={handleTrier} />
-                  </th>
-                  <th style={{ padding: "10px 16px" }}>Détails</th>
-                  <th style={{ padding: "10px 16px", textAlign: "right" }}>
-                    <EnteteTriable label="Montant" colonne="montant" align="right" tri={tri} onTrier={handleTrier} />
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {tries.map((e) => {
-                  const Icone = TYPE_ICONS[e.type];
-                  // Toutes les opérations sont désormais cliquables — pas
-                  // seulement les ventes/annulations liées à une facture
-                  // (correction "Entrée de stock / Transferts" §12-§17 :
-                  // navigation complète depuis l'Historique général).
-                  const cible: CibleOperation | null =
-                    e.factureId !== null
-                      ? { type: "facture", id: e.factureId }
-                      : e.type === "entree" || e.type === "transfert"
-                        ? { type: e.type, id: e.id }
-                        : null;
-                  return (
-                    <tr
-                      key={e.id}
-                      data-operation-id={e.id}
-                      onClick={() => cible && onNaviguerVersOperation(cible)}
-                      style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: cible ? "pointer" : "default", ...styleSurbrillance(e.id) }}
-                    >
-                      <td style={{ padding: "10px 16px", color: defaultTokens.colors.textSoft, whiteSpace: "nowrap" }}>{new Date(e.date).toLocaleString("fr-FR")}</td>
-                      <td style={{ padding: "10px 16px" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: TYPE_COLORS[e.type], fontWeight: 700 }}>
-                          <Icone size={13} />
-                          {TYPE_LABELS[e.type]}
-                        </span>
-                      </td>
-                      <td style={{ padding: "10px 16px" }}>
-                        {e.type === "vente" || e.type === "annulation" ? (
-                          <div>
-                            <span style={{ fontFamily: defaultTokens.typography.mono, fontWeight: 700, color: defaultTokens.colors.accent }}>{e.factureNumero}</span>
-                            <span style={{ color: defaultTokens.colors.textSoft }}> — {e.clientNom}</span>
-                            {e.type === "annulation" && e.motifAnnulation && (
-                              <div style={{ fontSize: 11.5, color: defaultTokens.colors.textFaint, marginTop: 2 }}>Motif : {e.motifAnnulation}</div>
-                            )}
-                          </div>
-                        ) : (
-                          <div>
-                            <span style={{ fontWeight: 600 }}>{e.produitMotif}</span>
-                            <span style={{ color: defaultTokens.colors.textSoft }}>
-                              {" "}
-                              ({e.produitTaille}) · {nomEmplacement(e)} · {e.quantite} ct.
-                            </span>
-                          </div>
-                        )}
-                        {(e.utilisateurId || e.utilisateurNom) && (
-                          <div style={{ fontSize: 11, color: defaultTokens.colors.textFaint, marginTop: 2 }}>
-                            {e.utilisateurId === session.userId ? "Vous" : e.utilisateurNom ? `${e.utilisateurNom} (${e.utilisateurRole})` : "Auteur non enregistré"}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700 }}>{e.montant !== null ? `${e.montant.toLocaleString("fr-FR")} FCFA` : "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div ref={conteneurRef} style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
+                    <th style={{ padding: "10px 16px" }}>
+                      <EnteteTriable label="Date" colonne="date" tri={tri} onTrier={handleTrier} />
+                    </th>
+                    <th style={{ padding: "10px 16px" }}>
+                      <EnteteTriable label="Type" colonne="type" tri={tri} onTrier={handleTrier} />
+                    </th>
+                    <th style={{ padding: "10px 16px" }}>Détails</th>
+                    <th style={{ padding: "10px 16px", textAlign: "right" }}>
+                      <EnteteTriable label="Montant" colonne="montant" align="right" tri={tri} onTrier={handleTrier} />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evenements.map((e) => {
+                    const Icone = TYPE_ICONS[e.type];
+                    const cible: CibleOperation | null =
+                      e.factureId !== null
+                        ? { type: "facture", id: e.factureId }
+                        : e.type === "entree" || e.type === "transfert"
+                          ? { type: e.type, id: e.id }
+                          : null;
+                    return (
+                      <tr
+                        key={e.id}
+                        data-operation-id={e.id}
+                        onClick={() => cible && onNaviguerVersOperation(cible)}
+                        style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: cible ? "pointer" : "default", ...styleSurbrillance(e.id) }}
+                      >
+                        <td style={{ padding: "10px 16px", color: defaultTokens.colors.textSoft, whiteSpace: "nowrap" }}>{new Date(e.date).toLocaleString("fr-FR")}</td>
+                        <td style={{ padding: "10px 16px" }}>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: TYPE_COLORS[e.type], fontWeight: 700 }}>
+                            <Icone size={13} />
+                            {TYPE_LABELS[e.type]}
+                          </span>
+                        </td>
+                        <td style={{ padding: "10px 16px" }}>
+                          {e.type === "vente" || e.type === "annulation" ? (
+                            <div>
+                              <span style={{ fontFamily: defaultTokens.typography.mono, fontWeight: 700, color: defaultTokens.colors.accent }}>{e.factureNumero}</span>
+                              <span style={{ color: defaultTokens.colors.textSoft }}> — {e.clientNom}</span>
+                              {e.type === "annulation" && e.motifAnnulation && (
+                                <div style={{ fontSize: 11.5, color: defaultTokens.colors.textFaint, marginTop: 2 }}>Motif : {e.motifAnnulation}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>{e.produitMotif}</span>
+                              <span style={{ color: defaultTokens.colors.textSoft }}>
+                                {" "}
+                                ({e.produitTaille}) · {nomEmplacement(e)} · {e.quantite} ct.
+                              </span>
+                            </div>
+                          )}
+                          {(e.utilisateurId || e.utilisateurNom) && (
+                            <div style={{ fontSize: 11, color: defaultTokens.colors.textFaint, marginTop: 2 }}>
+                              {e.utilisateurId === session.userId ? "Vous" : e.utilisateurNom ? `${e.utilisateurNom} (${e.utilisateurRole})` : "Auteur non enregistré"}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700 }}>{e.montant !== null ? `${e.montant.toLocaleString("fr-FR")} FCFA` : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, padding: "14px 16px", borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  background: "none",
+                  border: `1px solid ${defaultTokens.colors.border}`,
+                  borderRadius: defaultTokens.radius.sm,
+                  padding: "6px 12px",
+                  cursor: page <= 1 ? "not-allowed" : "pointer",
+                  opacity: page <= 1 ? 0.5 : 1,
+                  fontSize: 12.5,
+                }}
+              >
+                <ChevronLeft size={14} />
+                Précédent
+              </button>
+              <span style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+                Page {page} sur {totalPages} ({totalResultats} événement(s) au total)
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  background: "none",
+                  border: `1px solid ${defaultTokens.colors.border}`,
+                  borderRadius: defaultTokens.radius.sm,
+                  padding: "6px 12px",
+                  cursor: page >= totalPages ? "not-allowed" : "pointer",
+                  opacity: page >= totalPages ? 0.5 : 1,
+                  fontSize: 12.5,
+                }}
+              >
+                Suivant
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </>
         )}
       </Card>
     </div>
   );
 }
+

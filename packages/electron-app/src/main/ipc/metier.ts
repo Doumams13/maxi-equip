@@ -154,10 +154,68 @@ export function registerMetierIpcHandlers(
   });
 
   // --- Factures ---
-  ipcMain.handle("factures:list", () => {
+  /**
+   * Correction "Audit Phase 2 — pagination Factures" : remplace
+   * `factures:list` (plafonné à 50, recherche/tri/filtre appliqués
+   * seulement sur ces 50 lignes côté Renderer) par une vraie pagination
+   * BASE DE DONNÉES. Le Renderer envoie sa page/recherche/filtres/tri
+   * actuels ; seules les 10 lignes demandées sont chargées, quel que
+   * soit le nombre total de factures.
+   */
+  ipcMain.handle(
+    "factures:listPagine",
+    (
+      _e,
+      filtres: {
+        recherche: string;
+        statutFiltre: "tous" | "annulee" | "en_attente" | "livree";
+        vendeurUtilisateurId: string | null;
+        colonneTri: "numero" | "date" | "client" | "vendeur" | "montant" | "statut" | null;
+        direction: "asc" | "desc";
+        page: number;
+        tailleParPage: number;
+      }
+    ) => {
+      const session = sessionManager.get();
+      // Défense en profondeur : un Gérant ne peut filtrer QUE sur
+      // lui-même, jamais faire confiance à une valeur arbitraire envoyée
+      // par le Renderer pour ce champ sensible (même principe déjà
+      // pratiqué ailleurs dans ce projet — jamais uniquement masqué côté
+      // interface).
+      const vendeurSecurise =
+        session && session.role !== "administrateur" && filtres.vendeurUtilisateurId && filtres.vendeurUtilisateurId !== session.userId
+          ? session.userId
+          : filtres.vendeurUtilisateurId;
+
+      const { resultats, totalResultats } = factureRepository.listAvecVendeurPagine({ ...filtres, vendeurUtilisateurId: vendeurSecurise });
+      const resultatsAnonymises = session ? anonymiserFactures(resultats, session) : resultats;
+      return {
+        resultats: resultatsAnonymises,
+        totalResultats,
+        page: filtres.page,
+        totalPages: Math.max(1, Math.ceil(totalResultats / filtres.tailleParPage)),
+        tailleParPage: filtres.tailleParPage,
+      };
+    }
+  );
+
+  ipcMain.handle("factures:trouverPage", (_e, factureId: string, tailleParPage: number) => factureRepository.trouverPageParDefaut(factureId, tailleParPage));
+
+  /**
+   * Options du filtre "Vendeur" — jamais construites côté Renderer à
+   * partir des factures déjà chargées (impossible désormais, une seule
+   * page est chargée à la fois). Un Gérant ne reçoit QUE lui-même
+   * ("Vous") : lui exposer la liste complète des vendeurs distincts
+   * révélerait des identités qui doivent rester anonymes pour lui,
+   * même avant qu'il ne filtre quoi que ce soit.
+   */
+  ipcMain.handle("factures:listVendeursFiltrables", () => {
     const session = sessionManager.get();
-    const factures = factureRepository.listAvecVendeur();
-    return session ? anonymiserFactures(factures, session) : factures;
+    if (!session) return [];
+    if (session.role === "administrateur") {
+      return factureRepository.listVendeursDistincts().map((v) => (v.id === session.userId ? { id: v.id, nom: "Vous" } : v));
+    }
+    return [{ id: session.userId, nom: "Vous" }];
   });
 
   ipcMain.handle("factures:resumeMois", () => factureRepository.sommeTotalMoisCourant());
@@ -494,14 +552,78 @@ export function registerMetierIpcHandlers(
 
   // --- Historique ---
   ipcMain.handle("historique:list", () => mouvementRepository.list());
-  ipcMain.handle("historique:listEnrichi", () => {
-    const session = sessionManager.get();
-    // "1 vente = 1 événement" (correction §1/§2/§16) — remplace l'ancien
-    // affichage mouvement par mouvement. Anonymisation systématique,
-    // décidée ici, jamais côté Renderer.
-    const evenements = mouvementRepository.listEvenements();
-    return session ? anonymiserActivite(evenements, session) : evenements;
-  });
+
+  /**
+   * Correction "Audit Phase 2 — pagination Historique" : remplace
+   * `historique:listEnrichi` (plafonné à 300, recherche/filtre/tri
+   * appliqués seulement sur ces 300 lignes côté Renderer) par une vraie
+   * pagination BASE DE DONNÉES. Le Renderer envoie sa
+   * page/recherche/filtres/tri actuels ; seules les 10 lignes demandées
+   * sont chargées, quel que soit le nombre total d'événements.
+   *
+   * Les bornes de période (jour/semaine/mois/personnalisé) sont
+   * calculées ICI, en JavaScript, avec exactement le même calcul que
+   * l'ancien filtre côté Renderer (voir debutPeriode() dans
+   * HistoriqueScreen.tsx) — jamais recalculées différemment via une
+   * fonction de date SQL, pour éviter tout risque de divergence de
+   * fuseau horaire.
+   */
+  ipcMain.handle(
+    "historique:listEnrichiPagine",
+    (
+      _e,
+      filtres: {
+        recherche: string;
+        typeFiltre: "tous" | "vente" | "annulation" | "entree" | "transfert";
+        periode: "tout" | "jour" | "semaine" | "mois" | "personnalise";
+        dateDebut: string;
+        dateFin: string;
+        colonneTri: "date" | "type" | "montant" | null;
+        direction: "asc" | "desc";
+        page: number;
+        tailleParPage: number;
+      }
+    ) => {
+      const session = sessionManager.get();
+
+      let dateDebutIso: string | null = null;
+      let dateFinIso: string | null = null;
+      const now = new Date();
+      if (filtres.periode === "jour") {
+        dateDebutIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      } else if (filtres.periode === "semaine") {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 7);
+        dateDebutIso = d.toISOString();
+      } else if (filtres.periode === "mois") {
+        dateDebutIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      } else if (filtres.periode === "personnalise") {
+        if (filtres.dateDebut) dateDebutIso = new Date(filtres.dateDebut).toISOString();
+        if (filtres.dateFin) dateFinIso = new Date(new Date(filtres.dateFin).setHours(23, 59, 59, 999)).toISOString();
+      }
+
+      const { resultats, totalResultats, compteurs } = mouvementRepository.listEvenementsPagine({
+        recherche: filtres.recherche,
+        typeFiltre: filtres.typeFiltre,
+        dateDebutIso,
+        dateFinIso,
+        colonneTri: filtres.colonneTri,
+        direction: filtres.direction,
+        page: filtres.page,
+        tailleParPage: filtres.tailleParPage,
+      });
+      const resultatsAnonymises = session ? anonymiserActivite(resultats, session) : resultats;
+      return {
+        resultats: resultatsAnonymises,
+        totalResultats,
+        page: filtres.page,
+        totalPages: Math.max(1, Math.ceil(totalResultats / filtres.tailleParPage)),
+        tailleParPage: filtres.tailleParPage,
+        compteurs,
+      };
+    }
+  );
+
 
   /**
    * Historique COMPLET des entrées/transferts — correction "Entrée de

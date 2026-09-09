@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { Facture } from "@maxi-equip/shared-types";
@@ -165,10 +165,15 @@ export function FacturesScreen({
 }) {
   const { showSuccess, showError } = useToast();
   const [factures, setFactures] = useState<FactureAvecVendeur[]>([]);
+  const [totalResultats, setTotalResultats] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [chargementListe, setChargementListe] = useState(true);
   const [resumeMois, setResumeMois] = useState<{ nombre: number; total: number } | null>(null);
   const [recherche, setRecherche] = useState("");
-  const [statutFiltre, setStatutFiltre] = useState("tous");
-  const [vendeurFiltre, setVendeurFiltre] = useState("tous");
+  const [rechercheDebattue, setRechercheDebattue] = useState("");
+  const [statutFiltre, setStatutFiltre] = useState<"tous" | "annulee" | "en_attente" | "livree">("tous");
+  const [vendeurFiltreId, setVendeurFiltreId] = useState<string | null>(null);
+  const [vendeursDisponibles, setVendeursDisponibles] = useState<{ id: string; nom: string }[]>([]);
   const [tri, setTri] = useState<{ colonne: ColonneTriable | null; direction: Direction }>({ colonne: "date", direction: "desc" });
   const [chargementAction, setChargementAction] = useState<string | null>(null);
   const [apercu, setApercu] = useState<{ chemin: string; nomSuggere: string; titre: string } | null>(null);
@@ -176,97 +181,87 @@ export function FacturesScreen({
 
   const [page, setPage] = useState(1);
 
-  async function refresh() {
-    const [liste, resume] = await Promise.all([window.maxiEquip.listFactures(), window.maxiEquip.getResumeFacturesMois()]);
-    setFactures(liste);
-    setResumeMois(resume);
+  /**
+   * Correction "Audit Phase 2 — pagination Factures" : plus de plafond
+   * de 50 factures chargées en une fois. Recherche, filtre de statut,
+   * filtre de vendeur et tri sont envoyés au Main, qui interroge la base
+   * de données directement (LIMIT/OFFSET) — seules les 10 lignes de la
+   * page demandée transitent par IPC, quel que soit le nombre total de
+   * factures enregistrées.
+   */
+  async function chargerPage() {
+    setChargementListe(true);
+    try {
+      const result = await window.maxiEquip.listFacturesPagine({
+        recherche: rechercheDebattue,
+        statutFiltre,
+        vendeurUtilisateurId: vendeurFiltreId,
+        colonneTri: tri.colonne,
+        direction: tri.direction,
+        page,
+        tailleParPage: TAILLE_PAGE,
+      });
+      setFactures(result.resultats);
+      setTotalResultats(result.totalResultats);
+      setTotalPages(result.totalPages);
+    } finally {
+      setChargementListe(false);
+    }
   }
 
   useEffect(() => {
-    void refresh();
+    void chargerPage();
+  }, [rechercheDebattue, statutFiltre, vendeurFiltreId, tri, page]);
+
+  // Anti-rebond léger sur la recherche : évite une requête base de
+  // données à chaque frappe (§ Performance de la correction) — 300ms est
+  // imperceptible pour l'utilisateur, mais évite de solliciter SQLite à
+  // chaque caractère tapé.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setRechercheDebattue(recherche);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [recherche]);
+
+  async function chargerResumeEtVendeurs() {
+    const [resume, vendeurs] = await Promise.all([window.maxiEquip.getResumeFacturesMois(), window.maxiEquip.listVendeursFiltrables()]);
+    setResumeMois(resume);
+    setVendeursDisponibles(vendeurs);
+  }
+
+  useEffect(() => {
+    void chargerResumeEtVendeurs();
   }, []);
 
+  /**
+   * Navigation cliquable depuis l'Historique/le Tableau de bord :
+   * puisqu'une seule page est chargée à la fois, la bonne page est
+   * désormais demandée directement à la base de données (rang réel de
+   * la facture sous le tri par défaut), jamais recalculée à partir d'une
+   * liste complète qui n'existe plus en mémoire côté Renderer.
+   */
   useEffect(() => {
     if (!cibleSurbrillance) return;
     setRecherche("");
+    setRechercheDebattue("");
     setStatutFiltre("tous");
-    setVendeurFiltre("tous");
+    setVendeurFiltreId(null);
+    setTri({ colonne: "date", direction: "desc" });
+    void window.maxiEquip.trouverPageFacture(cibleSurbrillance, TAILLE_PAGE).then((bonnePage) => {
+      if (bonnePage !== null) setPage(bonnePage);
+    });
   }, [cibleSurbrillance]);
-
-  const vendeursDisponibles = useMemo(() => {
-    const noms = new Set<string>();
-    factures.forEach((f) => {
-      const nom = f.vendeurUtilisateurId === session.userId ? "Vous" : f.vendeurNom;
-      if (nom) noms.add(nom);
-    });
-    return Array.from(noms).sort();
-  }, [factures, session.userId]);
-
-  const filtrees = useMemo(() => {
-    const q = recherche.trim().toLowerCase();
-    return factures.filter((f) => {
-      const matchRecherche = !q || f.numero.toLowerCase().includes(q) || f.clientNom.toLowerCase().includes(q);
-      const matchStatut = statutFiltre === "tous" || (statutFiltre === "annulee" ? !!f.annuleeLe : !f.annuleeLe && f.statutLivraison === statutFiltre);
-      const nomAffiche = f.vendeurUtilisateurId === session.userId ? "Vous" : f.vendeurNom;
-      const matchVendeur = vendeurFiltre === "tous" || nomAffiche === vendeurFiltre;
-      return matchRecherche && matchStatut && matchVendeur;
-    });
-  }, [factures, recherche, statutFiltre, vendeurFiltre, session.userId]);
-
-  const triees = useMemo(() => {
-    if (!tri.colonne) return filtrees;
-    const sens = tri.direction === "asc" ? 1 : -1;
-    const copie = [...filtrees];
-    copie.sort((a, b) => {
-      switch (tri.colonne) {
-        case "numero":
-          return sens * a.numero.localeCompare(b.numero, "fr");
-        case "date":
-          return sens * (new Date(a.date).getTime() - new Date(b.date).getTime());
-        case "client":
-          return sens * a.clientNom.localeCompare(b.clientNom, "fr");
-        case "vendeur":
-          return sens * (a.vendeurNom ?? "").localeCompare(b.vendeurNom ?? "", "fr");
-        case "montant":
-          return sens * (a.total - b.total);
-        case "statut":
-          return sens * a.statutLivraison.localeCompare(b.statutLivraison, "fr");
-        default:
-          return 0;
-      }
-    });
-    return copie;
-  }, [filtrees, tri]);
-
-  const totalPages = Math.max(1, Math.ceil(triees.length / TAILLE_PAGE));
-
-  // Calcule automatiquement la bonne page pour une navigation cliquable
-  // depuis l'Historique/le Dashboard (même logique fiable que pour les
-  // Entrées/Transferts, correction "Surbrillance des Factures" §2/§4) —
-  // dépend de la liste triée/filtrée complète, jamais de la page
-  // actuellement affichée.
-  useEffect(() => {
-    if (!cibleSurbrillance) return;
-    const index = triees.findIndex((f) => f.id === cibleSurbrillance);
-    if (index === -1) return;
-    setPage(Math.floor(index / TAILLE_PAGE) + 1);
-  }, [cibleSurbrillance, triees]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [totalPages, page]);
 
-  const pageActuelle = triees.slice((page - 1) * TAILLE_PAGE, page * TAILLE_PAGE);
-
-  // LE CŒUR DU CORRECTIF : la cible n'est transmise au hook de
-  // surbrillance QUE si elle est réellement présente sur la page
-  // actuellement affichée. Avant ce correctif, la cible brute était
-  // transmise dès le montage du composant — avant même que `factures`
-  // (chargé de façon asynchrone) ne soit rempli —, ce qui faisait
-  // échouer la recherche de l'élément DOM et effaçait la cible avant
-  // même l'arrivée des données. C'est exactement ce que faisait déjà
-  // HistoriqueOperationsTable pour les Entrées/Transferts.
-  const cibleActive = cibleSurbrillance && pageActuelle.some((f) => f.id === cibleSurbrillance) ? cibleSurbrillance : null;
+  // LE CŒUR DU CORRECTIF (conservé) : la cible n'est transmise au hook
+  // de surbrillance QUE si elle est réellement présente dans la page
+  // actuellement chargée depuis le serveur.
+  const cibleActive = cibleSurbrillance && factures.some((f) => f.id === cibleSurbrillance) ? cibleSurbrillance : null;
   const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(cibleActive, onSurbrillanceAppliquee);
 
   function handleTrier(colonne: ColonneTriable) {
@@ -335,7 +330,7 @@ export function FacturesScreen({
     try {
       await window.maxiEquip.marquerFactureLivree(factureId);
       showSuccess("Facture mise à jour", "Statut changé en « Payée — Livrée ».");
-      await refresh();
+      await chargerPage();
     } finally {
       setChargementAction(null);
     }
@@ -349,7 +344,7 @@ export function FacturesScreen({
       if (result.success) {
         showSuccess("Facture annulée", "Le stock prélevé sur les dépôts a été restauré.");
         setFactureAAnnuler(null);
-        await refresh();
+        await chargerPage();
       } else {
         showError("Annulation impossible", result.message ?? "Une erreur inattendue s'est produite.");
       }
@@ -404,28 +399,43 @@ export function FacturesScreen({
               onChange={(e) => { setRecherche(e.target.value); setPage(1); }}
             />
           </div>
-          <select style={inputStyle} value={statutFiltre} onChange={(e) => { setStatutFiltre(e.target.value); setPage(1); }}>
+          <select
+            style={inputStyle}
+            value={statutFiltre}
+            onChange={(e) => {
+              setStatutFiltre(e.target.value as "tous" | "annulee" | "en_attente" | "livree");
+              setPage(1);
+            }}
+          >
             <option value="tous">Tous les statuts</option>
             <option value="livree">Payée — Livrée</option>
             <option value="en_attente">Payée — En attente</option>
             <option value="annulee">Annulée</option>
           </select>
-          <select style={inputStyle} value={vendeurFiltre} onChange={(e) => { setVendeurFiltre(e.target.value); setPage(1); }}>
+          <select
+            style={inputStyle}
+            value={vendeurFiltreId ?? "tous"}
+            onChange={(e) => {
+              setVendeurFiltreId(e.target.value === "tous" ? null : e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="tous">Tous les vendeurs</option>
-            {vendeursDisponibles.map((n) => (
-              <option key={n} value={n}>
-                {n}
+            {vendeursDisponibles.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.nom}
               </option>
             ))}
           </select>
-          {(recherche || statutFiltre !== "tous" || vendeurFiltre !== "tous") && (
+          {(recherche || statutFiltre !== "tous" || vendeurFiltreId !== null) && (
             <Button
               type="button"
               variant="ghost"
               onClick={() => {
                 setRecherche("");
+                setRechercheDebattue("");
                 setStatutFiltre("tous");
-                setVendeurFiltre("tous");
+                setVendeurFiltreId(null);
                 setPage(1);
               }}
             >
@@ -437,7 +447,9 @@ export function FacturesScreen({
       </Card>
 
       <Card padding={0}>
-        {triees.length === 0 ? (
+        {chargementListe ? (
+          <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Chargement…</p>
+        ) : factures.length === 0 ? (
           <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Aucune facture ne correspond à vos filtres.</p>
         ) : (
           <>
@@ -467,7 +479,7 @@ export function FacturesScreen({
                 </tr>
               </thead>
               <tbody>
-                {pageActuelle.map((f) => {
+                {factures.map((f) => {
                   const nomAffiche = f.vendeurUtilisateurId === session.userId ? "Vous" : f.vendeurNom;
                   const enTraitement = chargementAction === f.id;
                   return (
@@ -547,7 +559,7 @@ export function FacturesScreen({
               Précédent
             </button>
             <span style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
-              Page {page} sur {totalPages}
+              Page {page} sur {totalPages} ({totalResultats} facture(s) au total)
             </span>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}

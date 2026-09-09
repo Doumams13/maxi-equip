@@ -136,8 +136,23 @@ const maxiEquipApi = {
   enregistrerVente: (input: VenteInput): Promise<StockOperationResult & { factureId?: string; numero?: string; total?: number }> =>
     ipcRenderer.invoke("ventes:create", input),
 
-  listFactures: (): Promise<(Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean })[]> =>
-    ipcRenderer.invoke("factures:list"),
+  listFacturesPagine: (filtres: {
+    recherche: string;
+    statutFiltre: "tous" | "annulee" | "en_attente" | "livree";
+    vendeurUtilisateurId: string | null;
+    colonneTri: "numero" | "date" | "client" | "vendeur" | "montant" | "statut" | null;
+    direction: "asc" | "desc";
+    page: number;
+    tailleParPage: number;
+  }): Promise<{
+    resultats: (Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean })[];
+    totalResultats: number;
+    page: number;
+    totalPages: number;
+    tailleParPage: number;
+  }> => ipcRenderer.invoke("factures:listPagine", filtres),
+  listVendeursFiltrables: (): Promise<{ id: string; nom: string }[]> => ipcRenderer.invoke("factures:listVendeursFiltrables"),
+  trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
   genererFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererPdf", factureId),
@@ -198,7 +213,24 @@ const maxiEquipApi = {
     }[];
   } | null> => ipcRenderer.invoke("factures:donneesPourModification", factureId),
   listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
-  listHistoriqueEnrichi: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("historique:listEnrichi"),
+  listHistoriqueEnrichiPagine: (filtres: {
+    recherche: string;
+    typeFiltre: "tous" | "vente" | "annulation" | "entree" | "transfert";
+    periode: "tout" | "jour" | "semaine" | "mois" | "personnalise";
+    dateDebut: string;
+    dateFin: string;
+    colonneTri: "date" | "type" | "montant" | null;
+    direction: "asc" | "desc";
+    page: number;
+    tailleParPage: number;
+  }): Promise<{
+    resultats: EvenementHistorique[];
+    totalResultats: number;
+    page: number;
+    totalPages: number;
+    tailleParPage: number;
+    compteurs: Record<string, number>;
+  }> => ipcRenderer.invoke("historique:listEnrichiPagine", filtres),
   listEntreesCompletes: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("stock:listEntrees"),
   listTransfertsComplets: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("stock:listTransferts"),
 

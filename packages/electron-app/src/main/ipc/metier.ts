@@ -408,6 +408,36 @@ export function registerMetierIpcHandlers(
     return { success: true };
   });
 
+  /**
+   * Indique, pour chaque emplacement fourni, s'il peut être supprimé
+   * DÉFINITIVEMENT (jamais utilisé) — correction "Suppression vs
+   * Archivage" §3 : "l'application doit vérifier automatiquement". Une
+   * seule requête groupée plutôt qu'un appel par emplacement.
+   */
+  ipcMain.handle("emplacements:verifierSuppressibles", (_e, ids: string[]) => {
+    return Object.fromEntries(ids.map((id) => [id, emplacementRepository.peutEtreSupprimeDefinitivement(id)]));
+  });
+
+  /**
+   * Suppression définitive — revérifie TOUJOURS côté serveur avant de
+   * supprimer (défense en profondeur, §6 : la vérification affichée à
+   * l'écran peut être périmée si une opération a eu lieu entre-temps).
+   * Ne supprime jamais un emplacement encore référencé.
+   */
+  ipcMain.handle("emplacements:supprimerDefinitivement", (_e, id: string) => {
+    const session = sessionManager.get();
+    if (!session || session.role !== "administrateur") {
+      return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
+    }
+    try {
+      emplacementRepository.supprimerDefinitivement(id);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
+      return { success: false, message };
+    }
+  });
+
   ipcMain.handle("factures:marquerLivree", (_e, factureId: string) => {
     factureRepository.marquerLivree(factureId);
     return { success: true };

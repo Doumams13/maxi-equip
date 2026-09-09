@@ -44,7 +44,7 @@ export function StockScreen({
   const [showConfirm, setShowConfirm] = useState(false);
   const [entreesCompletes, setEntreesCompletes] = useState<EvenementHistorique[]>([]);
 
-  const depots = emplacements.filter((e) => !e.estPointDeVente);
+  const depots = emplacements.filter((e) => !e.estPointDeVente && e.actif);
 
   async function refresh(currentEmplacementId: string) {
     const stock = await window.maxiEquip.getStockByEmplacement(currentEmplacementId);
@@ -60,7 +60,7 @@ export function StockScreen({
       const [emps, prods] = await Promise.all([window.maxiEquip.listEmplacements(), window.maxiEquip.listProduits()]);
       setEmplacements(emps);
       setProduits(prods);
-      const premierDepot = emps.find((e) => !e.estPointDeVente);
+      const premierDepot = emps.find((e) => !e.estPointDeVente && e.actif);
       if (premierDepot) {
         setEmplacementId(premierDepot.id);
         await refresh(premierDepot.id);

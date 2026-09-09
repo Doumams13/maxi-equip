@@ -49,6 +49,22 @@ export class AuthService {
     this.session.clear();
   }
 
+  /**
+   * Vérifie le mot de passe de l'utilisateur ACTUELLEMENT connecté, sans
+   * jamais modifier la session en cours (contrairement à login(), qui
+   * l'écraserait) — nécessaire pour la double validation par mot de
+   * passe des Paramètres (données sensibles). Réutilise la même
+   * fonction domaine que la connexion, jamais une seconde logique de
+   * vérification créée séparément.
+   */
+  async verifierMotDePasseActuel(motDePasseEnClair: string): Promise<boolean> {
+    const sessionActuelle = this.session.get();
+    if (!sessionActuelle) return false;
+    const utilisateur = this.repository.findByIdentifiant(sessionActuelle.identifiant);
+    const result = await domainAuth.authenticate(utilisateur, motDePasseEnClair, this.hasher);
+    return result.success;
+  }
+
   getSession(): domainAuth.SessionLocale | null {
     return this.session.get();
   }

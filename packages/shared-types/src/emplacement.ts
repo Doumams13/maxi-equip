@@ -14,4 +14,6 @@ export interface Emplacement extends MetierEntity {
   ville: string;
   /** true uniquement pour le SHOP — seul emplacement pouvant émettre une facture. */
   estPointDeVente: boolean;
+  /** Archivage (jamais une suppression physique) — correction "Points de vente dynamiques" §5/§9. */
+  actif: boolean;
 }

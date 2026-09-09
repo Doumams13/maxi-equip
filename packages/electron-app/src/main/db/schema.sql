@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS emplacements (
   type               TEXT NOT NULL CHECK (type IN ('shop', 'depot')),
   ville              TEXT NOT NULL,
   est_point_de_vente INTEGER NOT NULL CHECK (est_point_de_vente IN (0, 1)),
+  -- Correction "Points de vente dynamiques" : archivage (jamais une
+  -- suppression physique, §5/§9 — les ventes/entrées/transferts/stock
+  -- historiques doivent rester intacts et consultables). 1 = actif par
+  -- défaut, y compris pour SHOP/Akébé/Akanda déjà existants.
+  actif              INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0, 1)),
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL
 );

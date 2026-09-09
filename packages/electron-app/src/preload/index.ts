@@ -97,6 +97,7 @@ const maxiEquipApi = {
   logout: (): Promise<{ ok: boolean }> => ipcRenderer.invoke("auth:logout"),
   getSession: (): Promise<auth.SessionLocale | null> => ipcRenderer.invoke("auth:getSession"),
   getPermissions: (): Promise<auth.PermissionSet | null> => ipcRenderer.invoke("auth:getPermissions"),
+  verifierMotDePasse: (motDePasse: string): Promise<{ valide: boolean }> => ipcRenderer.invoke("auth:verifierMotDePasse", motDePasse),
 
   // --- Métier (Phase 2) ---
   listProduits: (): Promise<ProduitAvecMiniature[]> => ipcRenderer.invoke("catalogue:list"),
@@ -167,6 +168,12 @@ const maxiEquipApi = {
   }): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("parametres:setIdentite", identite),
   renommerEmplacement: (id: string, nouveauNom: string): Promise<{ success: boolean; message?: string }> =>
     ipcRenderer.invoke("emplacements:renommer", id, nouveauNom),
+  creerDepot: (nom: string): Promise<{ success: boolean; id?: string; message?: string }> => ipcRenderer.invoke("emplacements:creerDepot", nom),
+  archiverEmplacement: (
+    id: string
+  ): Promise<{ success: boolean; message?: string; stockRestant?: { motif: string; taille: string; quantite: number }[] }> =>
+    ipcRenderer.invoke("emplacements:archiver", id),
+  reactiverEmplacement: (id: string): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("emplacements:reactiver", id),
   getDonneesPourModification: (
     factureId: string
   ): Promise<{

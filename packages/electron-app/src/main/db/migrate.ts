@@ -14,6 +14,7 @@ export function runMigrations(db: Database.Database): void {
   addEstPrincipaleColumnIfMissing(db);
   fixReferenceUniqueConstraint(db);
   addLargeurHauteurColumnsIfMissing(db);
+  addActifColumnToEmplacementsIfMissing(db);
   addUtilisateurIdToMouvementsIfMissing(db);
   migrateFacturesPourAnnulationEtLivraison(db);
   seedParametresEntrepriseSiAbsent(db);
@@ -182,6 +183,19 @@ function addLargeurHauteurColumnsIfMissing(db: Database.Database): void {
   }
   if (!columns.some((c) => c.name === "hauteur")) {
     db.exec("ALTER TABLE produits ADD COLUMN hauteur REAL");
+  }
+}
+
+/**
+ * Correction "Points de vente dynamiques" : ajoute la colonne `actif`
+ * sur une base créée avant cette évolution. Valeur par défaut 1 (actif)
+ * pour tous les emplacements déjà existants (SHOP, Akébé, Akanda) —
+ * aucun archivage rétroactif involontaire.
+ */
+function addActifColumnToEmplacementsIfMissing(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(emplacements)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "actif")) {
+    db.exec("ALTER TABLE emplacements ADD COLUMN actif INTEGER NOT NULL DEFAULT 1");
   }
 }
 

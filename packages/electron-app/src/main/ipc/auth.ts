@@ -30,4 +30,16 @@ export function registerAuthIpcHandlers(authService: AuthService): void {
   ipcMain.handle("auth:getPermissions", () => {
     return authService.getPermissions();
   });
+
+  /**
+   * Double validation par mot de passe — Paramètres (données sensibles).
+   * Réutilise exactement la même vérification que la connexion, sans
+   * jamais modifier la session en cours (voir authService.
+   * verifierMotDePasseActuel). Le mot de passe transite en clair
+   * uniquement le temps de cet appel, jamais journalisé ni stocké.
+   */
+  ipcMain.handle("auth:verifierMotDePasse", async (_event, motDePasse: string) => {
+    const valide = await authService.verifierMotDePasseActuel(motDePasse);
+    return { valide };
+  });
 }

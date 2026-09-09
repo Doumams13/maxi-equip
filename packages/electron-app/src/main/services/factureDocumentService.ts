@@ -3,6 +3,7 @@ import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
 import type { Facture } from "@maxi-equip/shared-types";
+import type { IdentiteEntreprise } from "../repositories/parametresRepository.js";
 
 /**
  * Génération du document PDF de la facture MAXI EQUIP.
@@ -78,7 +79,7 @@ function chargerImage(doc: PDFKit.PDFDocument, chemin: string, x: number, y: num
 
 export interface FactureDocumentInput {
   facture: Facture;
-  nomMagasin: string;
+  identite: IdentiteEntreprise;
   vendeurNomAffiche: string;
 }
 
@@ -107,7 +108,7 @@ export async function genererFacturePdf(input: FactureDocumentInput): Promise<st
   });
 }
 
-function dessinerFacture(doc: PDFKit.PDFDocument, { facture, nomMagasin, vendeurNomAffiche }: FactureDocumentInput): void {
+function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche }: FactureDocumentInput): void {
   // --- Filigrane (derrière tout le reste, tel qu'extrait du PDF officiel) ---
   // Plus de try/catch silencieux ici : une image manquante doit être
   // visible dans les journaux, jamais masquée (§12 de la correction —
@@ -127,17 +128,25 @@ function dessinerFacture(doc: PDFKit.PDFDocument, { facture, nomMagasin, vendeur
   // client, qui affiche simplement "Payée".
   doc.font("Helvetica-Oblique").fontSize(8).text("Statut : Payée", 380, 118.4, { width: MARGE_DROITE - 380, align: "right" });
 
-  // --- Bloc informations légales MAXI EQUIP (gauche) ---
+  // --- Bloc informations légales (gauche) ---
+  // Correction "Paramètres" : les numéros de téléphone, l'adresse et le
+  // quartier viennent désormais de la configuration centralisée — plus
+  // aucune de ces trois informations codée en dur. Le reste (raison
+  // sociale, Capital Social, RCCM, NIF, BP, N° de Compte Bancaire) reste
+  // fixe, à l'identique du modèle officiel — ce ne sont pas des
+  // informations modifiables par cette correction (décision explicite).
   doc.font("Helvetica").fontSize(7.6).fillColor(NOIR);
+  const telephonesAffiches = identite.telephones.length > 0 ? identite.telephones.join(" - ") : "—";
   const lignesLegales = [
     "Quincaillerie et Vente de Matériaux de Construction :",
     "Import et Export des Marchandise de Construction",
     "SARLU au Capital Social : 1 000 000 FCFA",
     "N° RCCM : GA-LBV-01-2025-B13-00187",
     "N° NIF .: 202601002934 B",
-    "BP .: 22103 - Tél .: 066 33 87 30 - 077 42 61 87",
-    "077 00 54 11 / N° de Compte Bancaire : 90000489234-90",
-    "Quartier : Beaulieu (face à BATI-PLUS / Akanda - Gabon",
+    `BP .: 22103 - Tél .: ${telephonesAffiches}`,
+    "N° de Compte Bancaire : 90000489234-90",
+    `Adresse : ${identite.adresse || "—"}`,
+    `Quartier : ${identite.quartier || "—"}`,
   ];
   let y = 132.6;
   for (const ligne of lignesLegales) {
@@ -162,7 +171,7 @@ function dessinerFacture(doc: PDFKit.PDFDocument, { facture, nomMagasin, vendeur
   doc.text(facture.clientAdresse ?? "—", 55.2, 304.0);
 
   doc.font("Helvetica").fontSize(9.5).fillColor(NOIR);
-  doc.text(`Magasin : ${nomMagasin}`, 314.7, 279.3);
+  doc.text(`Magasin : ${identite.nom}`, 314.7, 279.3);
   doc.text(`Nombre d'articles : ${facture.lignes.length}`, 314.7, 291.9);
   doc.text(`Mode de règlement : ${facture.modeReglement ?? "—"}`, 314.7, 304.0);
   doc.text(`Vendeur : ${vendeurNomAffiche}`, 314.7, 316.1);

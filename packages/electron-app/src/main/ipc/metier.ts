@@ -6,7 +6,7 @@ import { EmplacementRepository } from "../repositories/emplacementRepository.js"
 import { StockRepository } from "../repositories/stockRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
 import { FactureRepository } from "../repositories/factureRepository.js";
-import { ParametresRepository } from "../repositories/parametresRepository.js";
+import { ParametresRepository, type IdentiteEntreprise } from "../repositories/parametresRepository.js";
 import { StockService } from "../services/stockService.js";
 import { VenteService, VenteValidationError, type VenteInput } from "../services/venteService.js";
 import { ImageService } from "../services/imageService.js";
@@ -189,8 +189,11 @@ export function registerMetierIpcHandlers(
         facture,
         // Correction "SHOP sur la facture" : le nom affiché vient
         // TOUJOURS de la configuration centralisée, jamais du nom
-        // interne de l'emplacement point-de-vente.
-        nomMagasin: parametresRepository.getNomMagasin(),
+        // interne de l'emplacement point-de-vente. Correction
+        // "Paramètres" : idem pour les numéros de téléphone, l'adresse
+        // et le quartier — plus aucune de ces informations n'est codée
+        // en dur dans le générateur de document.
+        identite: parametresRepository.getIdentite(),
         vendeurNomAffiche,
       });
       return { success: true, chemin, nomSuggere: `${facture.numero}.pdf` };
@@ -307,6 +310,43 @@ export function registerMetierIpcHandlers(
     }
     try {
       parametresRepository.setNomMagasin(nom);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
+      return { success: false, message };
+    }
+  });
+
+  /** Identité complète (nom, adresse, quartier, téléphones) — écran Paramètres. Lecture ouverte, écriture Administrateur uniquement. */
+  ipcMain.handle("parametres:getIdentite", () => parametresRepository.getIdentite());
+
+  ipcMain.handle("parametres:setIdentite", (_e, identite: IdentiteEntreprise) => {
+    const session = sessionManager.get();
+    if (!session || session.role !== "administrateur") {
+      return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
+    }
+    try {
+      parametresRepository.setIdentite(identite);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
+      return { success: false, message };
+    }
+  });
+
+  /**
+   * Renommage d'un emplacement — correction "Paramètres" (points de
+   * vente). Volontairement pas de création/suppression d'emplacement
+   * (limite explicite) : uniquement modifier le nom d'un emplacement
+   * déjà existant, Administrateur uniquement.
+   */
+  ipcMain.handle("emplacements:renommer", (_e, id: string, nouveauNom: string) => {
+    const session = sessionManager.get();
+    if (!session || session.role !== "administrateur") {
+      return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
+    }
+    try {
+      emplacementRepository.renommer(id, nouveauNom);
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";

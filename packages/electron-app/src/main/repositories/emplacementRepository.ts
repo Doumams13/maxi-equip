@@ -50,6 +50,22 @@ export class EmplacementRepository {
       .run(id, input.nom, input.type, input.ville, input.estPointDeVente ? 1 : 0, now, now);
     return id;
   }
+
+  /**
+   * Renomme un emplacement existant — correction "Paramètres" (points de
+   * vente / emplacements) : uniquement renommer les deux dépôts déjà
+   * existants (Akébé, Akanda), jamais en créer ou en supprimer (limite
+   * explicite du prompt). Toutes les zones de l'application lisent déjà
+   * `emplacement.nom` directement depuis cette table — aucune autre
+   * modification n'est nécessaire pour que le nouveau nom apparaisse
+   * partout (Stock, Ventes, Transferts, Historique, Tableau de bord,
+   * documents).
+   */
+  renommer(id: string, nouveauNom: string): void {
+    const valeur = nouveauNom.trim();
+    if (!valeur) throw new Error("Le nom de l'emplacement ne peut pas être vide.");
+    this.db.prepare("UPDATE emplacements SET nom = ?, updated_at = ? WHERE id = ?").run(valeur, new Date().toISOString(), id);
+  }
 }
 
 /**

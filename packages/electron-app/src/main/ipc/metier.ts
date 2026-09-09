@@ -204,13 +204,14 @@ export function registerMetierIpcHandlers(
     }
   });
 
-  /** Même principe que factures:genererPdf, pour le document interne d'approvisionnement (§4 de la correction). */
+  /** Même principe que factures:genererPdf, pour le document interne d'approvisionnement (§4 de la correction). Reprend désormais la même identité visuelle que la facture (facture complète + vendeur nécessaires, comme pour la facture elle-même). */
   ipcMain.handle("factures:genererDocumentInternePdf", async (_e, factureId: string) => {
-    const facture = factureRepository.findById(factureId);
+    const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
     try {
       const lignes = factureRepository.getDocumentInterne(factureId);
-      const chemin = await genererDocumentInternePdf(facture.numero, lignes, parametresRepository.getNomMagasin());
+      const vendeurNomAffiche = facture.vendeurNomManuel ?? facture.vendeurNom ?? "—";
+      const chemin = await genererDocumentInternePdf({ facture, identite: parametresRepository.getIdentite(), vendeurNomAffiche, lignes });
       return { success: true, chemin, nomSuggere: `${facture.numero}-document-interne.pdf` };
     } catch (err) {
       // eslint-disable-next-line no-console

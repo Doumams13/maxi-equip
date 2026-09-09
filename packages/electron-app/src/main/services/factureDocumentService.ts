@@ -21,15 +21,15 @@ import type { IdentiteEntreprise } from "../repositories/parametresRepository.js
  * jamais recréées.
  */
 
-const PAGE_WIDTH = 595.32;
-const PAGE_HEIGHT = 841.92;
-const MARGE_GAUCHE = 45.5;
-const MARGE_DROITE = 576;
+export const PAGE_WIDTH = 595.32;
+export const PAGE_HEIGHT = 841.92;
+export const MARGE_GAUCHE = 45.5;
+export const MARGE_DROITE = 576;
 
-const VERT = "#6ca545";
-const GRIS_LABEL = "#8a8574";
-const FOND_BOITE = "#f3f2ee";
-const NOIR = "#1a1a1a";
+export const VERT = "#6ca545";
+export const GRIS_LABEL = "#8a8574";
+export const FOND_BOITE = "#f3f2ee";
+export const NOIR = "#1a1a1a";
 
 function assetPath(nom: string): string {
   // Empaqueté tel quel par electron-vite (voir electron.vite.config.ts,
@@ -51,7 +51,7 @@ function assetPath(nom: string): string {
  * ("9 /600 FCFA" au lieu de "9 600 FCFA"). Corrigé en formatant
  * manuellement avec une espace normale.
  */
-function formaterMontant(n: number): string {
+export function formaterMontant(n: number): string {
   return Math.round(n)
     .toString()
     .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
@@ -84,6 +84,76 @@ export interface FactureDocumentInput {
 }
 
 /**
+ * En-tête complet (filigrane, logo, titre, référence/date, bloc
+ * d'informations légales) — extrait de dessinerFacture() pour être
+ * réutilisé tel quel par le document interne (correction "Refonte du
+ * document interne" : "reprendre exactement" l'identité visuelle de la
+ * facture). Le contenu du titre et de la ligne de référence sont
+ * paramétrables ; tout le reste (positions, polices, couleurs, bloc
+ * légal) est strictement identique, jamais réinventé.
+ */
+export function dessinerEnTeteEtIdentite(
+  doc: PDFKit.PDFDocument,
+  identite: IdentiteEntreprise,
+  options: { titre: string; ligneReference: string; dateAffichee: string; mentionStatut?: string }
+): void {
+  // --- Filigrane (derrière tout le reste, tel qu'extrait du PDF officiel) ---
+  chargerImage(doc, assetPath("facture-filigrane.png"), 79.2, 293.9, { width: 465, height: 321 });
+
+  // --- Logo couleur (haut gauche) — identique quel que soit le document ---
+  chargerImage(doc, assetPath("facture-logo.jpg"), MARGE_GAUCHE, 56.5, { width: 240.1, height: 62.8 });
+
+  // --- Titre + référence + date + statut (haut droite) ---
+  doc.font("Helvetica-Bold").fontSize(20).fillColor(VERT).text(options.titre, 340, 60.4, { width: MARGE_DROITE - 340, align: "right" });
+  doc.font("Helvetica").fontSize(9).fillColor(NOIR).text(options.ligneReference, 340, 90.7, { width: MARGE_DROITE - 340, align: "right" });
+  doc.text(`Date : ${options.dateAffichee}`, 340, 101.8, { width: MARGE_DROITE - 340, align: "right" });
+  if (options.mentionStatut) {
+    doc.font("Helvetica-Oblique").fontSize(8).text(options.mentionStatut, 340, 118.4, { width: MARGE_DROITE - 340, align: "right" });
+  }
+
+  // --- Bloc informations légales (gauche) — strictement identique entre
+  // facture et document interne : les numéros de téléphone, l'adresse et
+  // le quartier viennent de la configuration centralisée, le reste
+  // (raison sociale, Capital Social, RCCM, NIF, BP, N° de Compte
+  // Bancaire) reste fixe, à l'identique du modèle officiel.
+  doc.font("Helvetica").fontSize(7.6).fillColor(NOIR);
+  const telephonesAffiches = identite.telephones.length > 0 ? identite.telephones.join(" - ") : "—";
+  const lignesLegales = [
+    "Quincaillerie et Vente de Matériaux de Construction :",
+    "Import et Export des Marchandise de Construction",
+    "SARLU au Capital Social : 1 000 000 FCFA",
+    "N° RCCM : GA-LBV-01-2025-B13-00187",
+    "N° NIF .: 202601002934 B",
+    `BP .: 22103 - Tél .: ${telephonesAffiches}`,
+    "N° de Compte Bancaire : 90000489234-90",
+    `Adresse : ${identite.adresse || "—"}`,
+    `Quartier : ${identite.quartier || "—"}`,
+  ];
+  let y = 132.6;
+  for (const ligne of lignesLegales) {
+    doc.text(ligne, MARGE_GAUCHE, y);
+    y += 11.15;
+  }
+
+  // --- Ligne verte de séparation ---
+  doc.moveTo(43.6, 245).lineTo(551.9, 245).lineWidth(1.2).strokeColor(VERT).stroke();
+}
+
+/**
+ * Pied de page — strictement identique entre facture et document
+ * interne (texte fixe du modèle officiel, jamais modifié).
+ */
+export function dessinerPiedDePage(doc: PDFKit.PDFDocument): void {
+  doc.moveTo(43.6, 748.4).lineTo(551.9, 748.4).lineWidth(0.6).strokeColor("#999999").stroke();
+  doc.font("Helvetica-BoldOblique").fontSize(7.6).fillColor(NOIR);
+  doc.text("N°CNSS : 015-4109172-M - N°CNAMGS : 022-500-043-231", MARGE_GAUCHE, 774.3, { width: MARGE_DROITE - MARGE_GAUCHE, align: "center" });
+  doc.text("Merci pour votre confiance. Marchandise vendue non reprise et non échangée sauf accord préalable.", MARGE_GAUCHE, 785.5, {
+    width: MARGE_DROITE - MARGE_GAUCHE,
+    align: "center",
+  });
+}
+
+/**
  * Génère le PDF de la facture et l'enregistre sur disque. Retourne le
  * chemin du fichier — jamais recréé si déjà généré pour la même facture
  * avec les mêmes données (le nom de fichier est déterministe, basé sur
@@ -109,53 +179,11 @@ export async function genererFacturePdf(input: FactureDocumentInput): Promise<st
 }
 
 function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche }: FactureDocumentInput): void {
-  // --- Filigrane (derrière tout le reste, tel qu'extrait du PDF officiel) ---
-  // Plus de try/catch silencieux ici : une image manquante doit être
-  // visible dans les journaux, jamais masquée (§12 de la correction —
-  // c'est exactement ce silence qui avait caché le bug de chemin).
-  chargerImage(doc, assetPath("facture-filigrane.png"), 79.2, 293.9, { width: 465, height: 321 });
-
-  // --- Logo couleur (haut gauche) ---
-  chargerImage(doc, assetPath("facture-logo.jpg"), MARGE_GAUCHE, 56.5, { width: 240.1, height: 62.8 });
-
-  // --- Titre FACTURE + numéro + date + statut (haut droite) ---
-  doc.font("Helvetica-Bold").fontSize(20).fillColor(VERT).text("FACTURE", 400, 60.4, { width: MARGE_DROITE - 400, align: "right" });
-  doc.font("Helvetica").fontSize(9).fillColor(NOIR).text(facture.numero, 400, 90.7, { width: MARGE_DROITE - 400, align: "right" });
   const dateAffichee = new Date(facture.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
-  doc.text(`Date : ${dateAffichee}`, 400, 101.8, { width: MARGE_DROITE - 400, align: "right" });
   // Statut de livraison = uniquement une information interne à
   // l'application (écran Factures) — jamais sur le document remis au
   // client, qui affiche simplement "Payée".
-  doc.font("Helvetica-Oblique").fontSize(8).text("Statut : Payée", 380, 118.4, { width: MARGE_DROITE - 380, align: "right" });
-
-  // --- Bloc informations légales (gauche) ---
-  // Correction "Paramètres" : les numéros de téléphone, l'adresse et le
-  // quartier viennent désormais de la configuration centralisée — plus
-  // aucune de ces trois informations codée en dur. Le reste (raison
-  // sociale, Capital Social, RCCM, NIF, BP, N° de Compte Bancaire) reste
-  // fixe, à l'identique du modèle officiel — ce ne sont pas des
-  // informations modifiables par cette correction (décision explicite).
-  doc.font("Helvetica").fontSize(7.6).fillColor(NOIR);
-  const telephonesAffiches = identite.telephones.length > 0 ? identite.telephones.join(" - ") : "—";
-  const lignesLegales = [
-    "Quincaillerie et Vente de Matériaux de Construction :",
-    "Import et Export des Marchandise de Construction",
-    "SARLU au Capital Social : 1 000 000 FCFA",
-    "N° RCCM : GA-LBV-01-2025-B13-00187",
-    "N° NIF .: 202601002934 B",
-    `BP .: 22103 - Tél .: ${telephonesAffiches}`,
-    "N° de Compte Bancaire : 90000489234-90",
-    `Adresse : ${identite.adresse || "—"}`,
-    `Quartier : ${identite.quartier || "—"}`,
-  ];
-  let y = 132.6;
-  for (const ligne of lignesLegales) {
-    doc.text(ligne, MARGE_GAUCHE, y);
-    y += 11.15;
-  }
-
-  // --- Ligne verte de séparation ---
-  doc.moveTo(43.6, 245).lineTo(551.9, 245).lineWidth(1.2).strokeColor(VERT).stroke();
+  dessinerEnTeteEtIdentite(doc, identite, { titre: "FACTURE", ligneReference: facture.numero, dateAffichee, mentionStatut: "Statut : Payée" });
 
   // --- Deux boîtes : FACTURÉ À / DÉTAILS DE VENTE ---
   doc.rect(45.2, 255.5, 259.4, 78.7).fill(FOND_BOITE);
@@ -226,12 +254,5 @@ function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, vendeurNo
   doc.text("Total à payer", 380, ligneY + 20);
   doc.text(`${formaterMontant(facture.total)} FCFA`, 480, ligneY + 20, { width: MARGE_DROITE - 480, align: "right" });
 
-  // --- Pied de page (texte fixe du modèle) ---
-  doc.moveTo(43.6, 748.4).lineTo(551.9, 748.4).lineWidth(0.6).strokeColor("#999999").stroke();
-  doc.font("Helvetica-BoldOblique").fontSize(7.6).fillColor(NOIR);
-  doc.text("N°CNSS : 015-4109172-M - N°CNAMGS : 022-500-043-231", MARGE_GAUCHE, 774.3, { width: MARGE_DROITE - MARGE_GAUCHE, align: "center" });
-  doc.text("Merci pour votre confiance. Marchandise vendue non reprise et non échangée sauf accord préalable.", MARGE_GAUCHE, 785.5, {
-    width: MARGE_DROITE - MARGE_GAUCHE,
-    align: "center",
-  });
+  dessinerPiedDePage(doc);
 }

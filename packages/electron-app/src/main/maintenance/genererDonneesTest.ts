@@ -6,6 +6,7 @@ import { FactureRepository } from "../repositories/factureRepository.js";
 import { EmplacementRepository, bootstrapDefaultEmplacements } from "../repositories/emplacementRepository.js";
 import { StockService } from "../services/stockService.js";
 import { VenteService } from "../services/venteService.js";
+import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 
 /**
  * Génération de données de test réalistes — correction "Tests réels
@@ -87,8 +88,9 @@ export function executerGenerationDonneesTest(db: Database.Database): ResultatGe
     throw new Error("Aucun utilisateur actif trouvé — impossible d'attribuer les ventes/mouvements de test à un vendeur réel.");
   }
 
-  const stockService = new StockService(stockRepository, mouvementRepository);
-  const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository);
+  const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
+  const stockService = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository);
+  const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository);
 
   const produitIds = PRODUITS_TEST.map((p) => produitRepository.create(p));
 

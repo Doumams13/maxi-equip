@@ -4,6 +4,7 @@ import { StockRepository } from "../repositories/stockRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
 import { FactureRepository } from "../repositories/factureRepository.js";
 import { ProduitRepository } from "../repositories/produitRepository.js";
+import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 
 export class VenteValidationError extends Error {
   constructor(message: string) {
@@ -82,7 +83,8 @@ export class VenteService {
     private readonly produitRepository: ProduitRepository,
     private readonly stockRepository: StockRepository,
     private readonly mouvementRepository: MouvementRepository,
-    private readonly factureRepository: FactureRepository
+    private readonly factureRepository: FactureRepository,
+    private readonly boiteEnvoiRepository: BoiteEnvoiRepository
   ) {}
 
   enregistrerVente(input: VenteInput): VenteResult {
@@ -214,8 +216,9 @@ export class VenteService {
 
       this.factureRepository.createReleveInterne(factureId, lignesReleveInterne);
 
+      const mouvementIds: string[] = [];
       for (const m of mouvementsAEnregistrer) {
-        this.mouvementRepository.create({
+        const mouvementId = this.mouvementRepository.create({
           type: "sortie",
           produitId: m.produitId,
           emplacementId: m.emplacementId,
@@ -227,7 +230,28 @@ export class VenteService {
           utilisateurId: input.vendeurUtilisateurId,
           note: m.note,
         });
+        mouvementIds.push(mouvementId);
       }
+
+      // Boîte d'envoi (Phase 3.3) : ajoutée DANS la même transaction que
+      // la vente elle-même — jamais un ajout séparé qui pourrait laisser
+      // une facture enregistrée sans son entrée d'envoi (ou l'inverse) si
+      // une étape échouait entre les deux (§6 de la correction). Payload
+      // volontairement limité aux champs métier utiles à une future
+      // synchronisation — jamais un instantané de toute la base (§3).
+      this.boiteEnvoiRepository.creer("vente", factureId, {
+        factureId,
+        numero,
+        date: now,
+        clientNom: input.clientNom,
+        clientTelephone: input.clientTelephone,
+        clientAdresse: input.clientAdresse,
+        vendeurUtilisateurId: input.vendeurUtilisateurId,
+        modeReglement: input.modeReglement,
+        total,
+        lignes: lignesFacture,
+        mouvementIds,
+      });
 
       return { factureId, numero, total };
     });
@@ -284,6 +308,18 @@ export class VenteService {
       }
 
       this.factureRepository.annuler(factureId, motif.trim(), annuleePar);
+
+      // Boîte d'envoi (Phase 3.3) : l'annulation est une opération
+      // métier critique à part entière (§5 de la correction), avec son
+      // propre entity_id — jamais fusionnée avec l'entrée "vente"
+      // d'origine, qui reste un événement distinct et déjà envoyé.
+      this.boiteEnvoiRepository.creer("annulation", factureId, {
+        factureId,
+        numero: facture.numero,
+        motifAnnulation: motif.trim(),
+        annuleeLe: now,
+        annuleePar,
+      });
     });
 
     executer();

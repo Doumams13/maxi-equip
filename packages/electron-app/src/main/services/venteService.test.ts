@@ -29,12 +29,15 @@ function creerServiceAvecFauxDepots() {
     create: () => "facture-1",
     createReleveInterne: () => {},
   };
+  const boiteEnvoiRepository = {
+    creer: () => "be-1",
+  };
   const fauxDb = {
     transaction: (fn: () => unknown) => () => fn(),
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new VenteService(fauxDb as any, produitRepository as any, stockRepository as any, mouvementRepository as any, factureRepository as any);
+  const service = new VenteService(fauxDb as any, produitRepository as any, stockRepository as any, mouvementRepository as any, factureRepository as any, boiteEnvoiRepository as any);
   return { service, mouvementsCrees, applyDelta: stockRepository.applyDelta };
 }
 
@@ -155,8 +158,9 @@ describe("VenteService — annulation d'une facture (restauration du stock)", ()
       annuler: vi.fn(),
     };
     const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
+    const boiteEnvoiRepository = { creer: () => "be-1" };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = new VenteService(fauxDb as any, produitRepository as any, stockRepository as any, mouvementRepository as any, factureRepository as any);
+    const service = new VenteService(fauxDb as any, produitRepository as any, stockRepository as any, mouvementRepository as any, factureRepository as any, boiteEnvoiRepository as any);
 
     service.annulerVente("f1", "Erreur de saisie du client", "user-admin");
 
@@ -171,7 +175,7 @@ describe("VenteService — annulation d'une facture (restauration du stock)", ()
     const factureRepository = { findById: () => ({ id: "f1", annuleeLe: null }), annuler: vi.fn() };
     const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any);
+    const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any, {} as any);
     expect(() => service.annulerVente("f1", "", "user-admin")).toThrow();
   });
 
@@ -179,7 +183,7 @@ describe("VenteService — annulation d'une facture (restauration du stock)", ()
     const factureRepository = { findById: () => ({ id: "f1", annuleeLe: "2026-01-01T00:00:00Z" }), annuler: vi.fn() };
     const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any);
+    const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any, {} as any);
     expect(() => service.annulerVente("f1", "Motif", "user-admin")).toThrow();
   });
 });

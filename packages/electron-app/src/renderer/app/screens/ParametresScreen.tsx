@@ -41,6 +41,8 @@ export function ParametresScreen() {
   const [adresse, setAdresse] = useState("");
   const [quartier, setQuartier] = useState("");
   const [telephones, setTelephones] = useState<string[]>([""]);
+  const [nomAdministrateur, setNomAdministrateur] = useState("");
+  const [nomGerant, setNomGerant] = useState("");
 
   const [depots, setDepots] = useState<Emplacement[]>([]);
   const [suppressibles, setSuppressibles] = useState<Record<string, boolean>>({});
@@ -60,6 +62,8 @@ export function ParametresScreen() {
     setAdresse(identite.adresse);
     setQuartier(identite.quartier);
     setTelephones(identite.telephones.length > 0 ? identite.telephones : [""]);
+    setNomAdministrateur(identite.nomAdministrateur ?? "");
+    setNomGerant(identite.nomGerant ?? "");
     const seulsDepots = emplacements.filter((e) => !e.estPointDeVente);
     setDepots(seulsDepots);
     // Correction "Suppression vs Archivage" §3 : vérifié automatiquement
@@ -95,6 +99,8 @@ export function ParametresScreen() {
         adresse,
         quartier,
         telephones: telephones.map((t) => t.trim()).filter((t) => t.length > 0),
+        nomAdministrateur: nomAdministrateur.trim() || null,
+        nomGerant: nomGerant.trim() || null,
       });
       if (result.success) {
         showSuccess("Paramètres enregistrés avec succès", "Les nouvelles valeurs sont utilisées immédiatement dans toute l'application.");
@@ -322,6 +328,31 @@ export function ParametresScreen() {
         <div>
           <label style={labelStyle}>Quartier / Localisation</label>
           <input style={inputStyle} value={quartier} onChange={(e) => setQuartier(e.target.value)} disabled={chargement} placeholder="Ex. Akanda - Gabon" />
+        </div>
+
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
+            Responsables
+          </div>
+          <div style={{ display: "flex", gap: 12, marginBottom: 4 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Nom de l'Administrateur</label>
+              <input
+                style={inputStyle}
+                value={nomAdministrateur}
+                onChange={(e) => setNomAdministrateur(e.target.value)}
+                disabled={chargement}
+                placeholder="Ex. Mamadou Ndiaye"
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Nom du Gérant</label>
+              <input style={inputStyle} value={nomGerant} onChange={(e) => setNomGerant(e.target.value)} disabled={chargement} placeholder="Ex. Jean Dupont" />
+            </div>
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: 11.5, color: defaultTokens.colors.textFaint }}>
+            Facultatif — ces noms apparaissent sur les factures et documents internes générés lorsqu'ils sont renseignés.
+          </p>
         </div>
 
         <p style={{ margin: "16px 0 16px", fontSize: 11.5, color: defaultTokens.colors.textFaint }}>

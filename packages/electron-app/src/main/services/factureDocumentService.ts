@@ -143,7 +143,14 @@ export function dessinerEnTeteEtIdentite(
  * Pied de page — strictement identique entre facture et document
  * interne (texte fixe du modèle officiel, jamais modifié).
  */
-export function dessinerPiedDePage(doc: PDFKit.PDFDocument): void {
+/**
+ * Pied de page — strictement identique entre facture et document
+ * interne (texte fixe du modèle officiel, jamais modifié), avec l'ajout
+ * conditionnel des noms de responsables (correction "Paramètres —
+ * Administrateur/Gérant configurables" §4) : n'affiche que ce qui est
+ * réellement configuré, jamais "undefined"/"null" ni une ligne vide (§8).
+ */
+export function dessinerPiedDePage(doc: PDFKit.PDFDocument, identite?: IdentiteEntreprise): void {
   doc.moveTo(43.6, 748.4).lineTo(551.9, 748.4).lineWidth(0.6).strokeColor("#999999").stroke();
   doc.font("Helvetica-BoldOblique").fontSize(7.6).fillColor(NOIR);
   doc.text("N°CNSS : 015-4109172-M - N°CNAMGS : 022-500-043-231", MARGE_GAUCHE, 774.3, { width: MARGE_DROITE - MARGE_GAUCHE, align: "center" });
@@ -151,6 +158,15 @@ export function dessinerPiedDePage(doc: PDFKit.PDFDocument): void {
     width: MARGE_DROITE - MARGE_GAUCHE,
     align: "center",
   });
+
+  const responsables = [
+    identite?.nomAdministrateur ? `Administrateur : ${identite.nomAdministrateur}` : null,
+    identite?.nomGerant ? `Gérant : ${identite.nomGerant}` : null,
+  ].filter((s): s is string => s !== null);
+  if (responsables.length > 0) {
+    doc.font("Helvetica").fontSize(7.2).fillColor(GRIS_LABEL);
+    doc.text(responsables.join("   •   "), MARGE_GAUCHE, 797.2, { width: MARGE_DROITE - MARGE_GAUCHE, align: "center" });
+  }
 }
 
 /**
@@ -254,5 +270,5 @@ function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, vendeurNo
   doc.text("Total à payer", 380, ligneY + 20);
   doc.text(`${formaterMontant(facture.total)} FCFA`, 480, ligneY + 20, { width: MARGE_DROITE - 480, align: "right" });
 
-  dessinerPiedDePage(doc);
+  dessinerPiedDePage(doc, identite);
 }

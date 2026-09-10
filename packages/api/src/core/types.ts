@@ -19,6 +19,13 @@ export interface ApiRequest {
   headers: Record<string, string | undefined>;
   body: unknown;
   query: Record<string, string | undefined>;
+  /**
+   * Renseigné UNIQUEMENT après une validation JWT réelle réussie
+   * (Partie 4, point 9 de la correction "Sécurisation de l'API") —
+   * jamais présent pour une route publique, jamais renseigné à partir
+   * d'une simple présence de jeton non vérifiée.
+   */
+  auth?: { sub: string; role?: string };
 }
 
 export interface ApiResponse {

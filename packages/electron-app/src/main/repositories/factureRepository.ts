@@ -50,7 +50,39 @@ function rowToFacture(row: FactureRow, lignes: LigneFacture[]): Facture {
 export class FactureRepository {
   constructor(private readonly db: Database.Database) {}
 
-  /** Prochain numéro séquentiel FAC-AAAA-XXXX (Phase 0 §6 : numérotation des factures). */
+  /**
+   * Prochain numéro séquentiel FAC-AAAA-XXXX (Phase 0 §6 : numérotation des factures).
+   *
+   * SÉCURITÉ VERSION ACTUELLE (audit "Phase 3 — Numérotation des
+   * factures") : cette méthode est TOUJOURS appelée à l'intérieur de la
+   * même transaction synchrone que l'insertion de la facture elle-même
+   * (voir VenteService.enregistrerVente — aucun `await` entre les deux),
+   * et c'est son seul point d'appel dans tout le projet. Comme
+   * JavaScript est mono-thread et que better-sqlite3 sérialise déjà les
+   * transactions d'écriture au niveau du moteur SQLite, ce calcul et
+   * l'insertion qui suit forment un bloc atomique — y compris si
+   * l'application venait un jour à être lancée deux fois simultanément
+   * (aucun risque de doublon observé, aucune modification nécessaire ici
+   * pour l'installation unique actuelle). Un filet de sécurité
+   * supplémentaire, indépendant de cette méthode, existe déjà au niveau
+   * de la base : `idx_factures_numero_actif` (voir migrate.ts) refuse
+   * tout doublon de `numero` parmi les factures actives, même si cette
+   * garantie applicative venait à être un jour cassée par erreur.
+   *
+   * PRÉPARATION ARCHITECTURALE FUTURE — NON IMPLÉMENTÉE : ce numéro
+   * reste et doit rester un identifiant purement AFFICHÉ (jamais
+   * utilisé pour les relations entre tables, qui reposent exclusivement
+   * sur `id`, un UUID technique). Le jour où plusieurs installations
+   * partageront un serveur central, ce numéro local devra être distingué
+   * de l'UUID technique de synchronisation : la stratégie envisageable
+   * (jamais décidée ni implémentée ici) consisterait soit à n'exposer ce
+   * numéro simple qu'au sein d'une seule installation à la fois, soit à
+   * le faire coexister avec un numéro canonique attribué par le serveur
+   * central après synchronisation — sans jamais changer le format
+   * `FAC-AAAA-XXXX` déjà familier aux utilisateurs. Aucun identifiant
+   * d'appareil ni préfixe technique n'est ajouté par ce commentaire —
+   * c'est une note d'intention, pas du code.
+   */
   nextNumero(): string {
     const year = new Date().getFullYear();
     const prefix = `FAC-${year}-`;

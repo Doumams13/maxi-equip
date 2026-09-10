@@ -6,6 +6,9 @@ export interface IdentiteEntreprise {
   adresse: string;
   quartier: string;
   telephones: string[];
+  /** Correction "Paramètres — Administrateur/Gérant configurables" : `null` = non configuré, jamais une valeur inventée sur les documents. */
+  nomAdministrateur: string | null;
+  nomGerant: string | null;
 }
 
 /**
@@ -51,14 +54,16 @@ export class ParametresRepository {
 
   /** Identité complète — utilisée par l'écran Paramètres ET par la génération des documents (facture). */
   getIdentite(): IdentiteEntreprise {
-    const row = this.db.prepare("SELECT nom, adresse, ville FROM parametres_entreprise WHERE id = 'singleton'").get() as
-      | { nom: string; adresse: string; ville: string }
+    const row = this.db.prepare("SELECT nom, adresse, ville, nom_administrateur, nom_gerant FROM parametres_entreprise WHERE id = 'singleton'").get() as
+      | { nom: string; adresse: string; ville: string; nom_administrateur: string | null; nom_gerant: string | null }
       | undefined;
     return {
       nom: row?.nom ?? "MAXI-EQUIP",
       adresse: row?.adresse ?? "",
       quartier: row?.ville ?? "",
       telephones: this.getTelephones(),
+      nomAdministrateur: row?.nom_administrateur ?? null,
+      nomGerant: row?.nom_gerant ?? null,
     };
   }
 
@@ -68,17 +73,25 @@ export class ParametresRepository {
    * (supprimés puis réinsérés dans l'ordre fourni) : plus simple et tout
    * aussi fiable qu'une comparaison ligne à ligne pour une liste de cette
    * taille, gérée exclusivement depuis cet écran.
+   *
+   * Administrateur/Gérant : aucun des deux n'est obligatoire (§8 de la
+   * correction — "ne pas bloquer inutilement l'utilisation de
+   * l'application"). Une valeur vide est enregistrée comme NULL, jamais
+   * comme une chaîne vide, pour que le rendu des documents distingue
+   * clairement "non configuré" sans ambiguïté.
    */
   setIdentite(identite: IdentiteEntreprise): void {
     const nom = identite.nom.trim();
     if (!nom) throw new Error("Le nom du magasin ne peut pas être vide.");
     const telephonesValides = identite.telephones.map((t) => t.trim()).filter((t) => t.length > 0);
+    const nomAdministrateur = identite.nomAdministrateur?.trim() || null;
+    const nomGerant = identite.nomGerant?.trim() || null;
 
     const executer = this.db.transaction(() => {
       const now = new Date().toISOString();
       this.db
-        .prepare("UPDATE parametres_entreprise SET nom = ?, adresse = ?, ville = ?, updated_at = ? WHERE id = 'singleton'")
-        .run(nom, identite.adresse.trim(), identite.quartier.trim(), now);
+        .prepare("UPDATE parametres_entreprise SET nom = ?, adresse = ?, ville = ?, nom_administrateur = ?, nom_gerant = ?, updated_at = ? WHERE id = 'singleton'")
+        .run(nom, identite.adresse.trim(), identite.quartier.trim(), nomAdministrateur, nomGerant, now);
 
       this.db.prepare("DELETE FROM telephones_entreprise").run();
       const insererTelephone = this.db.prepare("INSERT INTO telephones_entreprise (id, numero, ordre, created_at, updated_at) VALUES (?, ?, ?, ?, ?)");

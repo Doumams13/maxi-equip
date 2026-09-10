@@ -15,6 +15,7 @@ export function runMigrations(db: Database.Database): void {
   fixReferenceUniqueConstraint(db);
   addLargeurHauteurColumnsIfMissing(db);
   addActifColumnToEmplacementsIfMissing(db);
+  addResponsablesColumnsIfMissing(db);
   addUtilisateurIdToMouvementsIfMissing(db);
   migrateFacturesPourAnnulationEtLivraison(db);
   seedParametresEntrepriseSiAbsent(db);
@@ -196,6 +197,22 @@ function addActifColumnToEmplacementsIfMissing(db: Database.Database): void {
   const columns = db.prepare("PRAGMA table_info(emplacements)").all() as { name: string }[];
   if (!columns.some((c) => c.name === "actif")) {
     db.exec("ALTER TABLE emplacements ADD COLUMN actif INTEGER NOT NULL DEFAULT 1");
+  }
+}
+
+/**
+ * Correction "Paramètres — Administrateur/Gérant configurables" : ajoute
+ * les colonnes des noms de responsables sur une base créée avant cette
+ * évolution. NULL par défaut (jamais une valeur inventée) — le rendu des
+ * documents doit déjà gérer l'absence de valeur proprement (§8).
+ */
+function addResponsablesColumnsIfMissing(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(parametres_entreprise)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "nom_administrateur")) {
+    db.exec("ALTER TABLE parametres_entreprise ADD COLUMN nom_administrateur TEXT");
+  }
+  if (!columns.some((c) => c.name === "nom_gerant")) {
+    db.exec("ALTER TABLE parametres_entreprise ADD COLUMN nom_gerant TEXT");
   }
 }
 

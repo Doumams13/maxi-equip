@@ -240,6 +240,13 @@ CREATE TABLE IF NOT EXISTS parametres_entreprise (
   telephone  TEXT NOT NULL,
   email      TEXT NOT NULL,
   whatsapp   TEXT NOT NULL,
+  -- Correction "Paramètres — Administrateur/Gérant configurables" :
+  -- noms des responsables affichés sur les documents (facture, document
+  -- interne) — jamais confondus avec le rôle de connexion "administrateur"
+  -- /"gerant" (permissions), qui reste inchangé. NULL = non configuré,
+  -- jamais une chaîne "undefined" affichée sur un document.
+  nom_administrateur TEXT,
+  nom_gerant         TEXT,
   updated_at TEXT NOT NULL
 );
 

@@ -179,11 +179,17 @@ export function HistoriqueScreen({
   }, [rechercheDebattue, typeFiltre, periode, dateDebut, dateFin, tri, page]);
 
   // Anti-rebond léger sur la recherche (§ Performance de la correction)
-  // — évite une requête base de données à chaque frappe.
+  // — évite une requête base de données à chaque frappe. Même correctif
+  // que FacturesScreen.tsx (bug réel signalé là-bas) appliqué ici par
+  // cohérence/prévention : ne réinitialiser la page que si la recherche
+  // a réellement changé depuis la dernière valeur déjà appliquée —
+  // jamais lors d'une réinitialisation programmatique des filtres.
   useEffect(() => {
     const timer = setTimeout(() => {
-      setRechercheDebattue(recherche);
-      setPage(1);
+      setRechercheDebattue((precedente) => {
+        if (precedente !== recherche) setPage(1);
+        return recherche;
+      });
     }, 300);
     return () => clearTimeout(timer);
   }, [recherche]);

@@ -217,10 +217,25 @@ export function FacturesScreen({
   // données à chaque frappe (§ Performance de la correction) — 300ms est
   // imperceptible pour l'utilisateur, mais évite de solliciter SQLite à
   // chaque caractère tapé.
+  //
+  // BUG RÉEL CORRIGÉ (signalé : clic sur une ancienne facture depuis
+  // l'Historique ne redirigeait ni ne mettait en évidence la bonne
+  // facture) : ce minuteur de 300ms se déclenchait aussi lorsque la
+  // recherche était réinitialisée PROGRAMMATIQUEMENT par la navigation
+  // cliquable (ci-dessous), et retombait sur setPage(1) — écrasant la
+  // bonne page que trouverPageFacture() venait de positionner quelques
+  // millisecondes plus tôt (l'appel IPC résout bien avant les 300ms).
+  // Correction : ne réinitialiser la page que si la recherche a
+  // RÉELLEMENT changé depuis la dernière valeur déjà appliquée — jamais
+  // le cas lors d'une navigation, qui vide `recherche` ET
+  // `rechercheDebattue` de façon synchrone AVANT que ce minuteur ne se
+  // déclenche.
   useEffect(() => {
     const timer = setTimeout(() => {
-      setRechercheDebattue(recherche);
-      setPage(1);
+      setRechercheDebattue((precedente) => {
+        if (precedente !== recherche) setPage(1);
+        return recherche;
+      });
     }, 300);
     return () => clearTimeout(timer);
   }, [recherche]);

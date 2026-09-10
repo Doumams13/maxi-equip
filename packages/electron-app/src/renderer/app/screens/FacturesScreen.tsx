@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, X } from "lucide-react";
 import type { Facture } from "@maxi-equip/shared-types";
 import { useSurbrillanceOperation } from "../highlight.js";
 import { PdfPreviewModal } from "../components/PdfPreviewModal.js";
+import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
 
 type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean };
 
@@ -564,26 +565,8 @@ export function FacturesScreen({
             </table>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, padding: "14px 16px", borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: `1px solid ${defaultTokens.colors.border}`, borderRadius: defaultTokens.radius.sm, padding: "6px 12px", cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.5 : 1, fontSize: 12.5 }}
-            >
-              <ChevronLeft size={14} />
-              Précédent
-            </button>
-            <span style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
-              Page {page} sur {totalPages} ({totalResultats} facture(s) au total)
-            </span>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
-              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: `1px solid ${defaultTokens.colors.border}`, borderRadius: defaultTokens.radius.sm, padding: "6px 12px", cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.5 : 1, fontSize: 12.5 }}
-            >
-              Suivant
-              <ChevronRight size={14} />
-            </button>
+          <div style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+            <PaginationIntelligente page={page} totalPages={totalPages} totalResultats={totalResultats} libelleUnite="facture(s)" onChangerPage={setPage} />
           </div>
           </>
         )}

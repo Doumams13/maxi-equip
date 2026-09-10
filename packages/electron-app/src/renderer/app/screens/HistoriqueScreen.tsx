@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Card, defaultTokens } from "@maxi-equip/design-system";
-import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowLeftRight, ShoppingCart, Ban, Search, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowLeftRight, ShoppingCart, Ban, Search, X } from "lucide-react";
 import type { EvenementHistorique } from "../../../preload/index.js";
 import type { CibleOperation } from "../AppRoot.js";
 import { useSurbrillanceOperation } from "../highlight.js";
+import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
 
 type Periode = "jour" | "semaine" | "mois" | "personnalise" | "tout";
 type ColonneTriable = "date" | "type" | "montant";
@@ -421,48 +422,8 @@ export function HistoriqueScreen({
               </table>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, padding: "14px 16px", borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  background: "none",
-                  border: `1px solid ${defaultTokens.colors.border}`,
-                  borderRadius: defaultTokens.radius.sm,
-                  padding: "6px 12px",
-                  cursor: page <= 1 ? "not-allowed" : "pointer",
-                  opacity: page <= 1 ? 0.5 : 1,
-                  fontSize: 12.5,
-                }}
-              >
-                <ChevronLeft size={14} />
-                Précédent
-              </button>
-              <span style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
-                Page {page} sur {totalPages} ({totalResultats} événement(s) au total)
-              </span>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  background: "none",
-                  border: `1px solid ${defaultTokens.colors.border}`,
-                  borderRadius: defaultTokens.radius.sm,
-                  padding: "6px 12px",
-                  cursor: page >= totalPages ? "not-allowed" : "pointer",
-                  opacity: page >= totalPages ? 0.5 : 1,
-                  fontSize: 12.5,
-                }}
-              >
-                Suivant
-                <ChevronRight size={14} />
-              </button>
+            <div style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+              <PaginationIntelligente page={page} totalPages={totalPages} totalResultats={totalResultats} libelleUnite="événement(s)" onChangerPage={setPage} />
             </div>
           </>
         )}

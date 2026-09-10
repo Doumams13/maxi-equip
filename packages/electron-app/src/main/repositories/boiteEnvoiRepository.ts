@@ -129,4 +129,16 @@ export class BoiteEnvoiRepository {
     const rows = this.db.prepare("SELECT status, COUNT(*) as n FROM boite_envoi GROUP BY status").all() as { status: string; n: number }[];
     return Object.fromEntries(rows.map((r) => [r.status, r.n]));
   }
+
+  /**
+   * Opérations prêtes à être (ré)envoyées — Phase 3.7, Partie 5 : inclut
+   * `pending` (jamais encore tentée) ET `error` (tentative précédente
+   * en échec — erreur réseau ou refus serveur, toujours disponible pour
+   * une nouvelle tentative manuelle, jamais un abandon silencieux).
+   * `confirmed`/`sent` ne sont JAMAIS renvoyées ici.
+   */
+  listerPretesPourEnvoi(): EntreeBoiteEnvoi[] {
+    const rows = this.db.prepare("SELECT * FROM boite_envoi WHERE status IN ('pending', 'error') ORDER BY created_at ASC").all() as EntreeBoiteEnvoiRow[];
+    return rows.map(rowToEntree);
+  }
 }

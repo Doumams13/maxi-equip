@@ -16,6 +16,7 @@ export function runMigrations(db: Database.Database): void {
   addLargeurHauteurColumnsIfMissing(db);
   addActifColumnToEmplacementsIfMissing(db);
   addResponsablesColumnsIfMissing(db);
+  createSyncTablesIfMissing(db);
   addUtilisateurIdToMouvementsIfMissing(db);
   migrateFacturesPourAnnulationEtLivraison(db);
   seedParametresEntrepriseSiAbsent(db);
@@ -214,6 +215,50 @@ function addResponsablesColumnsIfMissing(db: Database.Database): void {
   if (!columns.some((c) => c.name === "nom_gerant")) {
     db.exec("ALTER TABLE parametres_entreprise ADD COLUMN nom_gerant TEXT");
   }
+}
+
+/**
+ * Correction "Phase 3.7 — Moteur de synchronisation", Partie 10/11 :
+ * deux tables PUREMENT TECHNIQUES, jamais appliquées aux données
+ * métier (Partie 9 : "ne pas modifier stock/vente/facture depuis un
+ * PULL").
+ *
+ * `sync_etat` — un singleton conservant le dernier curseur serveur
+ * réellement traité (Partie 11). Mise à jour uniquement APRÈS
+ * enregistrement réussi des opérations reçues, dans la même transaction
+ * (Partie 18) — jamais un curseur avancé avant que les données
+ * correspondantes ne soient conservées.
+ *
+ * `sync_recu` — journal technique des opérations reçues via PULL
+ * (Partie 10) : conservées pour une évolution future, jamais
+ * transformées en écriture sur les tables métier existantes. Une
+ * contrainte UNIQUE sur `curseur_serveur` reste un filet de sécurité
+ * supplémentaire (le curseur empêche déjà normalement une redemande de
+ * la même plage), jamais le seul mécanisme d'idempotence.
+ */
+function createSyncTablesIfMissing(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_etat (
+      id TEXT PRIMARY KEY CHECK (id = 'singleton'),
+      dernier_curseur INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  const existeDeja = db.prepare("SELECT 1 FROM sync_etat WHERE id = 'singleton'").get();
+  if (!existeDeja) {
+    db.prepare("INSERT INTO sync_etat (id, dernier_curseur, updated_at) VALUES ('singleton', 0, ?)").run(new Date().toISOString());
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_recu (
+      id TEXT PRIMARY KEY,
+      curseur_serveur INTEGER NOT NULL UNIQUE,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      recu_le TEXT NOT NULL
+    );
+  `);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, defaultTokens } from "@maxi-equip/design-system";
+import { Card, Button, defaultTokens } from "@maxi-equip/design-system";
 import {
   Boxes,
   DollarSign,
@@ -13,6 +13,7 @@ import {
   ImageOff,
   User,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { MOUVEMENT_LABELS } from "../mouvementLabels.js";
@@ -378,12 +379,62 @@ function DashboardVendeur({
         )}
       </Card>
 
+      <BlocSynchronisation />
+
       <Card style={{ marginTop: 16 }}>
         <p style={{ margin: 0, fontSize: 12.5, color: defaultTokens.colors.textFaint }}>
-          Les demandes du site et les indicateurs de synchronisation apparaîtront ici lorsque ces fonctionnalités seront développées (phases suivantes).
+          Les demandes du site apparaîtront ici lorsque cette fonctionnalité sera développée (phase suivante).
         </p>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Phase 3.7 — bouton Synchroniser réellement fonctionnel (remplace
+ * l'ancien texte d'attente). Protection contre le double clic à DEUX
+ * niveaux (Partie 15) : ici (désactivation du bouton pendant l'appel)
+ * ET dans SyncService lui-même (le verrou réel, qui protégerait même
+ * deux appels IPC simultanés que cette désactivation ne peut pas, à
+ * elle seule, garantir).
+ */
+function BlocSynchronisation() {
+  const [enCours, setEnCours] = useState(false);
+  const [dernierResultat, setDernierResultat] = useState<{ succes: boolean; texte: string } | null>(null);
+
+  async function handleSynchroniser() {
+    setEnCours(true);
+    setDernierResultat(null);
+    try {
+      const resultat = await window.maxiEquip.synchroniser();
+      if (resultat.success) {
+        const push = resultat.push ? `${resultat.push.confirmees}/${resultat.push.envoyees} envoi(s) confirmé(s)` : "";
+        const pull = resultat.pull ? `${resultat.pull.recues} reçue(s)` : "";
+        setDernierResultat({ succes: true, texte: `Synchronisé — ${[push, pull].filter(Boolean).join(", ")}` });
+      } else {
+        setDernierResultat({ succes: false, texte: resultat.message ?? "Erreur de synchronisation." });
+      }
+    } catch (err) {
+      setDernierResultat({ succes: false, texte: err instanceof Error ? err.message : "Erreur de synchronisation." });
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  return (
+    <Card style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button onClick={() => void handleSynchroniser()} disabled={enCours} loading={enCours}>
+          <RefreshCw size={15} />
+          {enCours ? "Synchronisation…" : "Synchroniser"}
+        </Button>
+        {dernierResultat && (
+          <span style={{ fontSize: 12.5, color: dernierResultat.succes ? defaultTokens.colors.success : defaultTokens.colors.danger }}>
+            {dernierResultat.texte}
+          </span>
+        )}
+      </div>
+    </Card>
   );
 }
 

@@ -6,6 +6,42 @@ import { getJwtSecret } from "./config.js";
 const API_VERSION_PREFIX = "/v1";
 
 /**
+ * ═══════════════════════════════════════════════════════════════════
+ * RATE LIMITING — correction "Phase 3.5.1 — Consolidation API", Partie 7
+ * ═══════════════════════════════════════════════════════════════════
+ * ANALYSE : l'API n'est actuellement PAS exposée publiquement — elle
+ * tourne uniquement en développement local (`local-dev-server.ts`),
+ * jamais déployée, jamais appelée par `electron-app` (confirmé lors de
+ * l'audit Phase 3 par recherche exhaustive). Aucune infrastructure de
+ * rate limiting n'existe et aucune n'est créée par cette étape — un
+ * système complexe serait prématuré tant qu'aucun trafic réel n'existe.
+ *
+ * RATE LIMITING OBLIGATOIRE AVANT EXPOSITION PUBLIQUE. À implémenter
+ * impérativement avant que cette API ne soit accessible depuis un
+ * réseau non maîtrisé (au minimum sur les tentatives d'authentification
+ * échouées, pour limiter une attaque par force brute sur un jeton).
+ *
+ * ═══════════════════════════════════════════════════════════════════
+ * RÉVOCATION DE JWT — Partie 8
+ * ═══════════════════════════════════════════════════════════════════
+ * ANALYSE : aucune révocation n'existe ni n'est nécessaire aujourd'hui —
+ * aucun système de session réelle, aucun utilisateur distant connecté,
+ * un seul jeton d'installation émis manuellement à la fois (voir
+ * `emissionJetonApplication.ts`). Une liste de révocation (blacklist)
+ * ajouterait une complexité et un état supplémentaire à synchroniser
+ * sans bénéfice réel tant que ce contexte reste vrai.
+ *
+ * RÉVOCATION À PRÉVOIR LORSQUE : plusieurs installations existeront ET
+ * qu'il faudra pouvoir désactiver l'une d'elles individuellement ; OU
+ * que de vraies sessions utilisateur distantes existeront ; OU qu'une
+ * compromission de jeton devra être traitée avant son expiration
+ * naturelle. Solution la plus simple envisageable le moment venu : une
+ * table `jetons_revoques` (identifiant + date de révocation), vérifiée
+ * par le middleware avant d'accepter un jeton par ailleurs valide —
+ * jamais implémentée maintenant.
+ */
+
+/**
  * Middleware d'authentification CENTRALISÉ pour les routes de niveau
  * "app" (correction "Phase 3.5 — Sécurisation de l'API", Partie 4) —
  * jamais dupliqué dans chaque route individuellement.

@@ -17,6 +17,7 @@ import { StockRepository } from "./repositories/stockRepository.js";
 import { MouvementRepository } from "./repositories/mouvementRepository.js";
 import { FactureRepository } from "./repositories/factureRepository.js";
 import { ParametresRepository } from "./repositories/parametresRepository.js";
+import { BoiteEnvoiRepository } from "./repositories/boiteEnvoiRepository.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
@@ -200,8 +201,9 @@ app.whenReady().then(async () => {
     const mouvementRepository = new MouvementRepository(db);
     const factureRepository = new FactureRepository(db);
     const parametresRepository = new ParametresRepository(db);
-    const stockService = new StockService(stockRepository, mouvementRepository);
-    const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository);
+    const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
+    const stockService = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository);
+    const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository);
 
     // La fenêtre doit exister avant le service d'images (le sélecteur de
     // fichiers natif s'ouvre attaché à une fenêtre — dialog.showOpenDialog).

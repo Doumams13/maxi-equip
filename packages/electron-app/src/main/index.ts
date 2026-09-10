@@ -18,6 +18,9 @@ import { MouvementRepository } from "./repositories/mouvementRepository.js";
 import { FactureRepository } from "./repositories/factureRepository.js";
 import { ParametresRepository } from "./repositories/parametresRepository.js";
 import { BoiteEnvoiRepository } from "./repositories/boiteEnvoiRepository.js";
+import { SyncRepository } from "./repositories/syncRepository.js";
+import { SyncService } from "./services/syncService.js";
+import { registerSyncIpcHandlers } from "./ipc/sync.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
@@ -202,6 +205,8 @@ app.whenReady().then(async () => {
     const factureRepository = new FactureRepository(db);
     const parametresRepository = new ParametresRepository(db);
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
+    const syncRepository = new SyncRepository(db);
+    const syncService = new SyncService(boiteEnvoiRepository, syncRepository);
     const stockService = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository);
     const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository);
 
@@ -226,6 +231,7 @@ app.whenReady().then(async () => {
       sessionManager
     );
     registerImageIpcHandlers(imageService);
+    registerSyncIpcHandlers(syncService);
   } catch (err) {
     // Ne jamais planter silencieusement (ex. coffre-fort sécurisé du système
     // indisponible — cf. docs/architecture/PHASE0.md). L'utilisateur doit

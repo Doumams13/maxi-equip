@@ -238,10 +238,37 @@ export function registerMetierIpcHandlers(
    * "Facturation" : "cliquer plusieurs fois ne doit pas créer de
    * doublon").
    */
+  /**
+   * Résout le nom du vendeur affiché sur un document — correction
+   * "Vendeur affiché = Responsable configuré" : le nom brut du compte
+   * de connexion (ex. "Administrateur", placeholder créé au tout début
+   * du projet, avant que les vraies personnes ne soient connues) n'est
+   * plus affiché tel quel sur les documents remis au client. Priorité :
+   * 1. Un nom manuel réellement saisi pour CETTE vente précise (jamais
+   *    remplacé — c'est une information plus spécifique que le rôle).
+   * 2. Le nom du Responsable configuré dans Paramètres correspondant au
+   *    rôle du vendeur (Administrateur/Gérant) — la décision explicite
+   *    de l'utilisateur : "ce sont ces noms qui doivent être sur les
+   *    factures", distincts des identifiants de connexion.
+   * 3. Le nom brut du compte, en dernier recours seulement (Responsables
+   *    pas encore configurés — jamais un "—" quand une vraie information
+   *    existe déjà).
+   */
+  function resoudreVendeurAffiche(
+    facture: { vendeurNomManuel: string | null; vendeurNom: string | null; vendeurRole: string | null },
+    identite: IdentiteEntreprise
+  ): string {
+    if (facture.vendeurNomManuel) return facture.vendeurNomManuel;
+    if (facture.vendeurRole === "administrateur" && identite.nomAdministrateur) return identite.nomAdministrateur;
+    if (facture.vendeurRole === "gerant" && identite.nomGerant) return identite.nomGerant;
+    return facture.vendeurNom ?? "—";
+  }
+
   ipcMain.handle("factures:genererPdf", async (_e, factureId: string) => {
     const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
-    const vendeurNomAffiche = facture.vendeurNomManuel ?? facture.vendeurNom ?? "—";
+    const identite = parametresRepository.getIdentite();
+    const vendeurNomAffiche = resoudreVendeurAffiche(facture, identite);
     try {
       const chemin = await genererFacturePdf({
         facture,
@@ -251,7 +278,7 @@ export function registerMetierIpcHandlers(
         // "Paramètres" : idem pour les numéros de téléphone, l'adresse
         // et le quartier — plus aucune de ces informations n'est codée
         // en dur dans le générateur de document.
-        identite: parametresRepository.getIdentite(),
+        identite,
         vendeurNomAffiche,
       });
       return { success: true, chemin, nomSuggere: `${facture.numero}.pdf` };
@@ -268,8 +295,9 @@ export function registerMetierIpcHandlers(
     if (!facture) return { success: false, message: "Facture introuvable." };
     try {
       const lignes = factureRepository.getDocumentInterne(factureId);
-      const vendeurNomAffiche = facture.vendeurNomManuel ?? facture.vendeurNom ?? "—";
-      const chemin = await genererDocumentInternePdf({ facture, identite: parametresRepository.getIdentite(), vendeurNomAffiche, lignes });
+      const identite = parametresRepository.getIdentite();
+      const vendeurNomAffiche = resoudreVendeurAffiche(facture, identite);
+      const chemin = await genererDocumentInternePdf({ facture, identite, vendeurNomAffiche, lignes });
       return { success: true, chemin, nomSuggere: `${facture.numero}-document-interne.pdf` };
     } catch (err) {
       // eslint-disable-next-line no-console

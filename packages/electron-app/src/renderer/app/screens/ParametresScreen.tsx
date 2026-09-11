@@ -395,6 +395,8 @@ export function ParametresScreen() {
         )}
       </Card>
 
+      <BlocSauvegarde />
+
       {ajoutOuvert && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 250 }}>
           <Card elevated style={{ width: "min(400px, 92vw)", boxSizing: "border-box" }}>
@@ -509,5 +511,74 @@ export function ParametresScreen() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Sauvegarde des données — Phase 3.8. Interface volontairement simple
+ * (Partie 7) : deux actions, un statut. Toute la logique réelle
+ * (VACUUM INTO, vérification, chiffrement) reste côté Main — ce
+ * composant ne fait qu'appeler l'IPC déjà existant et afficher le
+ * résultat, jamais un accès direct au système de fichiers.
+ */
+function BlocSauvegarde() {
+  const [statut, setStatut] = useState<{ derniereAutomatique: { createdAt: string } | null } | null>(null);
+  const [creationEnCours, setCreationEnCours] = useState(false);
+  const { showSuccess, showError } = useToast();
+
+  useEffect(() => {
+    void window.maxiEquip.backupGetStatut().then(setStatut);
+  }, []);
+
+  async function handleCreerSauvegarde() {
+    setCreationEnCours(true);
+    try {
+      const resultat = await window.maxiEquip.backupCreer();
+      if (resultat.canceled) {
+        // L'utilisateur a simplement annulé la sélection du dossier — jamais une erreur.
+      } else if (resultat.success) {
+        showSuccess("Sauvegarde créée", `Enregistrée dans : ${resultat.chemin}`);
+        setStatut(await window.maxiEquip.backupGetStatut());
+      } else {
+        showError("Sauvegarde impossible", resultat.message ?? "Une erreur est survenue.");
+      }
+    } catch (err) {
+      showError("Sauvegarde impossible", err instanceof Error ? err.message : "Une erreur est survenue.");
+    } finally {
+      setCreationEnCours(false);
+    }
+  }
+
+  async function handleOuvrirDossier() {
+    const resultat = await window.maxiEquip.backupOuvrirDossier();
+    if (!resultat.success) showError("Impossible d'ouvrir le dossier", resultat.message ?? "");
+  }
+
+  const derniereDate = statut?.derniereAutomatique
+    ? new Date(statut.derniereAutomatique.createdAt).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" })
+    : null;
+
+  return (
+    <Card style={{ marginTop: 16 }}>
+      <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, marginTop: 0, marginBottom: 6 }}>Sauvegarde des données</h2>
+      <p style={{ margin: "0 0 4px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>Protégez les données de MAXI-EQUIP.</p>
+      <p style={{ margin: "0 0 16px", fontSize: 11.5, color: defaultTokens.colors.textFaint }}>
+        Le fichier de sauvegarde contient une copie protégée de vos données — conservez-le dans un endroit sûr, comme vous le feriez pour un mot de passe.
+      </p>
+
+      <div style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft, marginBottom: 16 }}>
+        Dernière sauvegarde automatique : <strong>{derniereDate ?? "aucune pour le moment"}</strong>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <Button onClick={() => void handleCreerSauvegarde()} loading={creationEnCours} disabled={creationEnCours}>
+          <Save size={15} />
+          Créer une sauvegarde
+        </Button>
+        <Button variant="secondary" onClick={() => void handleOuvrirDossier()}>
+          Ouvrir le dossier des sauvegardes
+        </Button>
+      </div>
+    </Card>
   );
 }

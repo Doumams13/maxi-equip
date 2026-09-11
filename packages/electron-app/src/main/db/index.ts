@@ -67,6 +67,23 @@ export function openDatabase(): Database.Database {
   return instance;
 }
 
+/**
+ * Correction "Phase 3.8 — Sauvegarde", Partie 5 : `BackupService` a
+ * besoin de la clé de déchiffrement pour produire une sauvegarde
+ * réellement restaurable (voir son commentaire d'en-tête pour la
+ * décision de sécurité complète). Réutilise EXACTEMENT le même
+ * mécanisme que `openDatabase()` (idempotent — relit le même fichier
+ * `db.key` déjà déchiffré via `safeStorage`), jamais une seconde
+ * logique de gestion de clé créée pour l'occasion.
+ */
+export function getEncryptionKey(): string {
+  return getOrCreateEncryptionKey();
+}
+
+export function getDatabasePath(): string {
+  return join(getUserDataDir(), "maxi-equip.sqlite");
+}
+
 export function closeDatabase(): void {
   if (db) {
     db.close();

@@ -2,48 +2,45 @@ import type Database from "better-sqlite3-multiple-ciphers";
 import DatabaseCtor from "better-sqlite3-multiple-ciphers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { getSchemaVersion } from "../db/migrate.js";
+import { type CleProtegeeParMotDePasse, protegerCleParMotDePasse, recupererCleAvecMotDePasse, LONGUEUR_MIN_MOT_DE_PASSE } from "./backupCrypto.js";
 
 /**
- * Service de sauvegarde — Phase 3.8. Indépendant de l'interface (Partie
- * 13) : ne connaît ni IPC ni React, uniquement le système de fichiers et
- * la base SQLite.
+ * Service de sauvegarde — Phase 3.8, corrigé pour la sécurité des
+ * sauvegardes manuelles (correction "Sécurité et clarté des
+ * sauvegardes"). Indépendant de l'interface : ne connaît ni IPC ni
+ * React, uniquement le système de fichiers et la base SQLite.
  *
  * ═══════════════════════════════════════════════════════════════════
- * DÉCISION DE SÉCURITÉ IMPORTANTE — clé de déchiffrement dans metadata.json
+ * TROIS TYPES, TROIS NIVEAUX DE CONFIANCE — jamais confondus
  * ═══════════════════════════════════════════════════════════════════
- * La base MAXI-EQUIP est chiffrée (SQLCipher), avec une clé stockée
- * séparément (`db.key`), elle-même chiffrée via `safeStorage`/DPAPI —
- * donc strictement liée à CETTE machine (voir db/index.ts). Une
- * sauvegarde qui ne contiendrait QUE `database.sqlite` chiffré serait
- * inutilisable sur toute autre machine, ce qui contredirait l'objectif
- * explicite de la Partie 2 ("protéger toutes les données nécessaires
- * pour reconstruire l'état de MAXI-EQUIP").
- *
- * DÉCISION RETENUE : la clé de déchiffrement RÉELLE (en clair) est
- * incluse dans `metadata.json`. Conséquence directe, jamais masquée :
- * le dossier de sauvegarde devient lui-même un secret aussi sensible
- * que la base de données elle-même, et doit être protégé en
- * conséquence par l'utilisateur (stockage sûr, jamais partagé). C'est
- * exactement le même niveau de confiance que la situation actuelle, où
- * `db.key` et `maxi-equip.sqlite` vivent déjà côte à côte sur le même
- * disque. Signalé explicitement dans l'interface (ParametresScreen.tsx)
- * et dans le rapport de cette correction — jamais une hypothèse
- * silencieuse.
+ * - `automatic`/`safety` : sécurité LOCALE uniquement. Restaurées sur
+ *   CETTE machine, où `db.key` existe déjà — ne contiennent donc AUCUNE
+ *   information de clé dans `metadata.json`, ni en clair ni protégée.
+ *   Jamais présentées comme portables vers une autre machine.
+ * - `manual` : sauvegarde PORTABLE et protégée par un mot de passe
+ *   choisi par l'utilisateur. Utilise une clé de chiffrement ALÉATOIRE,
+ *   spécifique à cette sauvegarde (jamais la clé principale de
+ *   l'installation), elle-même protégée par le mot de passe via
+ *   `backupCrypto.ts` (scrypt + AES-256-GCM, primitives standards
+ *   `node:crypto`, jamais une clé stockée en clair).
  *
  * ═══════════════════════════════════════════════════════════════════
- * MÉTHODE DE COPIE — VACUUM INTO, jamais fs.copyFile (Partie 5)
+ * MÉCANISME RÉEL — VACUUM INTO puis PRAGMA rekey (vérifié réellement)
  * ═══════════════════════════════════════════════════════════════════
- * `fs.copyFile` sur un fichier WAL actif copierait potentiellement un
- * état incohérent. `VACUUM INTO` est la commande SQLite native conçue
- * pour ce cas exact : copie transactionnellement cohérente en une seule
- * opération atomique, y compris les données non encore "checkpointées"
- * du WAL — vérifié concrètement avant d'écrire ce service (voir le
- * rapport de cette correction). `Database.prototype.backup()` natif a,
- * lui, échoué avec cette bibliothèque sur une base chiffrée
- * ("incompatible source and target databases") — VACUUM INTO fonctionne
- * correctement là où il échoue.
+ * 1. `VACUUM INTO` copie la base avec la clé PRINCIPALE (déjà vérifié
+ *    fiable avec WAL actif, y compris non checkpointé — voir Phase 3.8).
+ * 2. Pour une sauvegarde manuelle UNIQUEMENT : la COPIE (jamais la base
+ *    source) est rouverte avec cette même clé principale, puis
+ *    `PRAGMA rekey` vers une clé aléatoire fraîchement générée, suivi
+ *    d'un `VACUUM` pour finaliser réellement le rechiffrement — vérifié
+ *    concrètement que sans ce `VACUUM` après `rekey`, l'ancienne clé
+ *    reste acceptée par erreur (comportement réel de cette bibliothèque,
+ *    testé avant d'écrire ce code). Avec le `VACUUM`, l'ancienne clé est
+ *    bien rejetée ensuite.
+ * 3. La clé aléatoire est protégée par le mot de passe et stockée dans
+ *    `metadata.json` sous forme chiffrée — jamais en clair.
  */
 
 export type TypeSauvegarde = "manual" | "automatic" | "safety";
@@ -64,12 +61,17 @@ export interface StatutSauvegarde {
 }
 
 const NOM_APPLICATION = "MAXI-EQUIP";
-const VERSION_APPLICATION = "0.1.0"; // Reprend packages/electron-app/package.json — jamais recalculé dynamiquement pour rester simple (Partie 20 point 9).
+const VERSION_APPLICATION = "0.1.0";
 const FORMAT_SAUVEGARDE = "MAXI_EQUIP_BACKUP";
-const VERSION_FORMAT_SAUVEGARDE = 1;
+/**
+ * Version 2 : `database.encryptionKeyHex` (clé en clair, corrigé) est
+ * remplacé par `database.keyProtection` (présent uniquement pour
+ * `manual`, jamais de clé en clair) — changement de structure
+ * suffisamment important pour justifier l'incrément.
+ */
+const VERSION_FORMAT_SAUVEGARDE = 2;
 
-/** Centralisés ici, jamais dispersés (Partie 10/11) — faciles à ajuster plus tard. */
-export const DELAI_MIN_SAUVEGARDE_AUTOMATIQUE_MS = 24 * 60 * 60 * 1000; // 24h
+export const DELAI_MIN_SAUVEGARDE_AUTOMATIQUE_MS = 24 * 60 * 60 * 1000;
 export const NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES = 10;
 
 interface Metadata {
@@ -77,7 +79,11 @@ interface Metadata {
   formatVersion: number;
   application: { name: string; version: string };
   backup: { createdAt: string; type: TypeSauvegarde };
-  database: { filename: string; schemaVersion: number; encryptionKeyHex: string };
+  database: {
+    filename: string;
+    schemaVersion: number;
+    keyProtection?: CleProtegeeParMotDePasse;
+  };
 }
 
 function horodatageNomDossier(date: Date): string {
@@ -98,19 +104,7 @@ export class BackupService {
     return this.dossierSauvegardesInternes;
   }
 
-  /**
-   * Cœur du service — utilisé par les trois types. `dossierParent` est
-   * toujours fourni par l'appelant : pour une sauvegarde manuelle,
-   * c'est le dossier choisi par l'utilisateur (Partie 8) ; pour
-   * automatique/safety, un sous-dossier interne dédié (Partie 9).
-   *
-   * Construit d'abord dans un dossier temporaire à côté de la
-   * destination finale, sur le même volume (jamais le dossier
-   * temporaire système, qui pourrait être sur un disque différent et
-   * rendre le déplacement final non atomique) — puis renommé seulement
-   * après vérification complète (Partie 6).
-   */
-  private creerSauvegardeInterne(dossierParent: string, type: TypeSauvegarde): ResultatSauvegarde {
+  private creerSauvegardeInterne(dossierParent: string, type: TypeSauvegarde, motDePasse?: string): ResultatSauvegarde {
     if (!existsSync(dossierParent)) {
       try {
         mkdirSync(dossierParent, { recursive: true });
@@ -121,9 +115,6 @@ export class BackupService {
 
     let nomFinal = `${NOM_APPLICATION}_BACKUP_${horodatageNomDossier(new Date())}`;
     let cheminFinal = join(dossierParent, nomFinal);
-    // Garantit un nom unique même si deux sauvegardes sont créées dans la
-    // même seconde (résolution du nom normalisé) — jamais un écrasement
-    // silencieux d'une sauvegarde déjà existante.
     let suffixe = 1;
     while (existsSync(cheminFinal)) {
       suffixe++;
@@ -143,16 +134,35 @@ export class BackupService {
     try {
       this.db.exec(`VACUUM INTO '${cheminBaseCopie.replace(/'/g, "''")}'`);
 
+      let keyProtection: CleProtegeeParMotDePasse | undefined;
+
+      if (type === "manual") {
+        if (!motDePasse) throw new Error("Un mot de passe est obligatoire pour une sauvegarde manuelle.");
+
+        const cleAleatoire = randomBytes(32).toString("hex");
+        const copie = new DatabaseCtor(cheminBaseCopie);
+        try {
+          copie.pragma(`key='${this.cleChiffrement}'`);
+          copie.pragma("cipher_version");
+          copie.pragma(`rekey='${cleAleatoire}'`);
+          copie.exec("VACUUM");
+        } finally {
+          copie.close();
+        }
+
+        keyProtection = protegerCleParMotDePasse(cleAleatoire, motDePasse);
+      }
+
       const metadata: Metadata = {
         format: FORMAT_SAUVEGARDE,
         formatVersion: VERSION_FORMAT_SAUVEGARDE,
         application: { name: NOM_APPLICATION, version: VERSION_APPLICATION },
         backup: { createdAt: new Date().toISOString(), type },
-        database: { filename: "database.sqlite", schemaVersion: getSchemaVersion(this.db), encryptionKeyHex: this.cleChiffrement },
+        database: { filename: "database.sqlite", schemaVersion: getSchemaVersion(this.db), ...(keyProtection ? { keyProtection } : {}) },
       };
       writeFileSync(join(cheminTemporaire, "metadata.json"), JSON.stringify(metadata, null, 2), "utf-8");
 
-      this.verifierSauvegarde(cheminTemporaire);
+      this.verifierSauvegarde(cheminTemporaire, type, motDePasse);
 
       renameSync(cheminTemporaire, cheminFinal);
 
@@ -164,12 +174,7 @@ export class BackupService {
     }
   }
 
-  /**
-   * Vérifications réelles (Partie 6) : fichier présent, non vide,
-   * metadata.json lisible et cohérent, base réellement ouvrable AVEC LA
-   * MÊME CLÉ, et `PRAGMA integrity_check` réellement exécuté.
-   */
-  private verifierSauvegarde(dossier: string): void {
+  private verifierSauvegarde(dossier: string, type: TypeSauvegarde, motDePasse?: string): void {
     const cheminBase = join(dossier, "database.sqlite");
     const cheminMetadata = join(dossier, "metadata.json");
 
@@ -185,9 +190,17 @@ export class BackupService {
     }
     if (metadata.format !== FORMAT_SAUVEGARDE) throw new Error("metadata.json ne correspond pas au format MAXI-EQUIP.");
 
+    let cleAVerifier: string;
+    if (type === "manual") {
+      if (!metadata.database.keyProtection || !motDePasse) throw new Error("Informations de protection par mot de passe manquantes.");
+      cleAVerifier = recupererCleAvecMotDePasse(metadata.database.keyProtection, motDePasse);
+    } else {
+      cleAVerifier = this.cleChiffrement;
+    }
+
     const copie = new DatabaseCtor(cheminBase, { readonly: true });
     try {
-      copie.pragma(`key='${this.cleChiffrement}'`);
+      copie.pragma(`key='${cleAVerifier}'`);
       copie.pragma("cipher_version");
       const integrite = copie.pragma("integrity_check", { simple: true }) as string;
       if (integrite !== "ok") throw new Error(`Vérification d'intégrité SQLite échouée : ${integrite}`);
@@ -197,21 +210,17 @@ export class BackupService {
     }
   }
 
-  /** Partie 7/8 : l'emplacement est toujours choisi par l'utilisateur en amont (dialog côté IPC) — jamais deviné ici. */
-  creerSauvegardeManuelle(dossierChoisiParUtilisateur: string): ResultatSauvegarde {
-    return this.creerSauvegardeInterne(dossierChoisiParUtilisateur, "manual");
+  creerSauvegardeManuelle(dossierChoisiParUtilisateur: string, motDePasse: string): ResultatSauvegarde {
+    if (!motDePasse || motDePasse.length < LONGUEUR_MIN_MOT_DE_PASSE) {
+      return { success: false, message: `Le mot de passe doit contenir au moins ${LONGUEUR_MIN_MOT_DE_PASSE} caractères.` };
+    }
+    return this.creerSauvegardeInterne(dossierChoisiParUtilisateur, "manual", motDePasse);
   }
 
-  /** Partie 12 : architecture prête, jamais appelée automatiquement dans cette étape (aucune restauration n'existe encore pour la déclencher). */
   creerSauvegardeSecurite(): ResultatSauvegarde {
     return this.creerSauvegardeInterne(this.dossierPourType("safety"), "safety");
   }
 
-  /**
-   * Partie 9/10 : une sauvegarde automatique au maximum toutes les
-   * `DELAI_MIN_SAUVEGARDE_AUTOMATIQUE_MS`. Retourne `null` (jamais une
-   * erreur) si le délai n'est pas encore écoulé.
-   */
   creerSauvegardeAutomatiqueSiNecessaire(): ResultatSauvegarde | null {
     const dossierAuto = this.dossierPourType("automatic");
     const derniere = this.listerSauvegardesAutomatiques()[0];
@@ -226,7 +235,6 @@ export class BackupService {
     return resultat;
   }
 
-  /** Partie 11 : trie par date de création réelle (metadata.json), plus fiable que le nom de dossier ou la date de modification du fichier. */
   listerSauvegardesAutomatiques(): EntreeSauvegardeAutomatique[] {
     const dossierAuto = this.dossierPourType("automatic");
     if (!existsSync(dossierAuto)) return [];
@@ -240,13 +248,12 @@ export class BackupService {
         const metadata = JSON.parse(readFileSync(cheminMetadata, "utf-8")) as Metadata;
         entrees.push({ chemin: join(dossierAuto, nom), createdAt: metadata.backup.createdAt });
       } catch {
-        // Dossier corrompu/illisible ignoré, jamais supprimé automatiquement (Partie 6).
+        // Dossier corrompu/illisible ignoré, jamais supprimé automatiquement.
       }
     }
     return entrees.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   }
 
-  /** Partie 11 : ne touche jamais aux sauvegardes manuelles ou de sécurité — ne lit et ne supprime que le sous-dossier `auto`. */
   purgerAnciennesSauvegardesAutomatiques(): void {
     const toutes = this.listerSauvegardesAutomatiques();
     const aSupprimer = toutes.slice(NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES);

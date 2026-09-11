@@ -515,30 +515,58 @@ export function ParametresScreen() {
 }
 
 /**
- * Sauvegarde des données — Phase 3.8. Interface volontairement simple
- * (Partie 7) : deux actions, un statut. Toute la logique réelle
- * (VACUUM INTO, vérification, chiffrement) reste côté Main — ce
- * composant ne fait qu'appeler l'IPC déjà existant et afficher le
- * résultat, jamais un accès direct au système de fichiers.
+ * Sauvegarde des données — corrigée pour distinguer clairement deux
+ * usages différents (correction "Sécurité et clarté des sauvegardes",
+ * Partie 10) : une sauvegarde MANUELLE, exportable et protégée par un
+ * mot de passe choisi par l'utilisateur, et les sauvegardes
+ * AUTOMATIQUES, une sécurité purement locale sans mot de passe. Toute
+ * la logique réelle (VACUUM INTO, rekey, chiffrement du mot de passe)
+ * reste côté Main — ce composant ne fait qu'appeler l'IPC et afficher
+ * le résultat, jamais un accès direct au système de fichiers ni à la
+ * cryptographie.
  */
 function BlocSauvegarde() {
   const [statut, setStatut] = useState<{ derniereAutomatique: { createdAt: string } | null } | null>(null);
   const [creationEnCours, setCreationEnCours] = useState(false);
+  const [dossierChoisi, setDossierChoisi] = useState<string | null>(null);
+  const [motDePasse, setMotDePasse] = useState("");
+  const [confirmationMotDePasse, setConfirmationMotDePasse] = useState("");
+  const [erreurMotDePasse, setErreurMotDePasse] = useState<string | null>(null);
   const { showSuccess, showError } = useToast();
 
   useEffect(() => {
     void window.maxiEquip.backupGetStatut().then(setStatut);
   }, []);
 
-  async function handleCreerSauvegarde() {
+  async function handleChoisirDossier() {
+    const resultat = await window.maxiEquip.backupChoisirDossier();
+    if (!resultat.canceled) {
+      setDossierChoisi(resultat.dossier);
+      setMotDePasse("");
+      setConfirmationMotDePasse("");
+      setErreurMotDePasse(null);
+    }
+  }
+
+  async function handleConfirmerSauvegardeManuelle() {
+    if (!dossierChoisi) return;
+    if (!motDePasse || motDePasse.length < 8) {
+      setErreurMotDePasse("Le mot de passe doit contenir au moins 8 caractères.");
+      return;
+    }
+    if (motDePasse !== confirmationMotDePasse) {
+      setErreurMotDePasse("Les deux mots de passe ne correspondent pas.");
+      return;
+    }
+    setErreurMotDePasse(null);
     setCreationEnCours(true);
     try {
-      const resultat = await window.maxiEquip.backupCreer();
-      if (resultat.canceled) {
-        // L'utilisateur a simplement annulé la sélection du dossier — jamais une erreur.
-      } else if (resultat.success) {
+      const resultat = await window.maxiEquip.backupCreerManuelle(dossierChoisi, motDePasse, confirmationMotDePasse);
+      if (resultat.success) {
         showSuccess("Sauvegarde créée", `Enregistrée dans : ${resultat.chemin}`);
-        setStatut(await window.maxiEquip.backupGetStatut());
+        setDossierChoisi(null);
+        setMotDePasse("");
+        setConfirmationMotDePasse("");
       } else {
         showError("Sauvegarde impossible", resultat.message ?? "Une erreur est survenue.");
       }
@@ -549,7 +577,7 @@ function BlocSauvegarde() {
     }
   }
 
-  async function handleOuvrirDossier() {
+  async function handleOuvrirDossierAutomatique() {
     const resultat = await window.maxiEquip.backupOuvrirDossier();
     if (!resultat.success) showError("Impossible d'ouvrir le dossier", resultat.message ?? "");
   }
@@ -559,26 +587,90 @@ function BlocSauvegarde() {
     : null;
 
   return (
-    <Card style={{ marginTop: 16 }}>
-      <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, marginTop: 0, marginBottom: 6 }}>Sauvegarde des données</h2>
-      <p style={{ margin: "0 0 4px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>Protégez les données de MAXI-EQUIP.</p>
-      <p style={{ margin: "0 0 16px", fontSize: 11.5, color: defaultTokens.colors.textFaint }}>
-        Le fichier de sauvegarde contient une copie protégée de vos données — conservez-le dans un endroit sûr, comme vous le feriez pour un mot de passe.
-      </p>
+    <>
+      <Card style={{ marginTop: 16 }}>
+        <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, marginTop: 0, marginBottom: 4 }}>Sauvegarde des données</h2>
+        <p style={{ margin: "0 0 20px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>Protégez les données importantes de MAXI-EQUIP.</p>
 
-      <div style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft, marginBottom: 16 }}>
-        Dernière sauvegarde automatique : <strong>{derniereDate ?? "aucune pour le moment"}</strong>
-      </div>
-
-      <div style={{ display: "flex", gap: 10 }}>
-        <Button onClick={() => void handleCreerSauvegarde()} loading={creationEnCours} disabled={creationEnCours}>
+        {/* --- Sauvegarde manuelle --- */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>
+          Sauvegarde manuelle
+        </div>
+        <p style={{ margin: "0 0 12px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+          Créez une sauvegarde complète que vous pourrez conserver à l'emplacement de votre choix (clé USB, disque externe, cloud...).
+        </p>
+        <Button onClick={() => void handleChoisirDossier()} disabled={creationEnCours}>
           <Save size={15} />
           Créer une sauvegarde
         </Button>
-        <Button variant="secondary" onClick={() => void handleOuvrirDossier()}>
-          Ouvrir le dossier des sauvegardes
+
+        <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "20px 0" }} />
+
+        {/* --- Sauvegardes automatiques --- */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>
+          Sauvegardes automatiques
+        </div>
+        <p style={{ margin: "0 0 10px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+          MAXI-EQUIP crée automatiquement des copies de sécurité locales et conserve les 10 dernières.
+        </p>
+        <div style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft, marginBottom: 12 }}>
+          Dernière sauvegarde automatique : <strong>{derniereDate ?? "aucune pour le moment"}</strong>
+        </div>
+        <Button variant="secondary" onClick={() => void handleOuvrirDossierAutomatique()}>
+          Ouvrir les sauvegardes automatiques
         </Button>
-      </div>
-    </Card>
+      </Card>
+
+      {dossierChoisi && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 260 }}>
+          <Card elevated style={{ width: "min(420px, 92vw)", boxSizing: "border-box" }}>
+            <h2 style={{ margin: "0 0 6px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>Créer une sauvegarde protégée</h2>
+            <p style={{ margin: "0 0 16px", fontSize: 12, color: defaultTokens.colors.textFaint }}>
+              Votre sauvegarde contient une copie complète de vos données. Conservez votre mot de passe dans un endroit sûr : il sera nécessaire pour restaurer
+              cette sauvegarde. MAXI-EQUIP ne pourra pas le récupérer si vous l'oubliez.
+            </p>
+
+            <label style={labelStyle}>Mot de passe</label>
+            <input
+              type="password"
+              style={inputStyle}
+              value={motDePasse}
+              onChange={(e) => setMotDePasse(e.target.value)}
+              autoFocus
+              disabled={creationEnCours}
+            />
+            <label style={{ ...labelStyle, marginTop: 10 }}>Confirmer le mot de passe</label>
+            <input
+              type="password"
+              style={inputStyle}
+              value={confirmationMotDePasse}
+              onChange={(e) => setConfirmationMotDePasse(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void handleConfirmerSauvegardeManuelle()}
+              disabled={creationEnCours}
+            />
+            {erreurMotDePasse && <p style={{ margin: "8px 0 0", fontSize: 12, color: defaultTokens.colors.danger }}>{erreurMotDePasse}</p>}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setDossierChoisi(null);
+                  setMotDePasse("");
+                  setConfirmationMotDePasse("");
+                  setErreurMotDePasse(null);
+                }}
+                disabled={creationEnCours}
+                style={{ flex: 1 }}
+              >
+                Annuler
+              </Button>
+              <Button onClick={() => void handleConfirmerSauvegardeManuelle()} loading={creationEnCours} style={{ flex: 1 }}>
+                Créer la sauvegarde
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+    </>
   );
 }

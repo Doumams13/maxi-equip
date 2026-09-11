@@ -20,7 +20,7 @@ type EtatIndicateur = "verification" | "non_configuree" | "pret" | "en_cours" | 
 
 export function IndicateurSynchronisation() {
   const [etat, setEtat] = useState<EtatIndicateur>("verification");
-  const { showError } = useToast();
+  const { showError, showSuccess } = useToast();
 
   useEffect(() => {
     let annule = false;
@@ -39,6 +39,12 @@ export function IndicateurSynchronisation() {
       const resultat = await window.maxiEquip.synchroniser();
       if (resultat.success) {
         setEtat("pret");
+        // Confirmation explicite du résultat réel — un succès ne doit
+        // jamais rester silencieux, sinon impossible de vérifier
+        // concrètement qu'une synchronisation a réellement eu lieu.
+        const push = resultat.push ? `${resultat.push.confirmees}/${resultat.push.envoyees} envoi(s) confirmé(s)` : "0 envoi";
+        const pull = resultat.pull ? `${resultat.pull.recues} reçue(s)` : "0 reçue";
+        showSuccess("Synchronisation réussie", `${push} · ${pull}`);
       } else {
         showError("Synchronisation échouée", resultat.message ?? "Une erreur est survenue.");
         setEtat("erreur");

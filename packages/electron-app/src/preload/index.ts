@@ -171,7 +171,7 @@ const maxiEquipApi = {
   backupChoisirDossier: (): Promise<{ canceled: true } | { canceled: false; dossier: string }> => ipcRenderer.invoke("backup:choisir-dossier"),
   backupCreerManuelle: (dossier: string, motDePasse: string, confirmation: string): Promise<{ success: boolean; chemin?: string; message?: string }> =>
     ipcRenderer.invoke("backup:creer-manuelle", dossier, motDePasse, confirmation),
-  backupGetStatut: (): Promise<{ derniereAutomatique: { createdAt: string } | null }> => ipcRenderer.invoke("backup:get-status"),
+  backupGetStatut: (): Promise<{ derniereAutomatique: { createdAt: string } | null; nombreVulnerables: number }> => ipcRenderer.invoke("backup:get-status"),
   backupOuvrirDossier: (): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("backup:open-folder"),
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),

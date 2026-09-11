@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMigrations } from "../db/migrate.js";
@@ -127,6 +127,39 @@ describe("BackupService — sécurité des sauvegardes manuelles", () => {
 
     const manuelle = service.creerSauvegardeManuelle(join(dossierTravail, "destination-manuelle"), MOT_DE_PASSE);
     expect(existsSync(manuelle.chemin!)).toBe(true);
+  });
+
+  it("TEST 5 — une ancienne sauvegarde au format v1 (clé en clair) est détectée comme vulnérable, jamais confondue avec une sauvegarde saine", () => {
+    const service = creerService();
+
+    // Simule une VRAIE sauvegarde créée avec l'ancien code (avant la correction), en écrivant directement l'ancien format sur disque — jamais via le service actuel, qui ne peut plus produire ça.
+    const dossierAuto = join(dossierTravail, "backups", "auto");
+    const dossierAncienneSauvegarde = join(dossierAuto, "MAXI-EQUIP_BACKUP_2026-01-01_00-00-00");
+    mkdirSync(dossierAncienneSauvegarde, { recursive: true });
+    writeFileSync(
+      join(dossierAncienneSauvegarde, "metadata.json"),
+      JSON.stringify({
+        format: "MAXI_EQUIP_BACKUP",
+        formatVersion: 1,
+        application: { name: "MAXI-EQUIP", version: "0.1.0" },
+        backup: { createdAt: "2026-01-01T00:00:00.000Z", type: "automatic" },
+        database: { filename: "database.sqlite", schemaVersion: 1, encryptionKeyHex: CLE_TEST },
+      })
+    );
+    writeFileSync(join(dossierAncienneSauvegarde, "database.sqlite"), "contenu-simule");
+
+    // Une nouvelle sauvegarde, créée avec le code ACTUEL (corrigé) — l'ancienne datant du 1er janvier, le délai de 24h est largement dépassé, une nouvelle est donc normalement créée (comportement de l'anti-spam inchangé).
+    const resultatNeuf = service.creerSauvegardeAutomatiqueSiNecessaire();
+    expect(resultatNeuf!.success).toBe(true);
+
+    const entrees = service.listerSauvegardesAutomatiques();
+    const ancienne = entrees.find((e) => e.chemin === dossierAncienneSauvegarde);
+    const neuve = entrees.find((e) => e.chemin === resultatNeuf!.chemin);
+    expect(ancienne?.vulnerable).toBe(true);
+    expect(neuve?.vulnerable).toBe(false); // La nouvelle, créée avec le code corrigé, n'est jamais vulnérable.
+
+    const statut = service.getStatut();
+    expect(statut.nombreVulnerables).toBe(1); // Uniquement l'ancienne — jamais la nouvelle comptée à tort.
   });
 
   it("TEST H — régression : la création d'une sauvegarde n'écrit jamais sur la base source", () => {

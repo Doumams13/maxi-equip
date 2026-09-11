@@ -54,10 +54,24 @@ export interface ResultatSauvegarde {
 export interface EntreeSauvegardeAutomatique {
   chemin: string;
   createdAt: string;
+  /**
+   * Correction "Clé de chiffrement en clair dans les sauvegardes",
+   * Test 5 : une sauvegarde créée AVANT cette correction contenait
+   * `encryptionKeyHex` en clair (format v1). Détecté ici par lecture
+   * réelle du contenu brut de metadata.json — jamais supposé à partir
+   * du seul `formatVersion`, qui pourrait en théorie être absent ou
+   * incohérent sur un fichier corrompu. Une telle sauvegarde n'est
+   * JAMAIS supprimée automatiquement (Partie 6 : jamais de suppression
+   * silencieuse) — uniquement signalée, à charge de l'utilisateur de la
+   * supprimer lui-même.
+   */
+  vulnerable: boolean;
 }
 
 export interface StatutSauvegarde {
   derniereAutomatique: { createdAt: string } | null;
+  /** Nombre de sauvegardes automatiques encore au format v1 (clé en clair) — 0 si aucune, jamais un champ omis qui laisserait croire à une absence de vérification. */
+  nombreVulnerables: number;
 }
 
 const NOM_APPLICATION = "MAXI-EQUIP";
@@ -245,8 +259,12 @@ export class BackupService {
       const cheminMetadata = join(dossierAuto, nom, "metadata.json");
       if (!existsSync(cheminMetadata)) continue;
       try {
-        const metadata = JSON.parse(readFileSync(cheminMetadata, "utf-8")) as Metadata;
-        entrees.push({ chemin: join(dossierAuto, nom), createdAt: metadata.backup.createdAt });
+        const brut = readFileSync(cheminMetadata, "utf-8");
+        const metadata = JSON.parse(brut) as Metadata;
+        // Détection réelle par lecture du contenu brut — jamais une
+        // supposition à partir du seul `formatVersion` (Test 5).
+        const vulnerable = brut.includes("encryptionKeyHex");
+        entrees.push({ chemin: join(dossierAuto, nom), createdAt: metadata.backup.createdAt, vulnerable });
       } catch {
         // Dossier corrompu/illisible ignoré, jamais supprimé automatiquement.
       }
@@ -263,7 +281,11 @@ export class BackupService {
   }
 
   getStatut(): StatutSauvegarde {
-    const derniere = this.listerSauvegardesAutomatiques()[0];
-    return { derniereAutomatique: derniere ? { createdAt: derniere.createdAt } : null };
+    const toutes = this.listerSauvegardesAutomatiques();
+    const derniere = toutes[0];
+    return {
+      derniereAutomatique: derniere ? { createdAt: derniere.createdAt } : null,
+      nombreVulnerables: toutes.filter((e) => e.vulnerable).length,
+    };
   }
 }

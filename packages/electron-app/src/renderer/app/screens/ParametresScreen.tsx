@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Save, Plus, Trash2, Pencil, Archive, RotateCcw, Check, X } from "lucide-react";
+import { Save, Plus, Trash2, Pencil, Archive, RotateCcw, Check, X, History, FolderOpen } from "lucide-react";
 import type { Emplacement } from "@maxi-equip/shared-types";
 import { ConfirmationMotDePasse } from "../components/ConfirmationMotDePasse.js";
 
@@ -589,36 +589,73 @@ function BlocSauvegarde() {
   return (
     <>
       <Card style={{ marginTop: 16 }}>
-        <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, marginTop: 0, marginBottom: 4 }}>Sauvegarde des données</h2>
-        <p style={{ margin: "0 0 20px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>Protégez les données importantes de MAXI-EQUIP.</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <Save size={16} color={defaultTokens.colors.accent} />
+          <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, margin: 0 }}>Sauvegarde des données</h2>
+        </div>
+        <p style={{ margin: "0 0 18px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>Protégez et restaurez les données de MAXI-EQUIP.</p>
 
-        {/* --- Sauvegarde manuelle --- */}
-        <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>
-          Sauvegarde manuelle
+        <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "0 0 18px" }} />
+
+        {/* --- Sauvegarde manuelle — action principale, seule section pleine largeur --- */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+          <Save size={13} color={defaultTokens.colors.textSoft} />
+          <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            Sauvegarde manuelle
+          </div>
         </div>
         <p style={{ margin: "0 0 12px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
-          Créez une sauvegarde complète que vous pourrez conserver à l'emplacement de votre choix (clé USB, disque externe, cloud...).
+          Créez une copie complète de vos données et conservez-la à l'emplacement de votre choix.
         </p>
         <Button onClick={() => void handleChoisirDossier()} disabled={creationEnCours}>
           <Save size={15} />
           Créer une sauvegarde
         </Button>
 
-        <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "20px 0" }} />
+        <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "20px 0 18px" }} />
 
-        {/* --- Sauvegardes automatiques --- */}
-        <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>
-          Sauvegardes automatiques
+        {/* --- Automatique + Restauration, côte à côte — passent en colonne sur une largeur réduite (flexWrap). --- */}
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <History size={13} color={defaultTokens.colors.textSoft} />
+              <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                Sauvegarde automatique
+              </div>
+            </div>
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: defaultTokens.colors.textSoft, lineHeight: 1.4 }}>
+              Une sauvegarde est créée automatiquement toutes les 24 heures après votre connexion.
+            </p>
+            <div style={{ fontSize: 12, color: defaultTokens.colors.textSoft, marginBottom: 12 }}>
+              Dernière sauvegarde : <strong>{derniereDate ?? "aucune pour le moment"}</strong>
+            </div>
+            <Button variant="secondary" onClick={() => void handleOuvrirDossierAutomatique()}>
+              <FolderOpen size={14} />
+              Ouvrir les sauvegardes
+            </Button>
+          </div>
+
+          {/* Séparateur vertical discret — devient horizontal naturellement quand les colonnes passent l'une sous l'autre (largeur 100% + hauteur 1px via le flexWrap). */}
+          <div style={{ width: 1, alignSelf: "stretch", background: defaultTokens.colors.borderSoft }} />
+
+          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <RotateCcw size={13} color={defaultTokens.colors.textSoft} />
+              <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                Restauration
+              </div>
+            </div>
+            <p style={{ margin: "0 0 12px", fontSize: 12, color: defaultTokens.colors.textSoft, lineHeight: 1.4 }}>
+              Restaurez vos données à partir d'une sauvegarde précédente.
+            </p>
+            {/* Non implémentée (Phase 3.9) — bouton visuellement présent mais désactivé, jamais un déclenchement réel, jamais une apparence de bug. */}
+            <Button variant="secondary" disabled title="Cette fonctionnalité arrive dans une prochaine mise à jour.">
+              <RotateCcw size={14} />
+              Restaurer
+            </Button>
+            <div style={{ fontSize: 11, color: defaultTokens.colors.textFaint, marginTop: 6 }}>Bientôt disponible</div>
+          </div>
         </div>
-        <p style={{ margin: "0 0 10px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
-          MAXI-EQUIP crée automatiquement des copies de sécurité locales et conserve les 10 dernières.
-        </p>
-        <div style={{ fontSize: 12.5, color: defaultTokens.colors.textSoft, marginBottom: 12 }}>
-          Dernière sauvegarde automatique : <strong>{derniereDate ?? "aucune pour le moment"}</strong>
-        </div>
-        <Button variant="secondary" onClick={() => void handleOuvrirDossierAutomatique()}>
-          Ouvrir les sauvegardes automatiques
-        </Button>
       </Card>
 
       {dossierChoisi && (

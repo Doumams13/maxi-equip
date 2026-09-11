@@ -526,7 +526,7 @@ export function ParametresScreen() {
  * cryptographie.
  */
 function BlocSauvegarde() {
-  const [statut, setStatut] = useState<{ derniereAutomatique: { createdAt: string } | null } | null>(null);
+  const [statut, setStatut] = useState<{ derniereAutomatique: { createdAt: string } | null; nombreVulnerables: number } | null>(null);
   const [creationEnCours, setCreationEnCours] = useState(false);
   const [dossierChoisi, setDossierChoisi] = useState<string | null>(null);
   const [motDePasse, setMotDePasse] = useState("");
@@ -629,6 +629,15 @@ function BlocSauvegarde() {
             <div style={{ fontSize: 12, color: defaultTokens.colors.textSoft, marginBottom: 12 }}>
               Dernière sauvegarde : <strong>{derniereDate ?? "aucune pour le moment"}</strong>
             </div>
+            {statut && statut.nombreVulnerables > 0 && (
+              // Correction "Clé de chiffrement en clair" — signale sans jamais supprimer automatiquement (Partie 6) une ou plusieurs anciennes sauvegardes créées avant cette correction, qui contiennent encore la clé en clair.
+              <p style={{ margin: "0 0 12px", fontSize: 11.5, color: defaultTokens.colors.danger, lineHeight: 1.4 }}>
+                {statut.nombreVulnerables === 1
+                  ? "1 ancienne sauvegarde automatique contient encore une clé non protégée."
+                  : `${statut.nombreVulnerables} anciennes sauvegardes automatiques contiennent encore une clé non protégée.`}{" "}
+                Nous recommandons de la supprimer manuellement.
+              </p>
+            )}
             <Button variant="secondary" onClick={() => void handleOuvrirDossierAutomatique()}>
               <FolderOpen size={14} />
               Ouvrir les sauvegardes

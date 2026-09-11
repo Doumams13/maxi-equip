@@ -168,7 +168,9 @@ const maxiEquipApi = {
   // --- Sauvegarde (Phase 3.8) — le Renderer ne choisit jamais un chemin
   // directement ni n'accède au système de fichiers : la boîte de
   // dialogue et toute l'écriture réelle restent côté Main. ---
-  backupCreer: (): Promise<{ success: boolean; chemin?: string; message?: string; canceled?: boolean }> => ipcRenderer.invoke("backup:create"),
+  backupChoisirDossier: (): Promise<{ canceled: true } | { canceled: false; dossier: string }> => ipcRenderer.invoke("backup:choisir-dossier"),
+  backupCreerManuelle: (dossier: string, motDePasse: string, confirmation: string): Promise<{ success: boolean; chemin?: string; message?: string }> =>
+    ipcRenderer.invoke("backup:creer-manuelle", dossier, motDePasse, confirmation),
   backupGetStatut: (): Promise<{ derniereAutomatique: { createdAt: string } | null }> => ipcRenderer.invoke("backup:get-status"),
   backupOuvrirDossier: (): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("backup:open-folder"),
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),

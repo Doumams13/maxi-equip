@@ -21,6 +21,34 @@ export function runMigrations(db: Database.Database): void {
   migrateFacturesPourAnnulationEtLivraison(db);
   seedParametresEntrepriseSiAbsent(db);
   migrerTelephoneUniqueVersTable(db);
+  setSchemaVersion(db);
+}
+
+/**
+ * Correction "Phase 3.8 — Sauvegarde", Partie 1 point 10 : aucune
+ * version de schéma n'existait avant cette étape (chaque migration
+ * vérifiait individuellement sa propre condition, `PRAGMA table_info`,
+ * jamais un numéro global). `PRAGMA user_version` est le mécanisme
+ * natif SQLite prévu exactement pour cet usage — gratuit, déjà présent
+ * dans le moteur, aucune nouvelle dépendance ni nouvelle table.
+ *
+ * Cette constante DOIT être incrémentée manuellement à chaque nouvelle
+ * migration ajoutée dans cette fonction — c'est désormais la seule
+ * source de vérité pour "quelle version de schéma cette base
+ * possède-t-elle", utilisée par `BackupService` (metadata.json) et,
+ * plus tard, par la restauration (Phase 3.9) pour valider la
+ * compatibilité d'une sauvegarde avant de l'appliquer.
+ */
+export const SCHEMA_VERSION = 1;
+
+function setSchemaVersion(db: Database.Database): void {
+  db.pragma(`user_version = ${SCHEMA_VERSION}`);
+}
+
+/** Lecture seule — utilisée par BackupService, jamais par une migration (qui doit utiliser setSchemaVersion via runMigrations). */
+export function getSchemaVersion(db: Database.Database): number {
+  const row = db.pragma("user_version", { simple: true }) as number;
+  return row;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, session, Menu } from "electron";
 import { join } from "node:path";
-import { closeDatabase, openDatabase } from "./db/index.js";
+import { closeDatabase, openDatabase, getEncryptionKey } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { registerIpcHandlers } from "./ipc/index.js";
 import { registerAuthIpcHandlers } from "./ipc/auth.js";
@@ -21,6 +21,8 @@ import { BoiteEnvoiRepository } from "./repositories/boiteEnvoiRepository.js";
 import { SyncRepository } from "./repositories/syncRepository.js";
 import { SyncService } from "./services/syncService.js";
 import { registerSyncIpcHandlers } from "./ipc/sync.js";
+import { BackupService } from "./services/backupService.js";
+import { registerBackupIpcHandlers } from "./ipc/backup.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
@@ -232,6 +234,20 @@ app.whenReady().then(async () => {
     );
     registerImageIpcHandlers(imageService);
     registerSyncIpcHandlers(syncService);
+
+    // Sauvegarde (Phase 3.8) — service indépendant, jamais un accès
+    // filesystem direct depuis le Renderer (Partie 13). Le déclenchement
+    // automatique (Partie 10) est protégé par try/catch : un échec de
+    // sauvegarde ne doit JAMAIS empêcher l'application de démarrer
+    // normalement (Partie 18 : ne rien casser de l'existant).
+    const backupService = new BackupService(db, getEncryptionKey(), join(app.getPath("userData"), "backups"));
+    registerBackupIpcHandlers(backupService);
+    try {
+      backupService.creerSauvegardeAutomatiqueSiNecessaire();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[backup] sauvegarde automatique impossible :", err);
+    }
   } catch (err) {
     // Ne jamais planter silencieusement (ex. coffre-fort sécurisé du système
     // indisponible — cf. docs/architecture/PHASE0.md). L'utilisateur doit

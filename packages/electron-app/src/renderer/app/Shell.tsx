@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Logo, Button, defaultTokens } from "@maxi-equip/design-system";
+import { IndicateurSynchronisation } from "./components/IndicateurSynchronisation.js";
 import {
   LayoutDashboard,
   Package,
@@ -121,7 +122,32 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
         </div>
       </aside>
 
-      <main style={{ flex: 1, minWidth: 0, height: "100%", overflowY: "auto", background: defaultTokens.colors.bg }}>
+      <main style={{ flex: 1, minWidth: 0, height: "100%", overflowY: "auto", background: defaultTokens.colors.bg, display: "flex", flexDirection: "column" }}>
+        {/*
+          Barre supérieure globale — correction "Affichage de la
+          synchronisation" : partagée par TOUS les écrans (contrairement
+          à un placement dans un écran précis), donc identique pour
+          Administrateur et Gérant. Ne contient pour l'instant que
+          l'indicateur de synchronisation, positionné à droite — aucune
+          cloche de notifications n'existe encore dans l'application
+          (hors périmètre de cette correction), l'indicateur est donc
+          seul pour le moment, prêt à accueillir un futur élément à sa
+          gauche sans restructuration.
+        */}
+        <div
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            padding: "10px 24px",
+            borderBottom: `1px solid ${defaultTokens.colors.borderSoft}`,
+            background: "#fff",
+          }}
+        >
+          <IndicateurSynchronisation />
+        </div>
+
         {/*
           Conteneur de largeur maximale — correction "adaptation
           responsive" : sans lui, un écran de contenu s'étire jusqu'au
@@ -132,7 +158,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
           résolution de référence), aucun effet, la mise en page reste
           identique à avant cette correction.
         */}
-        <div style={{ maxWidth: defaultTokens.layout.contentMaxWidth, margin: "0 auto" }}>{children}</div>
+        <div style={{ maxWidth: defaultTokens.layout.contentMaxWidth, margin: "0 auto", width: "100%", flex: 1, overflowY: "auto" }}>{children}</div>
       </main>
     </div>
   );

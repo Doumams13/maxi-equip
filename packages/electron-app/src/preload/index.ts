@@ -163,6 +163,7 @@ const maxiEquipApi = {
     message?: string;
   }> => ipcRenderer.invoke("sync:run"),
   syncEstEnCours: (): Promise<boolean> => ipcRenderer.invoke("sync:estEnCours"),
+  syncEstConfiguree: (): Promise<boolean> => ipcRenderer.invoke("sync:configuree"),
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
   genererFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>

@@ -226,6 +226,8 @@ const maxiEquipApi = {
   ): Promise<{ factureId: string; numero: string; total: number }> => ipcRenderer.invoke("demandes:confirmer", id, input),
   demandesRefuser: (id: string, motif: string): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:refuser", id, motif),
   demandesAnnuler: (id: string): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:annuler", id),
+  demandesMarquerSuivi: (id: string, statut: "en_cours" | "a_contacter" | "contactee"): Promise<import("@maxi-equip/shared-types").Demande> =>
+    ipcRenderer.invoke("demandes:marquer-suivi", id, statut),
 
   notificationsLister: (): Promise<import("@maxi-equip/shared-types").Notification[]> => ipcRenderer.invoke("notifications:lister"),
   notificationsCompterNonLues: (): Promise<number> => ipcRenderer.invoke("notifications:compter-non-lues"),

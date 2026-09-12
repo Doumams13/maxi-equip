@@ -39,6 +39,8 @@ export interface ConfirmerDemandeInput {
 export const DUREE_CONSERVATION_DEMANDE_NON_CONFIRMEE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const STATUTS_MODIFIABLES: DemandeStatut[] = ["nouvelle", "en_cours", "a_contacter", "contactee"];
+/** Statuts de SUIVI (Partie 2/3 de la correction) — distincts des statuts terminaux (confirmee/refusee/annulee), qui ont leurs propres méthodes dédiées. */
+const STATUTS_SUIVI: DemandeStatut[] = ["nouvelle", "en_cours", "a_contacter", "contactee"];
 
 export class DemandeService {
   constructor(
@@ -115,6 +117,24 @@ export class DemandeService {
     if (!demande) throw new DemandeValidationError("Demande introuvable.");
     this.assurerModifiable(demande);
     this.demandeRepository.modifierClient(demandeId, champs);
+    return this.demandeRepository.findById(demandeId)!;
+  }
+
+  /**
+   * Correction "Suivi et modification des demandes", Partie 2/3/4 :
+   * fait progresser le statut de SUIVI (nouvelle -> à contacter ->
+   * contactée -> en cours), réellement enregistré (jamais une simple
+   * indication visuelle temporaire) — jamais utilisée pour confirmer,
+   * refuser ou annuler, qui gardent leurs propres méthodes dédiées.
+   */
+  marquerSuivi(demandeId: string, statut: DemandeStatut): Demande {
+    if (!STATUTS_SUIVI.includes(statut)) {
+      throw new DemandeValidationError(`"${statut}" n'est pas un statut de suivi valide.`);
+    }
+    const demande = this.demandeRepository.findById(demandeId);
+    if (!demande) throw new DemandeValidationError("Demande introuvable.");
+    this.assurerModifiable(demande);
+    this.demandeRepository.changerStatut(demandeId, statut);
     return this.demandeRepository.findById(demandeId)!;
   }
 

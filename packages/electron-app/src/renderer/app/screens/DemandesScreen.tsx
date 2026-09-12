@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Search, Check, X, RotateCcw, Pencil, Package } from "lucide-react";
+import { Search, Check, X, RotateCcw, Pencil, Package, Phone, Plus, Trash2 } from "lucide-react";
 import type { Demande, DemandeStatut, Emplacement } from "@maxi-equip/shared-types";
 
 const inputStyle: React.CSSProperties = {
@@ -168,6 +168,7 @@ function ModalDetailDemande({
     null
   );
   const [modeConfirmation, setModeConfirmation] = useState(false);
+  const [modeEdition, setModeEdition] = useState(false);
   const [modeRefus, setModeRefus] = useState(false);
   const [motifRefus, setMotifRefus] = useState("");
   const [enCours, setEnCours] = useState(false);
@@ -193,6 +194,18 @@ function ModalDetailDemande({
   }
 
   const modifiable = ["nouvelle", "en_cours", "a_contacter", "contactee"].includes(demande.statut);
+
+  async function handleMarquerSuivi(statut: "en_cours" | "a_contacter" | "contactee") {
+    setEnCours(true);
+    try {
+      await window.maxiEquip.demandesMarquerSuivi(demandeId, statut);
+      await charger();
+    } catch (err) {
+      showError("Impossible de mettre à jour le suivi", err instanceof Error ? err.message : "Erreur inconnue.");
+    } finally {
+      setEnCours(false);
+    }
+  }
 
   async function handleRefuser() {
     if (!motifRefus.trim()) return;
@@ -272,20 +285,73 @@ function ModalDetailDemande({
           );
         })}
 
-        {modifiable && !modeConfirmation && !modeRefus && (
-          <div style={{ display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" }}>
-            <Button onClick={() => setModeConfirmation(true)}>
-              <Check size={14} />
-              Confirmer
+        {modifiable && !modeConfirmation && !modeRefus && !modeEdition && (
+          <>
+            {/* --- Correction "Suivi et modification" : le suivi a désormais une vraie place, jamais caché derrière la confirmation (Partie 13). --- */}
+            <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "16px 0" }} />
+            <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>
+              Suivi
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+              <StatutBadge statut={demande.statut} />
+              {demande.statut === "nouvelle" && (
+                <Button variant="secondary" onClick={() => void handleMarquerSuivi("a_contacter")} disabled={enCours}>
+                  <Phone size={14} />
+                  Marquer à contacter
+                </Button>
+              )}
+              {demande.statut === "a_contacter" && (
+                <Button variant="secondary" onClick={() => void handleMarquerSuivi("contactee")} disabled={enCours}>
+                  <Phone size={14} />
+                  Marquer comme contactée
+                </Button>
+              )}
+              {demande.statut === "contactee" && (
+                <Button variant="secondary" onClick={() => void handleMarquerSuivi("en_cours")} disabled={enCours}>
+                  Marquer en cours de traitement
+                </Button>
+              )}
+            </div>
+
+            <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "16px 0" }} />
+
+            <Button variant="secondary" onClick={() => setModeEdition(true)} style={{ width: "100%", justifyContent: "center" }}>
+              <Pencil size={14} />
+              Modifier la demande
             </Button>
-            <Button variant="secondary" onClick={() => setModeRefus(true)}>
-              Refuser
-            </Button>
-            <Button variant="secondary" onClick={() => void handleAnnuler()} disabled={enCours}>
-              <RotateCcw size={14} />
-              Annuler la demande
-            </Button>
-          </div>
+
+            <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "16px 0" }} />
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>
+              Actions finales
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button onClick={() => setModeConfirmation(true)}>
+                <Check size={14} />
+                Confirmer
+              </Button>
+              <Button variant="secondary" onClick={() => setModeRefus(true)}>
+                Refuser
+              </Button>
+              <Button variant="secondary" onClick={() => void handleAnnuler()} disabled={enCours}>
+                <RotateCcw size={14} />
+                Annuler la demande
+              </Button>
+            </div>
+          </>
+        )}
+
+        {modeEdition && (
+          <FormulaireEdition
+            demande={demande}
+            onAnnuler={() => setModeEdition(false)}
+            onEnregistre={() => {
+              setModeEdition(false);
+              void charger();
+              showSuccess("Demande modifiée", "Les modifications ont été enregistrées.");
+            }}
+            onErreur={(message) => showError("Modification impossible", message)}
+          />
         )}
 
         {modeRefus && (
@@ -317,6 +383,156 @@ function ModalDetailDemande({
           />
         )}
       </Card>
+    </div>
+  );
+}
+
+/**
+ * Correction "Suivi et modification des demandes", Parties 5-9 — un
+ * vrai mode édition : client + lignes (quantité/taille modifiables,
+ * suppression), ajout de produit depuis le VRAI catalogue (jamais un
+ * catalogue parallèle). N'appelle jamais VenteService, ne touche jamais
+ * le stock — uniquement `demandesModifierClient`/`demandesModifierLignes`,
+ * qui ne font que ré-écrire la demande elle-même (Partie 8/9).
+ */
+function FormulaireEdition({
+  demande,
+  onAnnuler,
+  onEnregistre,
+  onErreur,
+}: {
+  demande: Demande;
+  onAnnuler: () => void;
+  onEnregistre: () => void;
+  onErreur: (message: string) => void;
+}) {
+  const [clientNom, setClientNom] = useState(demande.clientNom);
+  const [clientTelephone, setClientTelephone] = useState(demande.clientTelephone);
+  const [clientAdresse, setClientAdresse] = useState(demande.clientAdresse);
+  const [clientEmail, setClientEmail] = useState(demande.clientEmail ?? "");
+  const [commentaire, setCommentaire] = useState(demande.commentaire ?? "");
+  const [lignes, setLignes] = useState(demande.lignes.map((l) => ({ ...l })));
+  const [catalogue, setCatalogue] = useState<{ id: string; motif: string; taille: string; prix: string | number }[] | null>(null);
+  const [produitAAjouter, setProduitAAjouter] = useState("");
+  const [enCours, setEnCours] = useState(false);
+
+  useEffect(() => {
+    void window.maxiEquip.listProduits().then((liste) => setCatalogue(liste));
+  }, []);
+
+  function modifierLigne(index: number, champs: Partial<{ quantite: number; taille: string }>) {
+    setLignes((prev) => prev.map((l, i) => (i === index ? { ...l, ...champs } : l)));
+  }
+
+  function supprimerLigne(index: number) {
+    setLignes((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function ajouterProduit() {
+    const produit = (catalogue ?? []).find((p) => p.id === produitAAjouter);
+    if (!produit) return;
+    setLignes((prev) => [...prev, { produitId: produit.id, motif: produit.motif, taille: produit.taille, quantite: 1, prixIndicatif: Number(produit.prix) }]);
+    setProduitAAjouter("");
+  }
+
+  async function handleEnregistrer() {
+    if (lignes.length === 0) {
+      onErreur("Une demande doit conserver au moins un produit.");
+      return;
+    }
+    setEnCours(true);
+    try {
+      await window.maxiEquip.demandesModifierClient(demande.id, {
+        clientNom,
+        clientTelephone,
+        clientAdresse,
+        clientEmail: clientEmail.trim() || null,
+        commentaire: commentaire.trim() || null,
+      });
+      await window.maxiEquip.demandesModifierLignes(
+        demande.id,
+        lignes.map((l) => ({ produitId: l.produitId, motif: l.motif, taille: l.taille, quantite: l.quantite, prixIndicatif: l.prixIndicatif }))
+      );
+      onEnregistre();
+    } catch (err) {
+      onErreur(err instanceof Error ? err.message : "Erreur inconnue.");
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 18, borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, paddingTop: 16 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
+        Modifier la demande
+      </div>
+
+      <label style={labelStyle}>Nom du client</label>
+      <input style={{ ...inputStyle, marginBottom: 8 }} value={clientNom} onChange={(e) => setClientNom(e.target.value)} />
+      <label style={labelStyle}>Téléphone</label>
+      <input style={{ ...inputStyle, marginBottom: 8 }} value={clientTelephone} onChange={(e) => setClientTelephone(e.target.value)} />
+      <label style={labelStyle}>Adresse / localisation</label>
+      <input style={{ ...inputStyle, marginBottom: 8 }} value={clientAdresse} onChange={(e) => setClientAdresse(e.target.value)} />
+      <label style={labelStyle}>Email (facultatif)</label>
+      <input style={{ ...inputStyle, marginBottom: 8 }} value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
+      <label style={labelStyle}>Commentaire (facultatif)</label>
+      <input style={{ ...inputStyle, marginBottom: 14 }} value={commentaire} onChange={(e) => setCommentaire(e.target.value)} />
+
+      <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "14px 0" }} />
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>
+        Produits
+      </div>
+      {lignes.map((l, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div style={{ flex: "2 1 140px", fontSize: 13 }}>{l.motif}</div>
+          <input
+            style={{ ...inputStyle, flex: "1 1 90px" }}
+            value={l.taille}
+            onChange={(e) => modifierLigne(i, { taille: e.target.value })}
+            aria-label="Taille"
+          />
+          <input
+            type="number"
+            min={1}
+            style={{ ...inputStyle, flex: "0 1 70px" }}
+            value={l.quantite}
+            onChange={(e) => modifierLigne(i, { quantite: Math.max(1, Number(e.target.value) || 1) })}
+            aria-label="Quantité"
+          />
+          <button
+            onClick={() => supprimerLigne(i)}
+            title="Supprimer ce produit"
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 4, flexShrink: 0 }}
+          >
+            <Trash2 size={16} color={defaultTokens.colors.danger} />
+          </button>
+        </div>
+      ))}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10, marginBottom: 16 }}>
+        <select style={{ ...inputStyle, flex: 1 }} value={produitAAjouter} onChange={(e) => setProduitAAjouter(e.target.value)}>
+          <option value="">Ajouter un produit du catalogue…</option>
+          {(catalogue ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.motif} — {p.taille}
+            </option>
+          ))}
+        </select>
+        <Button variant="secondary" onClick={ajouterProduit} disabled={!produitAAjouter}>
+          <Plus size={14} />
+          Ajouter
+        </Button>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <Button variant="secondary" onClick={onAnnuler} disabled={enCours} style={{ flex: 1 }}>
+          Annuler
+        </Button>
+        <Button onClick={() => void handleEnregistrer()} loading={enCours} style={{ flex: 1 }}>
+          Enregistrer les modifications
+        </Button>
+      </div>
     </div>
   );
 }

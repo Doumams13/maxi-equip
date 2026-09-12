@@ -36,6 +36,7 @@ export function registerDemandeIpcHandlers(demandeService: DemandeService, notif
 
   ipcMain.handle("demandes:refuser", (_e, id: string, motif: string) => demandeService.refuser(id, motif));
   ipcMain.handle("demandes:annuler", (_e, id: string) => demandeService.annuler(id));
+  ipcMain.handle("demandes:marquer-suivi", (_e, id: string, statut: "en_cours" | "a_contacter" | "contactee") => demandeService.marquerSuivi(id, statut));
 
   ipcMain.handle("notifications:lister", () => notificationRepository.listerRecentes());
   ipcMain.handle("notifications:compter-non-lues", () => notificationRepository.compterNonLues());

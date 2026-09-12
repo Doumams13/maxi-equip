@@ -196,6 +196,80 @@ describe("DemandeService — Phase 4.1 (base SQLite réelle, vrai VenteService)"
     expect(mouvement.n).toBeGreaterThan(0);
   });
 
+  it("TEST 1/2/3 — suivi : nouvelle -> à contacter -> contactée, réellement enregistré en base", () => {
+    const service = construireService();
+    const demande = service.creerDepuisReception({
+      clientNom: "Suivi Test",
+      clientTelephone: "+241 20 20 20 20",
+      clientAdresse: "Libreville",
+      lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
+    });
+    expect(demande.statut).toBe("nouvelle");
+
+    const aContacter = service.marquerSuivi(demande.id, "a_contacter");
+    expect(aContacter.statut).toBe("a_contacter");
+    // Réellement en base, pas seulement en mémoire — relecture depuis un objet fraîchement chargé.
+    expect(service.obtenir(demande.id)!.statut).toBe("a_contacter");
+
+    const contactee = service.marquerSuivi(demande.id, "contactee");
+    expect(contactee.statut).toBe("contactee");
+    expect(service.obtenir(demande.id)!.statut).toBe("contactee");
+  });
+
+  it("marquerSuivi refuse de s'appliquer sur une demande déjà confirmée/refusée/annulée", () => {
+    const service = construireService();
+    const demande = service.creerDepuisReception({
+      clientNom: "Suivi Refuse",
+      clientTelephone: "+241 21 21 21 21",
+      clientAdresse: "Libreville",
+      lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
+    });
+    service.refuser(demande.id, "Test");
+    expect(() => service.marquerSuivi(demande.id, "contactee")).toThrow(DemandeValidationError);
+  });
+
+  it("TEST 5/6 + Partie 8 — ajout et suppression de produit dans une demande, jamais d'impact sur le stock", () => {
+    const service = construireService();
+    const stockRepository = new StockRepository(db);
+    const demande = service.creerDepuisReception({
+      clientNom: "Ajout Produit",
+      clientTelephone: "+241 22 22 22 22",
+      clientAdresse: "Libreville",
+      lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 }],
+    });
+
+    const stockAvant = stockRepository.getQuantite(produitId, depotId);
+
+    // Ajout d'une seconde ligne (Partie 7) — remplace bien l'ensemble tout en conservant la première.
+    const avecAjout = service.modifierLignes(demande.id, [
+      { produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 },
+      { produitId, motif: "Carreau Demande Test", taille: "30x30", quantite: 3, prixIndicatif: 8000 },
+    ]);
+    expect(avecAjout.lignes).toHaveLength(2);
+    expect(stockRepository.getQuantite(produitId, depotId)).toBe(stockAvant); // Toujours inchangé.
+
+    // Suppression d'une ligne (Partie 6/9).
+    const apresSuppression = service.modifierLignes(demande.id, [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 }]);
+    expect(apresSuppression.lignes).toHaveLength(1);
+    expect(stockRepository.getQuantite(produitId, depotId)).toBe(stockAvant); // Toujours inchangé, même après suppression.
+  });
+
+  it("TEST 7 — modification des informations client, sauvegarde réelle", () => {
+    const service = construireService();
+    const demande = service.creerDepuisReception({
+      clientNom: "Ancien Nom",
+      clientTelephone: "+241 23 23 23 23",
+      clientAdresse: "Ancienne adresse",
+      lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
+    });
+
+    const modifiee = service.modifierClient(demande.id, { clientNom: "Nouveau Nom", clientAdresse: "Nouvelle adresse, Akanda" });
+    expect(modifiee.clientNom).toBe("Nouveau Nom");
+    expect(modifiee.clientAdresse).toBe("Nouvelle adresse, Akanda");
+    expect(modifiee.clientTelephone).toBe("+241 23 23 23 23"); // Champ non fourni conservé tel quel.
+    expect(service.obtenir(demande.id)!.clientNom).toBe("Nouveau Nom"); // Réellement persistée.
+  });
+
   it("Une demande déjà confirmée ne peut plus être reconfirmée ni modifiée", () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
@@ -299,5 +373,203 @@ describe("DemandeService — Phase 4.1 (base SQLite réelle, vrai VenteService)"
     expect(service.obtenir(recente.id)).not.toBeNull();
     expect(service.obtenir(confirmeeAncienne.id)).not.toBeNull();
     expect(service.obtenir(confirmeeAncienne.id)!.statut).toBe("confirmee");
+  });
+
+  describe("Correction \"Suivi et modification des demandes\" — marquerSuivi et scénario bout-en-bout complet (Partie 17/18)", () => {
+    it("TEST 1/2/3 — progression réelle du suivi : nouvelle -> à contacter -> contactée -> en cours", () => {
+      const service = construireService();
+      const demande = service.creerDepuisReception({
+        clientNom: "Suivi Test",
+        clientTelephone: "+241 20 20 20 20",
+        clientAdresse: "Libreville",
+        lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
+      });
+      expect(demande.statut).toBe("nouvelle"); // TEST 1.
+
+      const aContacter = service.marquerSuivi(demande.id, "a_contacter");
+      expect(aContacter.statut).toBe("a_contacter"); // TEST 2.
+
+      const contactee = service.marquerSuivi(demande.id, "contactee");
+      expect(contactee.statut).toBe("contactee"); // TEST 3.
+
+      const enCours = service.marquerSuivi(demande.id, "en_cours");
+      expect(enCours.statut).toBe("en_cours");
+
+      // Réellement enregistré en base — jamais une indication visuelle temporaire (Partie 4).
+      const relu = db.prepare("SELECT statut FROM demandes WHERE id = ?").get(demande.id) as { statut: string };
+      expect(relu.statut).toBe("en_cours");
+    });
+
+    it("marquerSuivi refuse un statut qui n'est pas un statut de suivi (jamais confirmee/refusee/annulee par cette voie)", () => {
+      const service = construireService();
+      const demande = service.creerDepuisReception({
+        clientNom: "Suivi Invalide",
+        clientTelephone: "+241 21 21 21 21",
+        clientAdresse: "Libreville",
+        lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
+      });
+      expect(() => service.marquerSuivi(demande.id, "confirmee")).toThrow(DemandeValidationError);
+    });
+
+    it("TEST 4 — modification de quantité : demande mise à jour, aucune vente, aucun mouvement, aucun changement de stock", () => {
+      const service = construireService();
+      const stockRepository = new StockRepository(db);
+      const demande = service.creerDepuisReception({
+        clientNom: "Modif Quantite",
+        clientTelephone: "+241 22 22 22 22",
+        clientAdresse: "Libreville",
+        lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 }],
+      });
+      const stockAvant = stockRepository.getQuantite(produitId, depotId);
+      const facturesAvant = (db.prepare("SELECT COUNT(*) as n FROM factures").get() as { n: number }).n;
+
+      const modifiee = service.modifierLignes(demande.id, [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 5, prixIndicatif: 12000 }]);
+
+      expect(modifiee.lignes[0]!.quantite).toBe(5);
+      expect(stockRepository.getQuantite(produitId, depotId)).toBe(stockAvant); // Stock inchangé.
+      expect((db.prepare("SELECT COUNT(*) as n FROM factures").get() as { n: number }).n).toBe(facturesAvant); // Aucune vente créée.
+    });
+
+    it("TEST 5 — ajout d'un produit : nouvelle ligne créée, aucune vente, aucun changement de stock", () => {
+      const service = construireService();
+      const stockRepository = new StockRepository(db);
+      const demande = service.creerDepuisReception({
+        clientNom: "Ajout Produit",
+        clientTelephone: "+241 23 23 23 23",
+        clientAdresse: "Libreville",
+        lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 }],
+      });
+      const stockAvant = stockRepository.getQuantite(produitId, depotId);
+
+      const modifiee = service.modifierLignes(demande.id, [
+        { produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 },
+        { produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 3, prixIndicatif: 12000 },
+      ]);
+
+      expect(modifiee.lignes).toHaveLength(2);
+      expect(stockRepository.getQuantite(produitId, depotId)).toBe(stockAvant);
+    });
+
+    it("TEST 6 — suppression d'un produit : ligne supprimée, demande cohérente (au moins une ligne conservée)", () => {
+      const service = construireService();
+      const demande = service.creerDepuisReception({
+        clientNom: "Suppression Produit",
+        clientTelephone: "+241 24 24 24 24",
+        clientAdresse: "Libreville",
+        lignes: [
+          { produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 },
+          { produitId, motif: "Carreau Demande Test", taille: "30x30", quantite: 3, prixIndicatif: 8000 },
+        ],
+      });
+      expect(demande.lignes).toHaveLength(2);
+
+      const modifiee = service.modifierLignes(demande.id, [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 }]);
+      expect(modifiee.lignes).toHaveLength(1);
+
+      // Une demande ne peut jamais rester sans aucun produit (garde déjà existante, revérifiée ici).
+      expect(() => service.modifierLignes(demande.id, [])).toThrow(DemandeValidationError);
+    });
+
+    it("TEST 7 — modification des informations client, sauvegarde réelle vérifiée", () => {
+      const service = construireService();
+      const demande = service.creerDepuisReception({
+        clientNom: "Nom Original",
+        clientTelephone: "+241 25 25 25 25",
+        clientAdresse: "Adresse Originale",
+        lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
+      });
+
+      const modifiee = service.modifierClient(demande.id, { clientNom: "Nom Corrigé", clientTelephone: "+241 99 99 99 99" });
+      expect(modifiee.clientNom).toBe("Nom Corrigé");
+      expect(modifiee.clientTelephone).toBe("+241 99 99 99 99");
+      expect(modifiee.clientAdresse).toBe("Adresse Originale"); // Champ non fourni, conservé tel quel.
+
+      const relue = db.prepare("SELECT client_nom FROM demandes WHERE id = ?").get(demande.id) as { client_nom: string };
+      expect(relue.client_nom).toBe("Nom Corrigé");
+    });
+
+    it("TEST 8 + Partie 18 — SCÉNARIO BOUT-EN-BOUT COMPLET : suivi, contact, modification (quantité + ajout produit), puis confirmation réelle", () => {
+      const service = construireService();
+      const stockRepository = new StockRepository(db);
+
+      // 1-2. Une demande arrive : Produit A, quantité 2. Statut nouvelle.
+      const demande = service.creerDepuisReception({
+        clientNom: "Scenario Complet",
+        clientTelephone: "+241 26 26 26 26",
+        clientAdresse: "Libreville, Akébé",
+        lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 2, prixIndicatif: 12000 }],
+      });
+      expect(demande.statut).toBe("nouvelle");
+
+      // 3. À contacter.
+      service.marquerSuivi(demande.id, "a_contacter");
+      // 4-5. Contacté -> Client contacté.
+      service.marquerSuivi(demande.id, "contactee");
+      expect(service.obtenir(demande.id)!.statut).toBe("contactee");
+
+      // 6-8. Le client veut finalement 5 produits — modification réelle.
+      const stockAvantModif = stockRepository.getQuantite(produitId, depotId);
+      let modifiee = service.modifierLignes(demande.id, [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 5, prixIndicatif: 12000 }]);
+      expect(modifiee.lignes[0]!.quantite).toBe(5);
+
+      // 9-10. Le client ajoute un Produit B — ajout réel d'une seconde ligne.
+      modifiee = service.modifierLignes(demande.id, [
+        { produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 5, prixIndicatif: 12000 },
+        { produitId, motif: "Carreau Demande Test", taille: "30x30", quantite: 3, prixIndicatif: 8000 },
+      ]);
+
+      // 11-12. Vérifier : demande modifiée, stock inchangé.
+      expect(modifiee.lignes).toHaveLength(2);
+      expect(stockRepository.getQuantite(produitId, depotId)).toBe(stockAvantModif); // Aucun stock touché par la modification.
+
+      // 13-14. Confirmation réelle : vente créée, quantités correctes, stock modifié SEULEMENT maintenant, facture créée.
+      const resultat = service.confirmer(demande.id, {
+        pointDeVenteId: shopId,
+        vendeurUtilisateurId: "u1",
+        vendeurCompteConnecteNom: "Testeur",
+        vendeurNomManuel: null,
+        modeReglement: "especes",
+        lignes: [
+          { produitId, quantite: 5, prixUnitaire: 12000, allocationsDepots: [{ emplacementId: depotId, quantite: 5 }] },
+          { produitId, quantite: 3, prixUnitaire: 8000, allocationsDepots: [{ emplacementId: depotId, quantite: 3 }] },
+        ],
+      });
+
+      expect(resultat.total).toBe(5 * 12000 + 3 * 8000);
+      expect(stockRepository.getQuantite(produitId, depotId)).toBe(stockAvantModif - 8); // Stock modifié SEULEMENT maintenant (5+3=8).
+      expect(service.obtenir(demande.id)!.statut).toBe("confirmee");
+      expect(service.obtenir(demande.id)!.factureId).toBe(resultat.factureId);
+
+      const facture = db.prepare("SELECT * FROM factures WHERE id = ?").get(resultat.factureId) as { vendeur_utilisateur_id: string };
+      expect(facture.vendeur_utilisateur_id).toBe("u1");
+    });
+
+    it("TEST 9 — refus après suivi (motif conservé, statut correct)", () => {
+      const service = construireService();
+      const demande = service.creerDepuisReception({
+        clientNom: "Refus Apres Suivi",
+        clientTelephone: "+241 27 27 27 27",
+        clientAdresse: "Libreville",
+        lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
+      });
+      service.marquerSuivi(demande.id, "a_contacter");
+      service.marquerSuivi(demande.id, "contactee");
+
+      const refusee = service.refuser(demande.id, "Client finalement non intéressé");
+      expect(refusee.statut).toBe("refusee");
+      expect(refusee.refusMotif).toBe("Client finalement non intéressé");
+    });
+
+    it("TEST 10 — annulation (statut correct)", () => {
+      const service = construireService();
+      const demande = service.creerDepuisReception({
+        clientNom: "Annulation Test",
+        clientTelephone: "+241 28 28 28 28",
+        clientAdresse: "Libreville",
+        lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
+      });
+      const annulee = service.annuler(demande.id);
+      expect(annulee.statut).toBe("annulee");
+    });
   });
 });

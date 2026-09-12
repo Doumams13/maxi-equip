@@ -25,6 +25,11 @@ import { BackupService } from "./services/backupService.js";
 import { registerBackupIpcHandlers } from "./ipc/backup.js";
 import { BackupRestoreService } from "./services/backupRestoreService.js";
 import { registerBackupRestoreIpcHandlers } from "./ipc/backupRestore.js";
+import { DemandeRepository } from "./repositories/demandeRepository.js";
+import { NotificationRepository } from "./repositories/notificationRepository.js";
+import { DemandeService } from "./services/demandeService.js";
+import { registerDemandeIpcHandlers } from "./ipc/demandes.js";
+import { injecterDemandeTest } from "./maintenance/injecterDemandeTest.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
@@ -158,9 +163,20 @@ app.whenReady().then(async () => {
         const resultat = executerGenerationDonneesTest(db);
         // eslint-disable-next-line no-console
         console.log(JSON.stringify(resultat, null, 2));
+      } else if (mode === "injecter-demande-test") {
+        const produitArg = process.argv.find((a) => a.startsWith("--produit-id="));
+        const produitId = produitArg ? produitArg.split("=")[1]! : (db.prepare("SELECT id FROM produits LIMIT 1").get() as { id: string } | undefined)?.id;
+        if (!produitId) {
+          // eslint-disable-next-line no-console
+          console.error("Aucun produit disponible pour l'injection — créez au moins un produit ou passez --produit-id=<id>.");
+        } else {
+          const resultat = await injecterDemandeTest(db, produitId);
+          // eslint-disable-next-line no-console
+          console.log(JSON.stringify(resultat, null, 2));
+        }
       } else {
         // eslint-disable-next-line no-console
-        console.error(`Mode maintenance inconnu : "${mode}". Modes valides : reset-donnees-test, generer-donnees-test.`);
+        console.error(`Mode maintenance inconnu : "${mode}". Modes valides : reset-donnees-test, generer-donnees-test, injecter-demande-test.`);
       }
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -210,9 +226,28 @@ app.whenReady().then(async () => {
     const parametresRepository = new ParametresRepository(db);
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
     const syncRepository = new SyncRepository(db);
-    const syncService = new SyncService(boiteEnvoiRepository, syncRepository);
     const stockService = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository);
     const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository);
+
+    // Demandes du site (Phase 4.1) : instanciés AVANT SyncService pour
+    // que celui-ci puisse recevoir le callback d'application réelle des
+    // opérations "demande" reçues via PULL (Partie 4/17) — jamais un
+    // couplage inverse, DemandeService ne connaît jamais SyncService.
+    const demandeRepository = new DemandeRepository(db);
+    const notificationRepository = new NotificationRepository(db);
+    const demandeService = new DemandeService(demandeRepository, notificationRepository, stockRepository, venteService);
+
+    const syncService = new SyncService(boiteEnvoiRepository, syncRepository, (payload, sourceEntityId) => {
+      const p = payload as {
+        clientNom: string;
+        clientTelephone: string;
+        clientAdresse: string;
+        clientEmail?: string | null;
+        commentaire?: string | null;
+        lignes: { produitId: string; motif: string; taille: string; quantite: number; prixIndicatif: number }[];
+      };
+      demandeService.creerDepuisReception({ ...p, sourceEntityId });
+    });
 
     // La fenêtre doit exister avant le service d'images (le sélecteur de
     // fichiers natif s'ouvre attaché à une fenêtre — dialog.showOpenDialog).
@@ -236,6 +271,16 @@ app.whenReady().then(async () => {
     );
     registerImageIpcHandlers(imageService);
     registerSyncIpcHandlers(syncService);
+
+    // Demandes (Phase 4.1) — Administrateur et Gérant, aucune restriction artificielle (Partie 15).
+    registerDemandeIpcHandlers(demandeService, notificationRepository, sessionManager);
+    // Purge (Partie 13/14) : au démarrage, jamais une tâche planifiée fragile — protégée par try/catch comme la sauvegarde automatique, un échec ne doit jamais empêcher le démarrage.
+    try {
+      demandeService.purgerDemandesAnciennes();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[demandes] purge des anciennes demandes impossible :", err);
+    }
 
     // Sauvegarde (Phase 3.8) — service indépendant, jamais un accès
     // filesystem direct depuis le Renderer (Partie 13). Le déclenchement

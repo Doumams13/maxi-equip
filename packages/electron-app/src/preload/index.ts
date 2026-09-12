@@ -192,6 +192,45 @@ const maxiEquipApi = {
   }> => ipcRenderer.invoke("backup:restore-analyser", dossier),
   backupRestoreExecuter: (dossier: string, motDePasse?: string): Promise<{ success: boolean; message?: string; etape?: string }> =>
     ipcRenderer.invoke("backup:restore-executer", dossier, motDePasse),
+
+  // --- Demandes du site (Phase 4.1) — Administrateur et Gérant. ---
+  demandesLister: (): Promise<import("@maxi-equip/shared-types").Demande[]> => ipcRenderer.invoke("demandes:lister"),
+  demandesObtenir: (id: string): Promise<import("@maxi-equip/shared-types").Demande | null> => ipcRenderer.invoke("demandes:obtenir", id),
+  demandesVerifierStock: (
+    id: string
+  ): Promise<{ produitId: string; motif: string; taille: string; quantiteDemandee: number; quantiteDisponible: number }[]> =>
+    ipcRenderer.invoke("demandes:verifier-stock", id),
+  demandesModifierLignes: (
+    id: string,
+    lignes: { produitId: string; motif: string; taille: string; quantite: number; prixIndicatif: number }[]
+  ): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:modifier-lignes", id, lignes),
+  demandesModifierClient: (
+    id: string,
+    champs: { clientNom?: string; clientTelephone?: string; clientAdresse?: string; clientEmail?: string | null; commentaire?: string | null }
+  ): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:modifier-client", id, champs),
+  demandesConfirmer: (
+    id: string,
+    input: {
+      pointDeVenteId: string;
+      vendeurNomManuel: string | null;
+      modeReglement: string | null;
+      lignes: {
+        produitId: string;
+        quantite: number;
+        prixUnitaire: number;
+        allocationsDepots: { emplacementId: string; quantite: number }[];
+        fournisseurExterne?: string;
+        prixAchatExterne?: number;
+      }[];
+    }
+  ): Promise<{ factureId: string; numero: string; total: number }> => ipcRenderer.invoke("demandes:confirmer", id, input),
+  demandesRefuser: (id: string, motif: string): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:refuser", id, motif),
+  demandesAnnuler: (id: string): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:annuler", id),
+
+  notificationsLister: (): Promise<import("@maxi-equip/shared-types").Notification[]> => ipcRenderer.invoke("notifications:lister"),
+  notificationsCompterNonLues: (): Promise<number> => ipcRenderer.invoke("notifications:compter-non-lues"),
+  notificationsMarquerLue: (id: string): Promise<void> => ipcRenderer.invoke("notifications:marquer-lue", id),
+  notificationsMarquerToutesLues: (): Promise<void> => ipcRenderer.invoke("notifications:marquer-toutes-lues"),
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
   genererFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>

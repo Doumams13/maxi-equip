@@ -39,7 +39,19 @@ export class SyncService {
 
   constructor(
     private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
-    private readonly syncRepository: SyncRepository
+    private readonly syncRepository: SyncRepository,
+    /**
+     * Phase 4.1, Partie 4/17 : seul le type "demande" doit être
+     * réellement appliqué aux données métier lors d'un PULL — tous les
+     * autres types (vente/entree/transfert/annulation) restent
+     * uniquement journalisés dans `sync_recu`, exactement comme depuis
+     * la Phase 3.7, jamais modifié ici. Callback optionnel (jamais un
+     * couplage direct à DemandeService, qui resterait alors indépendant
+     * et testable seul) — une erreur de traitement d'UNE demande
+     * n'interrompt jamais le reste du PULL (Partie 17 : ne pas casser
+     * PUSH/PULL/idempotence).
+     */
+    private readonly traiterDemandeRecue?: (payload: unknown, sourceEntityId: string) => void
   ) {}
 
   async executerSynchronisation(): Promise<ResultatSynchronisation> {
@@ -160,6 +172,21 @@ export class SyncService {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur inconnue.";
       return { success: false, etape: "pull", message: `Échec de l'enregistrement technique des opérations reçues : ${message}` };
+    }
+
+    // Application réelle aux données métier — UNIQUEMENT pour "demande"
+    // (Partie 4/17). Chaque échec individuel est isolé : une demande
+    // dont le paiement échoue ne doit jamais faire perdre les autres ni
+    // faire régresser le curseur déjà avancé ci-dessus.
+    if (this.traiterDemandeRecue) {
+      for (const operation of corps.operations) {
+        if (operation.entityType !== "demande") continue;
+        try {
+          this.traiterDemandeRecue(operation.payload, operation.entityId);
+        } catch {
+          // Volontairement silencieux ici — la donnée reste de toute façon disponible dans sync_recu (journal technique), jamais perdue, et n'empêche jamais le reste de la synchronisation.
+        }
+      }
     }
 
     return { success: true, pull: { recues: corps.operations.length } };

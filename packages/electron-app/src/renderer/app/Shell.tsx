@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { Logo, Button, defaultTokens } from "@maxi-equip/design-system";
 import { IndicateurSynchronisation } from "./components/IndicateurSynchronisation.js";
+import { IndicateurNotifications } from "./components/IndicateurNotifications.js";
 import {
   LayoutDashboard,
   Package,
@@ -9,13 +10,14 @@ import {
   ArrowLeftRight,
   ShoppingCart,
   Receipt,
+  MessageSquareText,
   History,
   LogOut,
   Settings,
 } from "lucide-react";
 import logoUrl from "../assets/maxi-equip-logo.png";
 
-export type ScreenId = "dashboard" | "produits" | "stock" | "transferts" | "ventes" | "factures" | "historique" | "parametres";
+export type ScreenId = "dashboard" | "produits" | "stock" | "transferts" | "ventes" | "factures" | "demandes" | "historique" | "parametres";
 
 export interface NavItem {
   id: ScreenId;
@@ -40,6 +42,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
   transferts: ArrowLeftRight,
   ventes: ShoppingCart,
   factures: Receipt,
+  demandes: MessageSquareText,
   historique: History,
   parametres: Settings,
 };
@@ -124,15 +127,12 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
 
       <main style={{ flex: 1, minWidth: 0, height: "100%", overflowY: "auto", background: defaultTokens.colors.bg, display: "flex", flexDirection: "column" }}>
         {/*
-          Barre supérieure globale — correction "Affichage de la
-          synchronisation" : partagée par TOUS les écrans (contrairement
-          à un placement dans un écran précis), donc identique pour
-          Administrateur et Gérant. Ne contient pour l'instant que
-          l'indicateur de synchronisation, positionné à droite — aucune
-          cloche de notifications n'existe encore dans l'application
-          (hors périmètre de cette correction), l'indicateur est donc
-          seul pour le moment, prêt à accueillir un futur élément à sa
-          gauche sans restructuration.
+          Barre supérieure globale — partagée par TOUS les écrans,
+          identique pour Administrateur et Gérant. Contient désormais
+          l'indicateur de notifications (Phase 4.1 — l'élément anticipé
+          lors de la correction "Affichage de la synchronisation", jamais
+          construit avant d'être réellement nécessaire) et l'indicateur
+          de synchronisation, dans cet ordre, à droite.
         */}
         <div
           style={{
@@ -140,11 +140,13 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
             display: "flex",
             justifyContent: "flex-end",
             alignItems: "center",
+            gap: 10,
             padding: "10px 24px",
             borderBottom: `1px solid ${defaultTokens.colors.borderSoft}`,
             background: "#fff",
           }}
         >
+          <IndicateurNotifications onOuvrirDemandes={() => onNavigate("demandes")} />
           <IndicateurSynchronisation />
         </div>
 

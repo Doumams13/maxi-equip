@@ -233,4 +233,56 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
     expect(resultat.push).toEqual({ envoyees: 0, confirmees: 0 });
     expect(fetchSimule).toHaveBeenCalledTimes(1);
   });
+
+  it("Phase 4.1 — une opération 'demande' reçue via PULL est réellement appliquée aux données métier (callback), contrairement aux autres types (journal technique uniquement)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/sync/push")) return new Response(JSON.stringify({ results: [] }), { status: 200 });
+        return new Response(
+          JSON.stringify({
+            operations: [
+              { curseur: 1, entityType: "demande", entityId: "site-demande-1", payload: { clientNom: "Client Site" }, recuLe: "" },
+              { curseur: 2, entityType: "entree", entityId: "mvt-1", payload: { quantite: 5 }, recuLe: "" },
+            ],
+            cursor: 2,
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const demandesTraitees: { payload: unknown; sourceEntityId: string }[] = [];
+    const service = new SyncService(boiteEnvoiRepository, syncRepository, (payload, sourceEntityId) => {
+      demandesTraitees.push({ payload, sourceEntityId });
+    });
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(true);
+    expect(demandesTraitees).toHaveLength(1); // Uniquement la demande, jamais l'entrée de stock.
+    expect(demandesTraitees[0]!.sourceEntityId).toBe("site-demande-1");
+    expect((demandesTraitees[0]!.payload as { clientNom: string }).clientNom).toBe("Client Site");
+    // Les deux opérations restent journalisées techniquement, comme avant (Partie 17 : ne rien casser).
+    expect(db.prepare("SELECT COUNT(*) as n FROM sync_recu").get()).toMatchObject({ n: 2 });
+  });
+
+  it("Phase 4.1 — une erreur dans le traitement d'une demande n'interrompt jamais le reste de la synchronisation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/sync/push")) return new Response(JSON.stringify({ results: [] }), { status: 200 });
+        return new Response(JSON.stringify({ operations: [{ curseur: 1, entityType: "demande", entityId: "x", payload: {}, recuLe: "" }], cursor: 1 }), {
+          status: 200,
+        });
+      })
+    );
+
+    const service = new SyncService(boiteEnvoiRepository, syncRepository, () => {
+      throw new Error("Echec volontaire de traitement metier");
+    });
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(true); // La synchronisation elle-même reste réussie.
+    expect(syncRepository.getDernierCurseur()).toBe(1); // Le curseur a bien avancé malgré l'échec métier isolé.
+  });
 });

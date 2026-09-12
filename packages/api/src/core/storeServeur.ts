@@ -16,7 +16,7 @@ import Database from "better-sqlite3-multiple-ciphers";
  * appliquée à `local-dev-server.ts`.
  */
 
-export type TypeOperationSync = "vente" | "annulation" | "entree" | "transfert";
+export type TypeOperationSync = "vente" | "annulation" | "entree" | "transfert" | "demande";
 
 export interface OperationRecue {
   entityType: TypeOperationSync;

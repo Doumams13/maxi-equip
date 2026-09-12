@@ -9,10 +9,14 @@ import type { OperationRecue, TypeOperationSync } from "./storeServeur.js";
  * jamais QUE ce qui est envoyé est correct).
  *
  * Types supportés : EXACTEMENT ceux réellement préparés par la Phase 3.3
- * (`boite_envoi.entity_type`) — vente, annulation, entrée, transfert.
+ * (`boite_envoi.entity_type`) — vente, annulation, entrée, transfert,
+ * demande (Phase 4.1 — point d'entrée réel pour la future Phase 5, le
+ * site vitrine : seul type poussé PAR le serveur/site plutôt que par
+ * l'application elle-même, jamais un système de synchronisation
+ * parallèle).
  */
 
-const TYPES_SUPPORTES: readonly TypeOperationSync[] = ["vente", "annulation", "entree", "transfert"];
+const TYPES_SUPPORTES: readonly TypeOperationSync[] = ["vente", "annulation", "entree", "transfert", "demande"];
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

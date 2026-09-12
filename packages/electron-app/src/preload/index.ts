@@ -173,6 +173,25 @@ const maxiEquipApi = {
     ipcRenderer.invoke("backup:creer-manuelle", dossier, motDePasse, confirmation),
   backupGetStatut: (): Promise<{ derniereAutomatique: { createdAt: string } | null; nombreVulnerables: number }> => ipcRenderer.invoke("backup:get-status"),
   backupOuvrirDossier: (): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("backup:open-folder"),
+
+  // --- Restauration (Phase 3.9) — le Renderer ne fait qu'orchestrer les
+  // étapes visuelles ; toute la logique réelle (vérification, mot de
+  // passe, safety backup, échange de fichiers, redémarrage) reste côté
+  // Main. ---
+  backupRestoreChoisirDossier: (): Promise<{ canceled: true } | { canceled: false; dossier: string }> =>
+    ipcRenderer.invoke("backup:restore-choisir-dossier"),
+  backupRestoreAnalyser: (
+    dossier: string
+  ): Promise<{
+    compatible: "ok" | "avertissement" | "incompatible";
+    message: string;
+    type?: "manual" | "automatic" | "safety";
+    necessiteMotDePasse: boolean;
+    createdAt?: string;
+    vulnerable: boolean;
+  }> => ipcRenderer.invoke("backup:restore-analyser", dossier),
+  backupRestoreExecuter: (dossier: string, motDePasse?: string): Promise<{ success: boolean; message?: string; etape?: string }> =>
+    ipcRenderer.invoke("backup:restore-executer", dossier, motDePasse),
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
   genererFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>

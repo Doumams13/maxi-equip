@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, session, Menu } from "electron";
 import { join } from "node:path";
-import { closeDatabase, openDatabase, getEncryptionKey } from "./db/index.js";
+import { closeDatabase, openDatabase, getEncryptionKey, getDatabasePath } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { registerIpcHandlers } from "./ipc/index.js";
 import { registerAuthIpcHandlers } from "./ipc/auth.js";
@@ -23,6 +23,8 @@ import { SyncService } from "./services/syncService.js";
 import { registerSyncIpcHandlers } from "./ipc/sync.js";
 import { BackupService } from "./services/backupService.js";
 import { registerBackupIpcHandlers } from "./ipc/backup.js";
+import { BackupRestoreService } from "./services/backupRestoreService.js";
+import { registerBackupRestoreIpcHandlers } from "./ipc/backupRestore.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
@@ -248,6 +250,10 @@ app.whenReady().then(async () => {
       // eslint-disable-next-line no-console
       console.error("[backup] sauvegarde automatique impossible :", err);
     }
+
+    // Restauration (Phase 3.9) — réutilise le même BackupService (pour la safety backup) et la même clé/chemin déjà résolus ci-dessus, jamais une seconde logique de gestion de clé.
+    const restoreService = new BackupRestoreService(backupService, getEncryptionKey(), getDatabasePath(), closeDatabase);
+    registerBackupRestoreIpcHandlers(restoreService);
   } catch (err) {
     // Ne jamais planter silencieusement (ex. coffre-fort sécurisé du système
     // indisponible — cf. docs/architecture/PHASE0.md). L'utilisateur doit

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Save, Plus, Trash2, Pencil, Archive, RotateCcw, Check, X, History, FolderOpen } from "lucide-react";
 import type { Emplacement } from "@maxi-equip/shared-types";
@@ -534,6 +534,52 @@ function BlocSauvegarde() {
   const [erreurMotDePasse, setErreurMotDePasse] = useState<string | null>(null);
   const { showSuccess, showError } = useToast();
 
+  // --- Restauration (Phase 3.9) ---
+  type EtapeRestauration = "fermee" | "analyse" | "resume" | "confirmation" | "en_cours" | "erreur";
+  const [etapeRestauration, setEtapeRestauration] = useState<EtapeRestauration>("fermee");
+  const [analyseRestauration, setAnalyseRestauration] = useState<Awaited<ReturnType<typeof window.maxiEquip.backupRestoreAnalyser>> | null>(null);
+  const [erreurRestauration, setErreurRestauration] = useState<string | null>(null);
+  const dossierRestaurationRef = useRef<string>("");
+  const motDePasseRestaurationRef = useRef<string>("");
+
+  function reinitialiserRestauration() {
+    setEtapeRestauration("fermee");
+    setAnalyseRestauration(null);
+    setErreurRestauration(null);
+    dossierRestaurationRef.current = "";
+    motDePasseRestaurationRef.current = "";
+  }
+
+  async function handleDemarrerRestauration() {
+    const choix = await window.maxiEquip.backupRestoreChoisirDossier();
+    if (choix.canceled) return;
+    dossierRestaurationRef.current = choix.dossier;
+    setEtapeRestauration("analyse");
+    const analyse = await window.maxiEquip.backupRestoreAnalyser(choix.dossier);
+    if (analyse.compatible === "incompatible") {
+      setErreurRestauration(analyse.message);
+      setEtapeRestauration("erreur");
+      return;
+    }
+    setAnalyseRestauration(analyse);
+    setEtapeRestauration("resume");
+  }
+
+  async function handleExecuterRestauration() {
+    setEtapeRestauration("en_cours");
+    try {
+      const resultat = await window.maxiEquip.backupRestoreExecuter(dossierRestaurationRef.current, motDePasseRestaurationRef.current || undefined);
+      if (!resultat.success) {
+        setErreurRestauration(resultat.message ?? "Une erreur est survenue.");
+        setEtapeRestauration("erreur");
+      }
+      // En cas de succès, l'application redémarre d'elle-même (déclenché côté Main) — rien d'autre à faire ici.
+    } catch (err) {
+      setErreurRestauration(err instanceof Error ? err.message : "Une erreur est survenue.");
+      setEtapeRestauration("erreur");
+    }
+  }
+
   useEffect(() => {
     void window.maxiEquip.backupGetStatut().then(setStatut);
   }, []);
@@ -657,15 +703,27 @@ function BlocSauvegarde() {
             <p style={{ margin: "0 0 12px", fontSize: 12, color: defaultTokens.colors.textSoft, lineHeight: 1.4 }}>
               Restaurez vos données à partir d'une sauvegarde précédente.
             </p>
-            {/* Non implémentée (Phase 3.9) — bouton visuellement présent mais désactivé, jamais un déclenchement réel, jamais une apparence de bug. */}
-            <Button variant="secondary" disabled title="Cette fonctionnalité arrive dans une prochaine mise à jour.">
+            <Button variant="secondary" onClick={() => void handleDemarrerRestauration()}>
               <RotateCcw size={14} />
               Restaurer
             </Button>
-            <div style={{ fontSize: 11, color: defaultTokens.colors.textFaint, marginTop: 6 }}>Bientôt disponible</div>
           </div>
         </div>
       </Card>
+
+      {etapeRestauration !== "fermee" && (
+        <ModalRestauration
+          etape={etapeRestauration}
+          analyse={analyseRestauration}
+          erreur={erreurRestauration}
+          onAnnuler={reinitialiserRestauration}
+          onContinuerVersConfirmation={(motDePasse) => {
+            motDePasseRestaurationRef.current = motDePasse;
+            setEtapeRestauration("confirmation");
+          }}
+          onConfirmerRestauration={() => void handleExecuterRestauration()}
+        />
+      )}
 
       {dossierChoisi && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 260 }}>
@@ -718,5 +776,127 @@ function BlocSauvegarde() {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Modal de restauration — Phase 3.9, Partie 12. Étapes volontairement
+ * réduites (analyse → résumé [+ mot de passe si nécessaire] →
+ * confirmation → en cours → erreur), jamais de fenêtre inutile.
+ * Ne contient aucune logique de restauration elle-même — uniquement
+ * l'affichage des résultats déjà calculés côté Main et la collecte du
+ * mot de passe le cas échéant.
+ */
+function ModalRestauration({
+  etape,
+  analyse,
+  erreur,
+  onAnnuler,
+  onContinuerVersConfirmation,
+  onConfirmerRestauration,
+}: {
+  etape: "analyse" | "resume" | "confirmation" | "en_cours" | "erreur";
+  analyse: Awaited<ReturnType<typeof window.maxiEquip.backupRestoreAnalyser>> | null;
+  erreur: string | null;
+  onAnnuler: () => void;
+  onContinuerVersConfirmation: (motDePasse: string) => void;
+  onConfirmerRestauration: () => void;
+}) {
+  const [motDePasseSaisi, setMotDePasseSaisi] = useState("");
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 270 }}>
+      <Card elevated style={{ width: "min(440px, 92vw)", boxSizing: "border-box" }}>
+        {etape === "analyse" && (
+          <>
+            <h2 style={{ margin: "0 0 10px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>Analyse de la sauvegarde…</h2>
+            <p style={{ margin: 0, fontSize: 12.5, color: defaultTokens.colors.textSoft }}>Vérification du contenu et de la compatibilité en cours.</p>
+          </>
+        )}
+
+        {etape === "resume" && analyse && (
+          <>
+            <h2 style={{ margin: "0 0 10px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>Sauvegarde trouvée</h2>
+            <p style={{ margin: "0 0 4px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+              Type : <strong>{analyse.type === "manual" ? "Manuelle" : analyse.type === "automatic" ? "Automatique" : "Sécurité"}</strong>
+            </p>
+            {analyse.createdAt && (
+              <p style={{ margin: "0 0 12px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+                Créée le : <strong>{new Date(analyse.createdAt).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" })}</strong>
+              </p>
+            )}
+            {analyse.compatible === "avertissement" && (
+              <p style={{ margin: "0 0 12px", fontSize: 12, color: defaultTokens.colors.danger, lineHeight: 1.4 }}>{analyse.message}</p>
+            )}
+            {analyse.necessiteMotDePasse && (
+              <>
+                <label style={labelStyle}>Mot de passe de la sauvegarde</label>
+                <input
+                  type="password"
+                  style={inputStyle}
+                  value={motDePasseSaisi}
+                  onChange={(e) => setMotDePasseSaisi(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && onContinuerVersConfirmation(motDePasseSaisi)}
+                  autoFocus
+                />
+              </>
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <Button variant="secondary" onClick={onAnnuler} style={{ flex: 1 }}>
+                Annuler
+              </Button>
+              <Button
+                onClick={() => onContinuerVersConfirmation(motDePasseSaisi)}
+                disabled={analyse.necessiteMotDePasse && !motDePasseSaisi}
+                style={{ flex: 1 }}
+              >
+                Continuer
+              </Button>
+            </div>
+          </>
+        )}
+
+        {etape === "confirmation" && (
+          <>
+            <h2 style={{ margin: "0 0 10px", fontFamily: defaultTokens.typography.display, fontSize: 16, color: defaultTokens.colors.danger }}>
+              Confirmer la restauration
+            </h2>
+            <p style={{ margin: "0 0 16px", fontSize: 12.5, color: defaultTokens.colors.textSoft, lineHeight: 1.5 }}>
+              Vous êtes sur le point de restaurer les données de MAXI-EQUIP. Les données actuelles seront remplacées par celles de la sauvegarde
+              sélectionnée. Une sauvegarde de sécurité de vos données actuelles sera créée avant la restauration. Cette opération nécessitera le
+              redémarrage de l'application.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button variant="secondary" onClick={onAnnuler} style={{ flex: 1 }}>
+                Annuler
+              </Button>
+              <Button variant="danger" onClick={onConfirmerRestauration} style={{ flex: 1 }}>
+                Restaurer
+              </Button>
+            </div>
+          </>
+        )}
+
+        {etape === "en_cours" && (
+          <>
+            <h2 style={{ margin: "0 0 10px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>Restauration en cours…</h2>
+            <p style={{ margin: 0, fontSize: 12.5, color: defaultTokens.colors.textSoft }}>
+              Sauvegarde de sécurité, puis restauration des données. L'application redémarrera automatiquement une fois terminé.
+            </p>
+          </>
+        )}
+
+        {etape === "erreur" && (
+          <>
+            <h2 style={{ margin: "0 0 10px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>Restauration impossible</h2>
+            <p style={{ margin: "0 0 16px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>{erreur}</p>
+            <p style={{ margin: "0 0 16px", fontSize: 11.5, color: defaultTokens.colors.textFaint }}>Vos données actuelles n'ont pas été modifiées.</p>
+            <Button variant="secondary" onClick={onAnnuler} style={{ width: "100%" }}>
+              Fermer
+            </Button>
+          </>
+        )}
+      </Card>
+    </div>
   );
 }

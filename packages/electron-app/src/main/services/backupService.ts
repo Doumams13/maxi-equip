@@ -76,14 +76,14 @@ export interface StatutSauvegarde {
 
 const NOM_APPLICATION = "MAXI-EQUIP";
 const VERSION_APPLICATION = "0.1.0";
-const FORMAT_SAUVEGARDE = "MAXI_EQUIP_BACKUP";
+export const FORMAT_SAUVEGARDE = "MAXI_EQUIP_BACKUP";
 /**
  * Version 2 : `database.encryptionKeyHex` (clé en clair, corrigé) est
  * remplacé par `database.keyProtection` (présent uniquement pour
  * `manual`, jamais de clé en clair) — changement de structure
  * suffisamment important pour justifier l'incrément.
  */
-const VERSION_FORMAT_SAUVEGARDE = 2;
+export const VERSION_FORMAT_SAUVEGARDE = 2;
 
 export const DELAI_MIN_SAUVEGARDE_AUTOMATIQUE_MS = 24 * 60 * 60 * 1000;
 export const NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES = 10;

@@ -8,6 +8,7 @@ import { StockScreen } from "./screens/StockScreen.js";
 import { TransfertsScreen } from "./screens/TransfertsScreen.js";
 import { VentesScreen } from "./screens/VentesScreen.js";
 import { FacturesScreen } from "./screens/FacturesScreen.js";
+import { DemandesScreen } from "./screens/DemandesScreen.js";
 import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
 import { ParametresScreen } from "./screens/ParametresScreen.js";
 
@@ -79,6 +80,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     { id: "transferts", label: "Transferts", autorise: permissions.canOperateStock },
     { id: "ventes", label: "Vente", autorise: permissions.canOperateSales },
     { id: "factures", label: "Factures", autorise: permissions.canAccessHistory },
+    { id: "demandes", label: "Demandes", autorise: permissions.canHandleSiteRequests },
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
     { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
   ];
@@ -131,6 +133,8 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
             }}
           />
         );
+      case "demandes":
+        return <DemandesScreen session={{ userId: session!.userId, nom: session!.nom }} />;
       case "historique":
         return (
           <HistoriqueScreen

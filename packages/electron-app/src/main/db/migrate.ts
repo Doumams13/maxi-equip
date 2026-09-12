@@ -21,7 +21,26 @@ export function runMigrations(db: Database.Database): void {
   migrateFacturesPourAnnulationEtLivraison(db);
   seedParametresEntrepriseSiAbsent(db);
   migrerTelephoneUniqueVersTable(db);
+  ajouterSourceEntityIdDemandesSiAbsent(db);
   setSchemaVersion(db);
+}
+
+/**
+ * Phase 4.1, Partie 17 — une demande reçue via PULL (Partie 4) doit
+ * pouvoir être identifiée de façon idempotente : le même identifiant
+ * source (attribué par le serveur/site) ne doit jamais créer deux
+ * demandes locales, même si un même lot d'opérations était pull à
+ * nouveau. NULL pour toute demande créée directement dans l'application
+ * (aucun identifiant source) — un index UNIQUE sur SQLite autorise
+ * plusieurs NULL sans conflit, donc cette colonne ne contraint jamais
+ * les demandes locales.
+ */
+function ajouterSourceEntityIdDemandesSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(demandes)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "source_entity_id")) {
+    db.exec("ALTER TABLE demandes ADD COLUMN source_entity_id TEXT");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_demandes_source_entity_id ON demandes (source_entity_id) WHERE source_entity_id IS NOT NULL");
+  }
 }
 
 /**
@@ -39,7 +58,7 @@ export function runMigrations(db: Database.Database): void {
  * plus tard, par la restauration (Phase 3.9) pour valider la
  * compatibilité d'une sauvegarde avant de l'appliquer.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 function setSchemaVersion(db: Database.Database): void {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);

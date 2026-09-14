@@ -239,26 +239,35 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
   useEffect(() => {
     if (!demandeAPreRemplir) return;
     void (async () => {
-      const demande = await window.maxiEquip.demandesObtenir(demandeAPreRemplir);
-      if (!demande) {
-        showError("Demande introuvable", "Impossible de récupérer les données de cette demande.");
+      try {
+        const demande = await window.maxiEquip.demandesObtenir(demandeAPreRemplir);
+        if (!demande) {
+          showError("Demande introuvable", "Impossible de récupérer les données de cette demande.");
+          onPreRemplissageDemandeConsomme?.();
+          return;
+        }
+        setClientNom(demande.clientNom);
+        setClientTelephone(demande.clientTelephone);
+        setDemandeOrigineId(demandeAPreRemplir);
+        const lignesChargees = demande.lignes.map((l) => ({
+          produitId: l.produitId,
+          quantite: String(l.quantite),
+          prixUnitaire: String(l.prixIndicatif),
+          allocations: {},
+          fournisseurExterne: "",
+          prixAchatExterne: "",
+        }));
+        setLignes(lignesChargees.length > 0 ? lignesChargees : [ligneVide()]);
+        showSuccess("Demande chargée", "Complétez le sourcing puis validez pour créer la vente et la facture.");
         onPreRemplissageDemandeConsomme?.();
-        return;
+      } catch (err) {
+        // Correction — un échec ici restait invisible auparavant (aucun
+        // try/catch), laissant le formulaire vide sans aucune indication.
+        // eslint-disable-next-line no-console
+        console.error("[ventes] préremplissage depuis une demande impossible :", err);
+        showError("Préremplissage impossible", err instanceof Error ? err.message : "Une erreur inattendue s'est produite en récupérant la demande.");
+        onPreRemplissageDemandeConsomme?.();
       }
-      setClientNom(demande.clientNom);
-      setClientTelephone(demande.clientTelephone);
-      setDemandeOrigineId(demandeAPreRemplir);
-      const lignesChargees = demande.lignes.map((l) => ({
-        produitId: l.produitId,
-        quantite: String(l.quantite),
-        prixUnitaire: String(l.prixIndicatif),
-        allocations: {},
-        fournisseurExterne: "",
-        prixAchatExterne: "",
-      }));
-      setLignes(lignesChargees.length > 0 ? lignesChargees : [ligneVide()]);
-      showSuccess("Demande chargée", "Complétez le sourcing puis validez pour créer la vente et la facture.");
-      onPreRemplissageDemandeConsomme?.();
     })();
   }, [demandeAPreRemplir]);
 

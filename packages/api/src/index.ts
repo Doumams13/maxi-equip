@@ -3,6 +3,7 @@ import { healthRoute as publicHealthRoute } from "./routes/v1/public/health.js";
 import { healthRoute as appHealthRoute } from "./routes/v1/app/health.js";
 import { pushRoute } from "./routes/v1/app/sync/push.js";
 import { pullRoute } from "./routes/v1/app/sync/pull.js";
+import { publicSubmitRequestRoute } from "./routes/v1/public/requests.js";
 
 export function createRouter(): Router {
   const router = new Router();
@@ -10,6 +11,7 @@ export function createRouter(): Router {
   router.register(appHealthRoute);
   router.register(pushRoute);
   router.register(pullRoute);
+  router.register(publicSubmitRequestRoute);
   return router;
 }
 

@@ -49,6 +49,7 @@ const server = createServer((nodeReq, nodeRes) => {
         headers: Object.fromEntries(Object.entries(nodeReq.headers).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])),
         query: Object.fromEntries(url.searchParams.entries()),
         body,
+        ip: nodeReq.socket.remoteAddress,
       };
 
       const apiRes = await router.dispatch(apiReq);

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+<rect width="800" height="600" fill="#F1EFE9"/>
+<rect x="0" y="440" width="800" height="160" fill="#5B6066"/>
+<line x1="0" y1="440" x2="800" y2="440" stroke="#00000022" stroke-width="2"/>
+
+        <rect x="60" y="380" width="680" height="160" rx="10" fill="#EDEDED" stroke="#CBCBCB" stroke-width="2"/>
+        <rect x="90" y="300" width="180" height="90" rx="6" fill="#D9D9D9"/>
+        <rect x="300" y="300" width="120" height="90" rx="6" fill="#B7CDB0"/>
+        <circle cx="620" cy="345" r="35" fill="#EFEFEF" stroke="#C9C9C9" stroke-width="3"/>
+        
+<rect x="24" y="24" width="230" height="34" rx="6" fill="#12280Acc"/>
+<text x="36" y="47" font-family="Segoe UI, sans-serif" font-size="16" fill="#FFFFFF">Exemple d'utilisation — cuisine</text>
+</svg>

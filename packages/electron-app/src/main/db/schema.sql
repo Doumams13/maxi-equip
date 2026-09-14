@@ -178,10 +178,18 @@ CREATE TABLE IF NOT EXISTS demandes (
   updated_at       TEXT NOT NULL
 );
 
+-- Correction "Intégration Site Phase 5" : produit_id n'est JAMAIS une
+-- clé étrangère vers produits(id) — une demande vient d'une source
+-- externe (le site vitrine) dont le catalogue n'est pas garanti d'être
+-- synchronisé avec les identifiants réels de cette installation.
+-- Traité comme une donnée informative dénormalisée, exactement comme
+-- motif/taille/prix_indicatif juste en dessous — jamais un identifiant
+-- garanti résoluble localement. Le personnel choisit le vrai produit
+-- lui-même lors du traitement (écran Vente, jamais deviné).
 CREATE TABLE IF NOT EXISTS lignes_demande (
   id               TEXT PRIMARY KEY,
   demande_id       TEXT NOT NULL REFERENCES demandes (id),
-  produit_id       TEXT NOT NULL REFERENCES produits (id),
+  produit_id       TEXT NOT NULL,
   motif            TEXT NOT NULL,
   taille           TEXT NOT NULL,
   quantite         INTEGER NOT NULL CHECK (quantite > 0),

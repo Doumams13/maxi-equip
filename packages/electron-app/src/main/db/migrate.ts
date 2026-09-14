@@ -24,7 +24,52 @@ export function runMigrations(db: Database.Database): void {
   ajouterSourceEntityIdDemandesSiAbsent(db);
   creerTableSuiviDemandeSiAbsente(db);
   migrerAncienStatutContacteeSiPresent(db);
+  retirerContrainteProduitIdLignesDemandeSiPresente(db);
   setSchemaVersion(db);
+}
+
+/**
+ * Correction "Intégration Site Phase 5" — retire la contrainte de clé
+ * étrangère `produit_id REFERENCES produits (id)` sur `lignes_demande`,
+ * devenue incorrecte : une demande provient d'une source EXTERNE (le
+ * site vitrine), dont le catalogue n'est jamais garanti d'être
+ * synchronisé avec les identifiants réels de cette installation.
+ * Vérifié réellement avant cette correction : une vraie tentative
+ * d'ingestion avec un identifiant inconnu échouait avec
+ * "FOREIGN KEY constraint failed", empêchant silencieusement toute
+ * demande venant d'un catalogue non parfaitement aligné d'apparaître
+ * dans l'application.
+ *
+ * SQLite ne permet pas de retirer une contrainte FOREIGN KEY par un
+ * simple ALTER TABLE — recrée la table sans la contrainte, copie les
+ * données existantes telles quelles (aucune perte), puis bascule.
+ * Idempotente : ne s'exécute que si l'ancienne contrainte est encore
+ * détectée dans le SQL de création de la table.
+ */
+function retirerContrainteProduitIdLignesDemandeSiPresente(db: Database.Database): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'lignes_demande'").get() as { sql: string } | undefined;
+  if (!row || !row.sql.includes("produit_id") || !row.sql.toUpperCase().includes("REFERENCES PRODUITS")) return;
+
+  const executer = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE lignes_demande_nouvelle (
+        id               TEXT PRIMARY KEY,
+        demande_id       TEXT NOT NULL REFERENCES demandes (id),
+        produit_id       TEXT NOT NULL,
+        motif            TEXT NOT NULL,
+        taille           TEXT NOT NULL,
+        quantite         INTEGER NOT NULL CHECK (quantite > 0),
+        prix_indicatif   INTEGER NOT NULL
+      );
+    `);
+    db.exec(`
+      INSERT INTO lignes_demande_nouvelle (id, demande_id, produit_id, motif, taille, quantite, prix_indicatif)
+      SELECT id, demande_id, produit_id, motif, taille, quantite, prix_indicatif FROM lignes_demande;
+    `);
+    db.exec("DROP TABLE lignes_demande;");
+    db.exec("ALTER TABLE lignes_demande_nouvelle RENAME TO lignes_demande;");
+  });
+  executer();
 }
 
 /**
@@ -93,7 +138,7 @@ function ajouterSourceEntityIdDemandesSiAbsent(db: Database.Database): void {
  * plus tard, par la restauration (Phase 3.9) pour valider la
  * compatibilité d'une sauvegarde avant de l'appliquer.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 function setSchemaVersion(db: Database.Database): void {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);

@@ -243,5 +243,5 @@ function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, v
   doc.text("MARGE SUR ACHAT EXTÉRIEUR", 300, resumeY + 30, { width: 170 });
   doc.text(`${formaterMontant(margeExterieureGenerale)} FCFA`, 470, resumeY + 30, { width: MARGE_DROITE - 470, align: "right" });
 
-  dessinerPiedDePage(doc, identite);
+  dessinerPiedDePage(doc);
 }

@@ -166,11 +166,13 @@ app.whenReady().then(async () => {
       } else if (mode === "injecter-demande-test") {
         const produitArg = process.argv.find((a) => a.startsWith("--produit-id="));
         const produitId = produitArg ? produitArg.split("=")[1]! : (db.prepare("SELECT id FROM produits LIMIT 1").get() as { id: string } | undefined)?.id;
+        const varianteArg = process.argv.find((a) => a.startsWith("--variante="));
+        const variante = varianteArg ? (Number(varianteArg.split("=")[1]) as 1 | 2 | 3) : 1;
         if (!produitId) {
           // eslint-disable-next-line no-console
           console.error("Aucun produit disponible pour l'injection — créez au moins un produit ou passez --produit-id=<id>.");
         } else {
-          const resultat = await injecterDemandeTest(db, produitId);
+          const resultat = await injecterDemandeTest(db, produitId, [1, 2, 3].includes(variante) ? variante : 1);
           // eslint-disable-next-line no-console
           console.log(JSON.stringify(resultat, null, 2));
         }

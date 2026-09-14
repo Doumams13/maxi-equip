@@ -23,21 +23,55 @@ export interface ResultatInjectionDemandeTest {
   message?: string;
 }
 
-export async function injecterDemandeTest(_db: Database.Database, produitId: string): Promise<ResultatInjectionDemandeTest> {
+/**
+ * Correction — trois variantes réalistes plutôt qu'une seule demande
+ * toujours identique, pour permettre de tester le parcours complet
+ * (liste, ouverture, suivi, "Traiter la demande") sur plusieurs cas
+ * distincts (client unique, plusieurs lignes) sans avoir à modifier le
+ * code à chaque fois.
+ */
+function construirePayload(variante: 1 | 2 | 3, produitId: string) {
+  if (variante === 2) {
+    return {
+      clientNom: "Marie Obiang",
+      clientTelephone: "+241 06 12 34 56",
+      clientAdresse: "Libreville, Nombakélé (test)",
+      clientEmail: null,
+      commentaire: "Demande de test n°2 — client sans email.",
+      lignes: [{ produitId, motif: "Produit de test", taille: "60x60", quantite: 5, prixIndicatif: 10000 }],
+    };
+  }
+  if (variante === 3) {
+    return {
+      clientNom: "Paul Ndong",
+      clientTelephone: "+241 05 98 76 54",
+      clientAdresse: "Libreville, Glass (test)",
+      clientEmail: "paul.ndong@example.com",
+      commentaire: "Demande de test n°3 — plusieurs produits.",
+      lignes: [
+        { produitId, motif: "Produit de test", taille: "60x60", quantite: 3, prixIndicatif: 10000 },
+        { produitId, motif: "Produit de test", taille: "60x60", quantite: 1, prixIndicatif: 10000 },
+      ],
+    };
+  }
+  return {
+    clientNom: "Client Test Injection",
+    clientTelephone: "+241 07 07 07 07",
+    clientAdresse: "Libreville, Akébé (test)",
+    clientEmail: "test-injection@example.com",
+    commentaire: "Demande de test n°1 injectée via --maintenance=injecter-demande-test",
+    lignes: [{ produitId, motif: "Produit de test", taille: "60x60", quantite: 2, prixIndicatif: 10000 }],
+  };
+}
+
+export async function injecterDemandeTest(_db: Database.Database, produitId: string, variante: 1 | 2 | 3 = 1): Promise<ResultatInjectionDemandeTest> {
   const config = getConfigurationSync();
   if (!config.jwt) {
     return { success: false, message: "Aucun jeton de synchronisation configuré (MAXI_EQUIP_SYNC_JWT) — impossible d'injecter via l'API réelle." };
   }
 
   const entityId = randomUUID();
-  const payloadDemande = {
-    clientNom: "Client Test Injection",
-    clientTelephone: "+241 07 07 07 07",
-    clientAdresse: "Libreville, Akébé (test)",
-    clientEmail: "test-injection@example.com",
-    commentaire: "Demande de test injectée via --maintenance=injecter-demande-test",
-    lignes: [{ produitId, motif: "Produit de test", taille: "60x60", quantite: 2, prixIndicatif: 10000 }],
-  };
+  const payloadDemande = construirePayload(variante, produitId);
 
   try {
     const reponse = await fetch(`${config.apiUrl}/v1/sync/push`, {

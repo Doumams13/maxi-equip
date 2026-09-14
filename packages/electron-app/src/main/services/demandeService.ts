@@ -1,15 +1,19 @@
 import type { Demande, DemandeStatut } from "@maxi-equip/shared-types";
-import { DemandeRepository, type NouvelleDemande, type NouvelleLigneDemande } from "../repositories/demandeRepository.js";
+import { DemandeRepository, type NouvelleDemande } from "../repositories/demandeRepository.js";
 import { NotificationRepository } from "../repositories/notificationRepository.js";
 import { StockRepository } from "../repositories/stockRepository.js";
-import { VenteService, type VenteLigneInput, type VenteResult } from "./venteService.js";
 
 /**
- * Phase 4.1 — orchestre le cycle de vie d'une demande du site vitrine.
- * Partie 10, point le plus important : la confirmation réutilise
- * EXACTEMENT `VenteService.enregistrerVente()` déjà existant et déjà
- * testé (Phase 2) — aucune règle de stock, de sourcing ou de calcul de
- * facture n'est réimplémentée ici.
+ * Correction "Workflow réel des demandes" — orchestre le cycle de vie
+ * d'une demande du site vitrine SANS jamais dupliquer la logique de
+ * vente : `VenteService` n'est plus une dépendance de ce service du
+ * tout (contrairement à la première version de la Phase 4.1) — la
+ * demande sert uniquement de SOURCE DE DONNÉES pour préremplir l'écran
+ * Vente réel (voir `VentesScreen.tsx`), qui appelle lui-même
+ * `ventes:create` exactement comme pour n'importe quelle vente. Une
+ * fois la vente réellement validée là-bas, `marquerTraitee()` se
+ * contente d'enregistrer la liaison — jamais une seconde création de
+ * vente/facture/mouvement ici.
  */
 
 export class DemandeValidationError extends Error {
@@ -27,35 +31,24 @@ export interface LigneVerificationStock {
   quantiteDisponible: number;
 }
 
-export interface ConfirmerDemandeInput {
-  pointDeVenteId: string;
-  vendeurUtilisateurId: string;
-  vendeurCompteConnecteNom: string;
-  vendeurNomManuel: string | null;
-  modeReglement: string | null;
-  lignes: VenteLigneInput[];
+export interface EntreeSuiviDemande {
+  statut: DemandeStatut;
+  commentaire: string | null;
+  createdAt: string;
 }
 
 export const DUREE_CONSERVATION_DEMANDE_NON_CONFIRMEE_MS = 7 * 24 * 60 * 60 * 1000;
 
+const STATUTS_SUIVI: DemandeStatut[] = ["nouvelle", "en_cours", "a_contacter"];
 const STATUTS_MODIFIABLES: DemandeStatut[] = ["nouvelle", "en_cours", "a_contacter", "contactee"];
-/** Statuts de SUIVI (Partie 2/3 de la correction) — distincts des statuts terminaux (confirmee/refusee/annulee), qui ont leurs propres méthodes dédiées. */
-const STATUTS_SUIVI: DemandeStatut[] = ["nouvelle", "en_cours", "a_contacter", "contactee"];
 
 export class DemandeService {
   constructor(
     private readonly demandeRepository: DemandeRepository,
     private readonly notificationRepository: NotificationRepository,
-    private readonly stockRepository: StockRepository,
-    private readonly venteService: VenteService
+    private readonly stockRepository: StockRepository
   ) {}
 
-  /**
-   * Partie 17 : si `sourceEntityId` est fourni et correspond à une
-   * demande déjà créée (une synchronisation qui recouvrirait la même
-   * opération), ne crée jamais de doublon métier — renvoie la demande
-   * existante telle quelle, sans nouvelle notification.
-   */
   creerDepuisReception(input: NouvelleDemande): Demande {
     if (input.sourceEntityId) {
       const existante = this.demandeRepository.trouverParSourceEntityId(input.sourceEntityId);
@@ -63,6 +56,7 @@ export class DemandeService {
     }
 
     const demande = this.demandeRepository.creer(input);
+    this.demandeRepository.ajouterSuivi(demande.id, "nouvelle", "Demande reçue depuis le site.");
     const nombreArticles = demande.lignes.reduce((s, l) => s + l.quantite, 0);
     this.notificationRepository.creer(
       "demande",
@@ -79,6 +73,14 @@ export class DemandeService {
 
   obtenir(id: string): Demande | null {
     return this.demandeRepository.findById(id);
+  }
+
+  listerSuivi(demandeId: string): EntreeSuiviDemande[] {
+    return this.demandeRepository.listerSuivi(demandeId);
+  }
+
+  compterActives(): number {
+    return this.demandeRepository.compterActives();
   }
 
   private assurerModifiable(demande: Demande): void {
@@ -100,34 +102,7 @@ export class DemandeService {
     }));
   }
 
-  modifierLignes(demandeId: string, lignes: NouvelleLigneDemande[]): Demande {
-    const demande = this.demandeRepository.findById(demandeId);
-    if (!demande) throw new DemandeValidationError("Demande introuvable.");
-    this.assurerModifiable(demande);
-    if (lignes.length === 0) throw new DemandeValidationError("Une demande doit conserver au moins un produit.");
-    this.demandeRepository.remplacerLignes(demandeId, lignes);
-    return this.demandeRepository.findById(demandeId)!;
-  }
-
-  modifierClient(
-    demandeId: string,
-    champs: { clientNom?: string; clientTelephone?: string; clientAdresse?: string; clientEmail?: string | null; commentaire?: string | null }
-  ): Demande {
-    const demande = this.demandeRepository.findById(demandeId);
-    if (!demande) throw new DemandeValidationError("Demande introuvable.");
-    this.assurerModifiable(demande);
-    this.demandeRepository.modifierClient(demandeId, champs);
-    return this.demandeRepository.findById(demandeId)!;
-  }
-
-  /**
-   * Correction "Suivi et modification des demandes", Partie 2/3/4 :
-   * fait progresser le statut de SUIVI (nouvelle -> à contacter ->
-   * contactée -> en cours), réellement enregistré (jamais une simple
-   * indication visuelle temporaire) — jamais utilisée pour confirmer,
-   * refuser ou annuler, qui gardent leurs propres méthodes dédiées.
-   */
-  marquerSuivi(demandeId: string, statut: DemandeStatut): Demande {
+  marquerSuivi(demandeId: string, statut: DemandeStatut, commentaire: string | null = null): Demande {
     if (!STATUTS_SUIVI.includes(statut)) {
       throw new DemandeValidationError(`"${statut}" n'est pas un statut de suivi valide.`);
     }
@@ -135,31 +110,20 @@ export class DemandeService {
     if (!demande) throw new DemandeValidationError("Demande introuvable.");
     this.assurerModifiable(demande);
     this.demandeRepository.changerStatut(demandeId, statut);
+    this.demandeRepository.ajouterSuivi(demandeId, statut, commentaire?.trim() || null);
     return this.demandeRepository.findById(demandeId)!;
   }
 
-  confirmer(demandeId: string, input: ConfirmerDemandeInput): VenteResult {
+  marquerTraitee(demandeId: string, factureId: string): Demande {
     const demande = this.demandeRepository.findById(demandeId);
     if (!demande) throw new DemandeValidationError("Demande introuvable.");
-    if (demande.statut === "confirmee") throw new DemandeValidationError("Cette demande est déjà confirmée.");
+    if (demande.statut === "confirmee") throw new DemandeValidationError("Cette demande est déjà traitée.");
     if (demande.statut === "refusee" || demande.statut === "annulee") {
-      throw new DemandeValidationError(`Une demande ${demande.statut === "refusee" ? "refusée" : "annulée"} ne peut plus être confirmée.`);
+      throw new DemandeValidationError(`Une demande ${demande.statut === "refusee" ? "refusée" : "annulée"} ne peut plus être traitée.`);
     }
-
-    const result = this.venteService.enregistrerVente({
-      pointDeVenteId: input.pointDeVenteId,
-      clientNom: demande.clientNom,
-      clientTelephone: demande.clientTelephone,
-      clientAdresse: demande.clientAdresse,
-      vendeurUtilisateurId: input.vendeurUtilisateurId,
-      vendeurCompteConnecteNom: input.vendeurCompteConnecteNom,
-      vendeurNomManuel: input.vendeurNomManuel,
-      modeReglement: input.modeReglement,
-      lignes: input.lignes,
-    });
-
-    this.demandeRepository.marquerConfirmee(demandeId, result.factureId);
-    return result;
+    this.demandeRepository.marquerConfirmee(demandeId, factureId);
+    this.demandeRepository.ajouterSuivi(demandeId, "confirmee", "Vente validée — facture liée.");
+    return this.demandeRepository.findById(demandeId)!;
   }
 
   refuser(demandeId: string, motif: string): Demande {
@@ -168,6 +132,7 @@ export class DemandeService {
     this.assurerModifiable(demande);
     if (!motif.trim()) throw new DemandeValidationError("Un motif est obligatoire pour refuser une demande.");
     this.demandeRepository.refuser(demandeId, motif.trim());
+    this.demandeRepository.ajouterSuivi(demandeId, "refusee", motif.trim());
     return this.demandeRepository.findById(demandeId)!;
   }
 
@@ -176,6 +141,7 @@ export class DemandeService {
     if (!demande) throw new DemandeValidationError("Demande introuvable.");
     this.assurerModifiable(demande);
     this.demandeRepository.changerStatut(demandeId, "annulee");
+    this.demandeRepository.ajouterSuivi(demandeId, "annulee", null);
     return this.demandeRepository.findById(demandeId)!;
   }
 

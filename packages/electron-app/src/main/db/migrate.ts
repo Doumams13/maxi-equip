@@ -22,7 +22,42 @@ export function runMigrations(db: Database.Database): void {
   seedParametresEntrepriseSiAbsent(db);
   migrerTelephoneUniqueVersTable(db);
   ajouterSourceEntityIdDemandesSiAbsent(db);
+  creerTableSuiviDemandeSiAbsente(db);
+  migrerAncienStatutContacteeSiPresent(db);
   setSchemaVersion(db);
+}
+
+/**
+ * Correction "Workflow réel des demandes" — historique de suivi
+ * (Partie 5/6/7) : chaque changement de statut peut porter un
+ * commentaire libre, conservé pour comprendre plus tard ce qui a déjà
+ * été fait. Table strictement additive, jamais un remplacement de
+ * `demandes.statut` (qui reste la source de vérité pour le statut
+ * ACTUEL) — uniquement un journal.
+ */
+function creerTableSuiviDemandeSiAbsente(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS suivi_demande (
+      id TEXT PRIMARY KEY,
+      demande_id TEXT NOT NULL REFERENCES demandes (id),
+      statut TEXT NOT NULL,
+      commentaire TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+}
+
+/**
+ * Correction "Workflow réel des demandes", Partie 3 : le statut
+ * "contactee" est retiré du workflow actif (le fait d'avoir contacté le
+ * client devient un COMMENTAIRE de suivi sur le statut "en_cours",
+ * jamais un statut technique séparé). Les demandes déjà au statut
+ * "contactee" (créées avant cette correction) sont migrées vers
+ * "en_cours" — jamais laissées dans un état devenu invisible de
+ * l'interface. Idempotent : sans effet si aucune ligne n'est concernée.
+ */
+function migrerAncienStatutContacteeSiPresent(db: Database.Database): void {
+  db.exec("UPDATE demandes SET statut = 'en_cours', updated_at = updated_at WHERE statut = 'contactee'");
 }
 
 /**
@@ -58,7 +93,7 @@ function ajouterSourceEntityIdDemandesSiAbsent(db: Database.Database): void {
  * plus tard, par la restauration (Phase 3.9) pour valider la
  * compatibilité d'une sauvegarde avant de l'appliquer.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 function setSchemaVersion(db: Database.Database): void {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);

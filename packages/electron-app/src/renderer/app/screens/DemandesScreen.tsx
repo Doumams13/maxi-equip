@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Search, Check, X, RotateCcw, Pencil, Package, Phone, Plus, Trash2 } from "lucide-react";
-import type { Demande, DemandeStatut, Emplacement } from "@maxi-equip/shared-types";
+import { Search, X, RotateCcw, Phone, ShoppingCart, ChevronDown, ChevronUp, Receipt } from "lucide-react";
+import type { Demande, DemandeStatut } from "@maxi-equip/shared-types";
+import { useSurbrillanceOperation } from "../highlight.js";
+
+/**
+ * Écran Demandes — correction "Workflow réel des demandes". La
+ * confirmation en vente ne vit plus ici : "Traiter la demande" redirige
+ * vers l'espace Vente réel (prérempli), qui reste l'unique endroit où
+ * VenteService est appelé. Cet écran ne fait plus que consulter, suivre
+ * (avec commentaires facultatifs et historique), refuser ou annuler.
+ */
 
 const inputStyle: React.CSSProperties = {
   padding: "9px 12px",
@@ -16,10 +25,10 @@ const labelStyle: React.CSSProperties = { display: "block", fontSize: 12, fontWe
 
 const LABELS_STATUT: Record<DemandeStatut, string> = {
   nouvelle: "Nouvelle",
-  en_cours: "En cours",
-  a_contacter: "À contacter",
-  contactee: "Contactée",
-  confirmee: "Confirmée",
+  en_cours: "En traitement",
+  a_contacter: "Client à contacter",
+  contactee: "En traitement",
+  confirmee: "Traitée",
   refusee: "Refusée",
   annulee: "Annulée",
 };
@@ -42,7 +51,16 @@ function StatutBadge({ statut }: { statut: DemandeStatut }) {
   );
 }
 
-export function DemandesScreen({ session }: { session: { userId: string; nom: string } }) {
+export function DemandesScreen({
+  onTraiterDemande,
+  cibleSurbrillance,
+  onSurbrillanceAppliquee,
+}: {
+  session: { userId: string; nom: string };
+  onTraiterDemande: (demandeId: string) => void;
+  cibleSurbrillance: string | null;
+  onSurbrillanceAppliquee: () => void;
+}) {
   const [demandes, setDemandes] = useState<Demande[] | null>(null);
   const [recherche, setRecherche] = useState("");
   const [statutFiltre, setStatutFiltre] = useState<DemandeStatut | "toutes">("toutes");
@@ -57,12 +75,19 @@ export function DemandesScreen({ session }: { session: { userId: string; nom: st
     void recharger();
   }, []);
 
+  useEffect(() => {
+    if (cibleSurbrillance) setDemandeOuverteId(cibleSurbrillance);
+  }, [cibleSurbrillance]);
+
   const filtrees = (demandes ?? []).filter((d) => {
     if (statutFiltre !== "toutes" && d.statut !== statutFiltre) return false;
     if (!recherche.trim()) return true;
     const r = recherche.toLowerCase();
     return d.numero.toLowerCase().includes(r) || d.clientNom.toLowerCase().includes(r) || d.clientTelephone.includes(r);
   });
+
+  const cibleActive = cibleSurbrillance && filtrees.some((d) => d.id === cibleSurbrillance) ? cibleSurbrillance : null;
+  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(cibleActive, onSurbrillanceAppliquee);
 
   return (
     <div style={{ padding: 28 }}>
@@ -86,16 +111,18 @@ export function DemandesScreen({ session }: { session: { userId: string; nom: st
           </div>
           <select style={inputStyle} value={statutFiltre} onChange={(e) => setStatutFiltre(e.target.value as DemandeStatut | "toutes")}>
             <option value="toutes">Tous les statuts</option>
-            {(Object.keys(LABELS_STATUT) as DemandeStatut[]).map((s) => (
-              <option key={s} value={s}>
-                {LABELS_STATUT[s]}
-              </option>
-            ))}
+            <option value="nouvelle">Nouvelle</option>
+            <option value="a_contacter">Client à contacter</option>
+            <option value="en_cours">En traitement</option>
+            <option value="confirmee">Traitée</option>
+            <option value="refusee">Refusée</option>
+            <option value="annulee">Annulée</option>
           </select>
         </div>
       </Card>
 
       <Card style={{ padding: 0, overflow: "hidden" }}>
+        <div ref={conteneurRef}>
         {!demandes ? (
           <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Chargement…</p>
         ) : filtrees.length === 0 ? (
@@ -114,7 +141,12 @@ export function DemandesScreen({ session }: { session: { userId: string; nom: st
             </thead>
             <tbody>
               {filtrees.map((d) => (
-                <tr key={d.id} onClick={() => setDemandeOuverteId(d.id)} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: "pointer" }}>
+                <tr
+                  key={d.id}
+                  data-operation-id={d.id}
+                  onClick={() => setDemandeOuverteId(d.id)}
+                  style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: "pointer", ...styleSurbrillance(d.id) }}
+                >
                   <td style={{ padding: "10px 16px", fontFamily: defaultTokens.typography.mono, fontWeight: 700, color: defaultTokens.colors.accent }}>{d.numero}</td>
                   <td style={{ padding: "10px 16px" }}>{d.clientNom}</td>
                   <td style={{ padding: "10px 16px" }}>{d.clientTelephone}</td>
@@ -130,16 +162,15 @@ export function DemandesScreen({ session }: { session: { userId: string; nom: st
             </tbody>
           </table>
         )}
+        </div>
       </Card>
 
       {demandeOuverteId && (
         <ModalDetailDemande
           demandeId={demandeOuverteId}
-          session={session}
           onFermer={() => setDemandeOuverteId(null)}
-          onChange={() => {
-            void recharger();
-          }}
+          onChange={() => void recharger()}
+          onTraiterDemande={onTraiterDemande}
           showSuccess={showSuccess}
           showError={showError}
         />
@@ -150,16 +181,16 @@ export function DemandesScreen({ session }: { session: { userId: string; nom: st
 
 function ModalDetailDemande({
   demandeId,
-  session,
   onFermer,
   onChange,
+  onTraiterDemande,
   showSuccess,
   showError,
 }: {
   demandeId: string;
-  session: { userId: string; nom: string };
   onFermer: () => void;
   onChange: () => void;
+  onTraiterDemande: (demandeId: string) => void;
   showSuccess: (titre: string, message: string) => void;
   showError: (titre: string, message: string) => void;
 }) {
@@ -167,8 +198,10 @@ function ModalDetailDemande({
   const [verification, setVerification] = useState<{ produitId: string; motif: string; taille: string; quantiteDemandee: number; quantiteDisponible: number }[] | null>(
     null
   );
-  const [modeConfirmation, setModeConfirmation] = useState(false);
-  const [modeEdition, setModeEdition] = useState(false);
+  const [historique, setHistorique] = useState<{ statut: DemandeStatut; commentaire: string | null; createdAt: string }[] | null>(null);
+  const [historiqueOuvert, setHistoriqueOuvert] = useState(false);
+  const [modeCommentaire, setModeCommentaire] = useState<"a_contacter" | "en_cours" | null>(null);
+  const [commentaireSaisi, setCommentaireSaisi] = useState("");
   const [modeRefus, setModeRefus] = useState(false);
   const [motifRefus, setMotifRefus] = useState("");
   const [enCours, setEnCours] = useState(false);
@@ -176,7 +209,10 @@ function ModalDetailDemande({
   async function charger() {
     const d = await window.maxiEquip.demandesObtenir(demandeId);
     setDemande(d);
-    if (d) setVerification(await window.maxiEquip.demandesVerifierStock(demandeId));
+    if (d) {
+      setVerification(await window.maxiEquip.demandesVerifierStock(demandeId));
+      setHistorique(await window.maxiEquip.demandesListerSuivi(demandeId));
+    }
   }
 
   useEffect(() => {
@@ -194,12 +230,17 @@ function ModalDetailDemande({
   }
 
   const modifiable = ["nouvelle", "en_cours", "a_contacter", "contactee"].includes(demande.statut);
+  const derniereEntree = historique?.[0] ?? null;
 
-  async function handleMarquerSuivi(statut: "en_cours" | "a_contacter" | "contactee") {
+  async function handleValiderSuivi() {
+    if (!modeCommentaire) return;
     setEnCours(true);
     try {
-      await window.maxiEquip.demandesMarquerSuivi(demandeId, statut);
+      await window.maxiEquip.demandesMarquerSuivi(demandeId, modeCommentaire, commentaireSaisi.trim() || null);
+      setModeCommentaire(null);
+      setCommentaireSaisi("");
       await charger();
+      onChange();
     } catch (err) {
       showError("Impossible de mettre à jour le suivi", err instanceof Error ? err.message : "Erreur inconnue.");
     } finally {
@@ -253,6 +294,25 @@ function ModalDetailDemande({
           <p style={{ margin: "0 0 14px", fontSize: 12.5, color: defaultTokens.colors.danger }}>Motif du refus : {demande.refusMotif}</p>
         )}
 
+        {demande.statut === "confirmee" && demande.factureId && (
+          <div
+            style={{
+              margin: "0 0 14px",
+              padding: "10px 12px",
+              background: defaultTokens.colors.successSoft,
+              borderRadius: defaultTokens.radius.sm,
+              fontSize: 12.5,
+              color: defaultTokens.colors.success,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Receipt size={14} />
+            Vente validée — facture associée à cette demande.
+          </div>
+        )}
+
         <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Client</div>
         <div style={{ fontSize: 13, marginBottom: 4 }}>{demande.clientNom}</div>
         <div style={{ fontSize: 13, color: defaultTokens.colors.textSoft, marginBottom: 4 }}>{demande.clientTelephone}</div>
@@ -263,7 +323,7 @@ function ModalDetailDemande({
         <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "16px 0" }} />
 
         <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>
-          Produits demandés
+          Articles demandés
         </div>
         {demande.lignes.map((l, i) => {
           const stock = verification?.find((v) => v.produitId === l.produitId);
@@ -277,7 +337,6 @@ function ModalDetailDemande({
               </div>
               {stock && (
                 <div style={{ fontSize: 11.5, color: stock.quantiteDisponible >= stock.quantiteDemandee ? defaultTokens.colors.success : defaultTokens.colors.danger }}>
-                  <Package size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
                   {stock.quantiteDisponible} en stock
                 </div>
               )}
@@ -285,51 +344,92 @@ function ModalDetailDemande({
           );
         })}
 
-        {modifiable && !modeConfirmation && !modeRefus && !modeEdition && (
+        {modifiable && !modeRefus && (
           <>
-            {/* --- Correction "Suivi et modification" : le suivi a désormais une vraie place, jamais caché derrière la confirmation (Partie 13). --- */}
             <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "16px 0" }} />
             <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>
               Suivi
             </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-              <StatutBadge statut={demande.statut} />
-              {demande.statut === "nouvelle" && (
-                <Button variant="secondary" onClick={() => void handleMarquerSuivi("a_contacter")} disabled={enCours}>
-                  <Phone size={14} />
-                  Marquer à contacter
-                </Button>
-              )}
-              {demande.statut === "a_contacter" && (
-                <Button variant="secondary" onClick={() => void handleMarquerSuivi("contactee")} disabled={enCours}>
-                  <Phone size={14} />
-                  Marquer comme contactée
-                </Button>
-              )}
-              {demande.statut === "contactee" && (
-                <Button variant="secondary" onClick={() => void handleMarquerSuivi("en_cours")} disabled={enCours}>
-                  Marquer en cours de traitement
-                </Button>
-              )}
-            </div>
+
+            {derniereEntree?.commentaire && (
+              <p style={{ margin: "0 0 10px", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>{derniereEntree.commentaire}</p>
+            )}
+
+            {modeCommentaire ? (
+              <div style={{ marginBottom: 12 }}>
+                <label style={labelStyle}>Commentaire de suivi (facultatif)</label>
+                <input
+                  style={inputStyle}
+                  value={commentaireSaisi}
+                  onChange={(e) => setCommentaireSaisi(e.target.value)}
+                  placeholder="Ex. Client absent, rappeler demain matin."
+                  autoFocus
+                  onKeyDown={(e) => e.key === "Enter" && void handleValiderSuivi()}
+                />
+                <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                  <Button variant="secondary" onClick={() => setModeCommentaire(null)} style={{ flex: 1 }}>
+                    Annuler
+                  </Button>
+                  <Button onClick={() => void handleValiderSuivi()} loading={enCours} style={{ flex: 1 }}>
+                    Enregistrer
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
+                <StatutBadge statut={demande.statut} />
+                {(demande.statut === "nouvelle" || demande.statut === "contactee") && (
+                  <Button variant="secondary" onClick={() => setModeCommentaire("a_contacter")}>
+                    <Phone size={14} />
+                    Client à contacter
+                  </Button>
+                )}
+                {demande.statut === "a_contacter" && (
+                  <Button variant="secondary" onClick={() => setModeCommentaire("en_cours")}>
+                    En traitement
+                  </Button>
+                )}
+                {demande.statut === "en_cours" && (
+                  <Button variant="secondary" onClick={() => setModeCommentaire("en_cours")}>
+                    Ajouter un commentaire de suivi
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {historique && historique.length > 0 && (
+              <button
+                onClick={() => setHistoriqueOuvert((v) => !v)}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: defaultTokens.colors.accent, marginBottom: 8 }}
+              >
+                {historiqueOuvert ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {historiqueOuvert ? "Masquer l'historique" : "Voir l'historique"}
+              </button>
+            )}
+            {historiqueOuvert && historique && (
+              <div style={{ marginBottom: 12 }}>
+                {historique.map((entree, i) => (
+                  <div key={i} style={{ padding: "8px 0", borderBottom: i < historique.length - 1 ? `1px solid ${defaultTokens.colors.borderSoft}` : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                      <StatutBadge statut={entree.statut} />
+                      <span style={{ fontSize: 11, color: defaultTokens.colors.textFaint }}>
+                        {new Date(entree.createdAt).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" })}
+                      </span>
+                    </div>
+                    {entree.commentaire && <p style={{ margin: "2px 0 0", fontSize: 12.5, color: defaultTokens.colors.textSoft }}>{entree.commentaire}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "16px 0" }} />
 
-            <Button variant="secondary" onClick={() => setModeEdition(true)} style={{ width: "100%", justifyContent: "center" }}>
-              <Pencil size={14} />
-              Modifier la demande
+            <Button onClick={() => onTraiterDemande(demandeId)} style={{ width: "100%", justifyContent: "center" }}>
+              <ShoppingCart size={14} />
+              Traiter la demande
             </Button>
 
-            <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "16px 0" }} />
-
-            <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>
-              Actions finales
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button onClick={() => setModeConfirmation(true)}>
-                <Check size={14} />
-                Confirmer
-              </Button>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
               <Button variant="secondary" onClick={() => setModeRefus(true)}>
                 Refuser
               </Button>
@@ -339,19 +439,6 @@ function ModalDetailDemande({
               </Button>
             </div>
           </>
-        )}
-
-        {modeEdition && (
-          <FormulaireEdition
-            demande={demande}
-            onAnnuler={() => setModeEdition(false)}
-            onEnregistre={() => {
-              setModeEdition(false);
-              void charger();
-              showSuccess("Demande modifiée", "Les modifications ont été enregistrées.");
-            }}
-            onErreur={(message) => showError("Modification impossible", message)}
-          />
         )}
 
         {modeRefus && (
@@ -368,278 +455,7 @@ function ModalDetailDemande({
             </div>
           </div>
         )}
-
-        {modeConfirmation && (
-          <FormulaireConfirmation
-            demande={demande}
-            session={session}
-            onAnnuler={() => setModeConfirmation(false)}
-            onConfirme={(message) => {
-              showSuccess("Demande confirmée", message);
-              onChange();
-              onFermer();
-            }}
-            onErreur={(message) => showError("Confirmation impossible", message)}
-          />
-        )}
       </Card>
-    </div>
-  );
-}
-
-/**
- * Correction "Suivi et modification des demandes", Parties 5-9 — un
- * vrai mode édition : client + lignes (quantité/taille modifiables,
- * suppression), ajout de produit depuis le VRAI catalogue (jamais un
- * catalogue parallèle). N'appelle jamais VenteService, ne touche jamais
- * le stock — uniquement `demandesModifierClient`/`demandesModifierLignes`,
- * qui ne font que ré-écrire la demande elle-même (Partie 8/9).
- */
-function FormulaireEdition({
-  demande,
-  onAnnuler,
-  onEnregistre,
-  onErreur,
-}: {
-  demande: Demande;
-  onAnnuler: () => void;
-  onEnregistre: () => void;
-  onErreur: (message: string) => void;
-}) {
-  const [clientNom, setClientNom] = useState(demande.clientNom);
-  const [clientTelephone, setClientTelephone] = useState(demande.clientTelephone);
-  const [clientAdresse, setClientAdresse] = useState(demande.clientAdresse);
-  const [clientEmail, setClientEmail] = useState(demande.clientEmail ?? "");
-  const [commentaire, setCommentaire] = useState(demande.commentaire ?? "");
-  const [lignes, setLignes] = useState(demande.lignes.map((l) => ({ ...l })));
-  const [catalogue, setCatalogue] = useState<{ id: string; motif: string; taille: string; prix: string | number }[] | null>(null);
-  const [produitAAjouter, setProduitAAjouter] = useState("");
-  const [enCours, setEnCours] = useState(false);
-
-  useEffect(() => {
-    void window.maxiEquip.listProduits().then((liste) => setCatalogue(liste));
-  }, []);
-
-  function modifierLigne(index: number, champs: Partial<{ quantite: number; taille: string }>) {
-    setLignes((prev) => prev.map((l, i) => (i === index ? { ...l, ...champs } : l)));
-  }
-
-  function supprimerLigne(index: number) {
-    setLignes((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function ajouterProduit() {
-    const produit = (catalogue ?? []).find((p) => p.id === produitAAjouter);
-    if (!produit) return;
-    setLignes((prev) => [...prev, { produitId: produit.id, motif: produit.motif, taille: produit.taille, quantite: 1, prixIndicatif: Number(produit.prix) }]);
-    setProduitAAjouter("");
-  }
-
-  async function handleEnregistrer() {
-    if (lignes.length === 0) {
-      onErreur("Une demande doit conserver au moins un produit.");
-      return;
-    }
-    setEnCours(true);
-    try {
-      await window.maxiEquip.demandesModifierClient(demande.id, {
-        clientNom,
-        clientTelephone,
-        clientAdresse,
-        clientEmail: clientEmail.trim() || null,
-        commentaire: commentaire.trim() || null,
-      });
-      await window.maxiEquip.demandesModifierLignes(
-        demande.id,
-        lignes.map((l) => ({ produitId: l.produitId, motif: l.motif, taille: l.taille, quantite: l.quantite, prixIndicatif: l.prixIndicatif }))
-      );
-      onEnregistre();
-    } catch (err) {
-      onErreur(err instanceof Error ? err.message : "Erreur inconnue.");
-    } finally {
-      setEnCours(false);
-    }
-  }
-
-  return (
-    <div style={{ marginTop: 18, borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, paddingTop: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
-        Modifier la demande
-      </div>
-
-      <label style={labelStyle}>Nom du client</label>
-      <input style={{ ...inputStyle, marginBottom: 8 }} value={clientNom} onChange={(e) => setClientNom(e.target.value)} />
-      <label style={labelStyle}>Téléphone</label>
-      <input style={{ ...inputStyle, marginBottom: 8 }} value={clientTelephone} onChange={(e) => setClientTelephone(e.target.value)} />
-      <label style={labelStyle}>Adresse / localisation</label>
-      <input style={{ ...inputStyle, marginBottom: 8 }} value={clientAdresse} onChange={(e) => setClientAdresse(e.target.value)} />
-      <label style={labelStyle}>Email (facultatif)</label>
-      <input style={{ ...inputStyle, marginBottom: 8 }} value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
-      <label style={labelStyle}>Commentaire (facultatif)</label>
-      <input style={{ ...inputStyle, marginBottom: 14 }} value={commentaire} onChange={(e) => setCommentaire(e.target.value)} />
-
-      <div style={{ height: 1, background: defaultTokens.colors.borderSoft, margin: "14px 0" }} />
-
-      <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>
-        Produits
-      </div>
-      {lignes.map((l, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <div style={{ flex: "2 1 140px", fontSize: 13 }}>{l.motif}</div>
-          <input
-            style={{ ...inputStyle, flex: "1 1 90px" }}
-            value={l.taille}
-            onChange={(e) => modifierLigne(i, { taille: e.target.value })}
-            aria-label="Taille"
-          />
-          <input
-            type="number"
-            min={1}
-            style={{ ...inputStyle, flex: "0 1 70px" }}
-            value={l.quantite}
-            onChange={(e) => modifierLigne(i, { quantite: Math.max(1, Number(e.target.value) || 1) })}
-            aria-label="Quantité"
-          />
-          <button
-            onClick={() => supprimerLigne(i)}
-            title="Supprimer ce produit"
-            style={{ background: "none", border: "none", cursor: "pointer", padding: 4, flexShrink: 0 }}
-          >
-            <Trash2 size={16} color={defaultTokens.colors.danger} />
-          </button>
-        </div>
-      ))}
-
-      <div style={{ display: "flex", gap: 8, marginTop: 10, marginBottom: 16 }}>
-        <select style={{ ...inputStyle, flex: 1 }} value={produitAAjouter} onChange={(e) => setProduitAAjouter(e.target.value)}>
-          <option value="">Ajouter un produit du catalogue…</option>
-          {(catalogue ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.motif} — {p.taille}
-            </option>
-          ))}
-        </select>
-        <Button variant="secondary" onClick={ajouterProduit} disabled={!produitAAjouter}>
-          <Plus size={14} />
-          Ajouter
-        </Button>
-      </div>
-
-      <div style={{ display: "flex", gap: 10 }}>
-        <Button variant="secondary" onClick={onAnnuler} disabled={enCours} style={{ flex: 1 }}>
-          Annuler
-        </Button>
-        <Button onClick={() => void handleEnregistrer()} loading={enCours} style={{ flex: 1 }}>
-          Enregistrer les modifications
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function FormulaireConfirmation({
-  demande,
-  onAnnuler,
-  onConfirme,
-  onErreur,
-}: {
-  demande: Demande;
-  session: { userId: string; nom: string };
-  onAnnuler: () => void;
-  onConfirme: (message: string) => void;
-  onErreur: (message: string) => void;
-}) {
-  const [emplacements, setEmplacements] = useState<Emplacement[] | null>(null);
-  const [pointDeVenteId, setPointDeVenteId] = useState("");
-  const [modeReglement, setModeReglement] = useState("especes");
-  const [depotParLigne, setDepotParLigne] = useState<Record<number, string>>({});
-  const [enCours, setEnCours] = useState(false);
-
-  useEffect(() => {
-    void window.maxiEquip.listEmplacements().then((liste) => {
-      setEmplacements(liste);
-      const shop = liste.find((e) => e.estPointDeVente);
-      if (shop) setPointDeVenteId(shop.id);
-    });
-  }, []);
-
-  const depots = (emplacements ?? []).filter((e) => !e.estPointDeVente && e.actif !== false);
-
-  async function handleConfirmer() {
-    setEnCours(true);
-    try {
-      const resultat = await window.maxiEquip.demandesConfirmer(demande.id, {
-        pointDeVenteId,
-        vendeurNomManuel: null,
-        modeReglement: modeReglement || null,
-        lignes: demande.lignes.map((l, i) => {
-          const depotId = depotParLigne[i];
-          return {
-            produitId: l.produitId,
-            quantite: l.quantite,
-            prixUnitaire: l.prixIndicatif,
-            allocationsDepots: depotId ? [{ emplacementId: depotId, quantite: l.quantite }] : [],
-          };
-        }),
-      });
-      onConfirme(`Facture ${resultat.numero} créée — ${resultat.total.toLocaleString("fr-FR")} FCFA.`);
-    } catch (err) {
-      onErreur(err instanceof Error ? err.message : "Erreur inconnue.");
-    } finally {
-      setEnCours(false);
-    }
-  }
-
-  return (
-    <div style={{ marginTop: 18, borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, paddingTop: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
-        Confirmer en vente
-      </div>
-
-      <label style={labelStyle}>Point de vente</label>
-      <select style={{ ...inputStyle, marginBottom: 10 }} value={pointDeVenteId} onChange={(e) => setPointDeVenteId(e.target.value)}>
-        {(emplacements ?? [])
-          .filter((e) => e.estPointDeVente)
-          .map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.nom}
-            </option>
-          ))}
-      </select>
-
-      {demande.lignes.map((l, i) => (
-        <div key={i} style={{ marginBottom: 8 }}>
-          <label style={labelStyle}>
-            Dépôt pour « {l.motif} » (x{l.quantite})
-          </label>
-          <select style={inputStyle} value={depotParLigne[i] ?? ""} onChange={(e) => setDepotParLigne((prev) => ({ ...prev, [i]: e.target.value }))}>
-            <option value="">Approvisionnement externe</option>
-            {depots.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.nom}
-              </option>
-            ))}
-          </select>
-        </div>
-      ))}
-
-      <label style={labelStyle}>Mode de règlement</label>
-      <select style={{ ...inputStyle, marginBottom: 14 }} value={modeReglement} onChange={(e) => setModeReglement(e.target.value)}>
-        <option value="especes">Espèces</option>
-        <option value="mobile_money">Mobile Money</option>
-        <option value="virement">Virement</option>
-        <option value="cheque">Chèque</option>
-      </select>
-
-      <div style={{ display: "flex", gap: 10 }}>
-        <Button variant="secondary" onClick={onAnnuler} disabled={enCours} style={{ flex: 1 }}>
-          Retour
-        </Button>
-        <Button onClick={() => void handleConfirmer()} loading={enCours} disabled={!pointDeVenteId} style={{ flex: 1 }}>
-          <Pencil size={14} />
-          Confirmer la vente
-        </Button>
-      </div>
     </div>
   );
 }

@@ -193,41 +193,32 @@ const maxiEquipApi = {
   backupRestoreExecuter: (dossier: string, motDePasse?: string): Promise<{ success: boolean; message?: string; etape?: string }> =>
     ipcRenderer.invoke("backup:restore-executer", dossier, motDePasse),
 
-  // --- Demandes du site (Phase 4.1) — Administrateur et Gérant. ---
+  // --- Demandes du site (Phase 4.1, corrigée) — Administrateur et Gérant.
+  // Plus aucun canal de modification des lignes/client ni de
+  // confirmation-vente : la demande alimente désormais l'espace Vente
+  // réel (voir enregistrerVente + demandesMarquerTraitee), jamais une
+  // seconde logique de vente ici. ---
   demandesLister: (): Promise<import("@maxi-equip/shared-types").Demande[]> => ipcRenderer.invoke("demandes:lister"),
   demandesObtenir: (id: string): Promise<import("@maxi-equip/shared-types").Demande | null> => ipcRenderer.invoke("demandes:obtenir", id),
   demandesVerifierStock: (
     id: string
   ): Promise<{ produitId: string; motif: string; taille: string; quantiteDemandee: number; quantiteDisponible: number }[]> =>
     ipcRenderer.invoke("demandes:verifier-stock", id),
-  demandesModifierLignes: (
+  demandesListerSuivi: (
+    id: string
+  ): Promise<{ statut: import("@maxi-equip/shared-types").DemandeStatut; commentaire: string | null; createdAt: string }[]> =>
+    ipcRenderer.invoke("demandes:lister-suivi", id),
+  demandesCompterActives: (): Promise<number> => ipcRenderer.invoke("demandes:compter-actives"),
+  demandesMarquerSuivi: (
     id: string,
-    lignes: { produitId: string; motif: string; taille: string; quantite: number; prixIndicatif: number }[]
-  ): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:modifier-lignes", id, lignes),
-  demandesModifierClient: (
-    id: string,
-    champs: { clientNom?: string; clientTelephone?: string; clientAdresse?: string; clientEmail?: string | null; commentaire?: string | null }
-  ): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:modifier-client", id, champs),
-  demandesConfirmer: (
-    id: string,
-    input: {
-      pointDeVenteId: string;
-      vendeurNomManuel: string | null;
-      modeReglement: string | null;
-      lignes: {
-        produitId: string;
-        quantite: number;
-        prixUnitaire: number;
-        allocationsDepots: { emplacementId: string; quantite: number }[];
-        fournisseurExterne?: string;
-        prixAchatExterne?: number;
-      }[];
-    }
-  ): Promise<{ factureId: string; numero: string; total: number }> => ipcRenderer.invoke("demandes:confirmer", id, input),
+    statut: "nouvelle" | "en_cours" | "a_contacter",
+    commentaire: string | null
+  ): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:marquer-suivi", id, statut, commentaire),
+  /** Appelé UNIQUEMENT après le succès réel de `enregistrerVente()` — jamais un point de confirmation en soi. */
+  demandesMarquerTraitee: (id: string, factureId: string): Promise<import("@maxi-equip/shared-types").Demande> =>
+    ipcRenderer.invoke("demandes:marquer-traitee", id, factureId),
   demandesRefuser: (id: string, motif: string): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:refuser", id, motif),
   demandesAnnuler: (id: string): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:annuler", id),
-  demandesMarquerSuivi: (id: string, statut: "en_cours" | "a_contacter" | "contactee"): Promise<import("@maxi-equip/shared-types").Demande> =>
-    ipcRenderer.invoke("demandes:marquer-suivi", id, statut),
 
   notificationsLister: (): Promise<import("@maxi-equip/shared-types").Notification[]> => ipcRenderer.invoke("notifications:lister"),
   notificationsCompterNonLues: (): Promise<number> => ipcRenderer.invoke("notifications:compter-non-lues"),

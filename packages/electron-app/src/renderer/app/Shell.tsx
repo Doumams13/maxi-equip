@@ -24,6 +24,8 @@ export interface NavItem {
   label: string;
   /** false si l'utilisateur connecté n'a pas le droit d'accéder à cet écran — Corrections/Phase 2 §7. */
   autorise: boolean;
+  /** Correction "Workflow réel des demandes", Partie 18/19 : compteur réel affiché à côté du libellé, jamais purement visuel. `undefined`/0 = aucun badge affiché. */
+  badge?: number;
 }
 
 export interface ShellProps {
@@ -32,6 +34,8 @@ export interface ShellProps {
   activeScreen: ScreenId;
   onNavigate: (screen: ScreenId) => void;
   onLogout: () => void;
+  /** Correction "Workflow réel des demandes", Partie 15/16 : clic sur une notification de demande — redirige ET met en évidence la demande concernée, jamais une simple ouverture de modal isolée. */
+  onOuvrirDemande: (demandeId: string) => void;
   children: ReactNode;
 }
 
@@ -54,7 +58,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
  * présentée comme disponible ») — la protection réelle reste néanmoins
  * assurée côté IPC/services, jamais uniquement ici.
  */
-export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, children }: ShellProps) {
+export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, onOuvrirDemande, children }: ShellProps) {
   const [logoutLoading, setLogoutLoading] = useState(false);
 
   async function handleLogout() {
@@ -94,6 +98,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
                   style={{
                     display: "flex",
                     alignItems: "center",
+                    justifyContent: "space-between",
                     gap: 10,
                     padding: "10px 12px",
                     borderRadius: defaultTokens.radius.sm,
@@ -106,8 +111,29 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
                     cursor: "pointer",
                   }}
                 >
-                  <Icon size={17} />
-                  {item.label}
+                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Icon size={17} />
+                    {item.label}
+                  </span>
+                  {!!item.badge && (
+                    <span
+                      style={{
+                        background: active ? "rgba(255,255,255,0.25)" : defaultTokens.colors.danger,
+                        color: "#fff",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        borderRadius: defaultTokens.radius.pill,
+                        minWidth: 20,
+                        height: 20,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0 5px",
+                      }}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -146,7 +172,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, c
             background: "#fff",
           }}
         >
-          <IndicateurNotifications onOuvrirDemandes={() => onNavigate("demandes")} />
+          <IndicateurNotifications onOuvrirDemande={onOuvrirDemande} />
           <IndicateurSynchronisation />
         </div>
 

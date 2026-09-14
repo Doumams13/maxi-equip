@@ -23,11 +23,14 @@ export class ApiLocationRepository implements LocationRepository {
   }
 }
 
+/**
+ * Correction "Intégration Site Phase 5" : même raisonnement que
+ * services/catalog/index.ts — aucun mécanisme réel de synchronisation
+ * des localisations n'existe encore, contrairement à la soumission de
+ * demandes. Reste volontairement mocké, indépendamment de
+ * NEXT_PUBLIC_API_BASE_URL.
+ */
 function createLocationRepository(): LocationRepository {
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-  if (apiBaseUrl) {
-    return new ApiLocationRepository(apiBaseUrl);
-  }
   return new MockLocationRepository();
 }
 

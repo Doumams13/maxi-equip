@@ -365,4 +365,20 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(service.obtenir(traiteeAncienne.id)).not.toBeNull();
     expect(service.obtenir(traiteeAncienne.id)!.statut).toBe("confirmee");
   });
+
+  it("Correction 'Intégration Site Phase 5' — une demande avec un produit_id EXTERNE (jamais dans le catalogue local) est réellement acceptée, plus de contrainte de clé étrangère bloquante", () => {
+    const service = construireService();
+    const demande = service.creerDepuisReception({
+      clientNom: "Client Site Vitrine",
+      clientTelephone: "+241 20 20 20 20",
+      clientAdresse: "Libreville",
+      lignes: [{ produitId: "identifiant-catalogue-site-jamais-synchronise", motif: "Marbre Blanc Import", taille: "80x80", quantite: 4, prixIndicatif: 18000 }],
+    });
+    expect(demande.statut).toBe("nouvelle");
+    expect(demande.lignes[0]!.produitId).toBe("identifiant-catalogue-site-jamais-synchronise");
+
+    // Confirme aussi que la vérification de stock (Partie 9 de la Phase 4.1) reste sans danger sur un produit inconnu — jamais une exception qui bloquerait la consultation de la demande.
+    const verification = service.verifierStock(demande.id);
+    expect(verification[0]!.quantiteDisponible).toBe(0); // Inconnu localement = 0 disponible, jamais une erreur.
+  });
 });

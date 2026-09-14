@@ -1,38 +1,45 @@
-import { Card, Logo, defaultTokens } from "@maxi-equip/design-system";
+import { catalogRepository } from "@/services/catalog";
+import { locationRepository } from "@/services/location";
+import { Hero } from "@/components/home/Hero";
+import { AdvantagesSection } from "@/components/home/AdvantagesSection";
+import { CategoryGrid } from "@/components/home/CategoryGrid";
+import { FeaturedProducts } from "@/components/home/FeaturedProducts";
+import { LocationsSection } from "@/components/home/LocationsSection";
+import { ErrorState } from "@/components/ui/states";
 
-/**
- * Page d'accueil provisoire — socle uniquement (Phase 0). Le catalogue, le
- * panier, le formulaire de demande et le bouton WhatsApp seront développés
- * en Phase 5, conformément à la Synthèse §4/§9.
- */
-export default function HomePage() {
-  return (
-    <main
-      style={{
-        fontFamily: defaultTokens.typography.body,
-        background: defaultTokens.colors.bg,
-        minHeight: "100vh",
-        padding: 32,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-        <Logo />
-        <h1
-          style={{
-            fontFamily: defaultTokens.typography.display,
-            fontSize: 20,
-            color: defaultTokens.colors.text,
-          }}
-        >
-          MAXI EQUIP — Socle du site vitrine (Phase 0)
-        </h1>
+// Revalidation courte : le catalogue/les promotions peuvent changer souvent
+// une fois branchés sur l'API réelle (mise à jour depuis l'application
+// Windows). En mock, cela n'a pas d'effet visible mais prépare l'intégration.
+export const revalidate = 60;
+
+export default async function HomePage() {
+  try {
+    const [featured, promotions, locations] = await Promise.all([
+      catalogRepository.listFeaturedModels(),
+      catalogRepository.listPromotions(),
+      locationRepository.listLocations(),
+    ]);
+
+    return (
+      <>
+        <Hero featuredModels={featured} promotions={promotions} />
+        <AdvantagesSection />
+        <CategoryGrid />
+        <FeaturedProducts models={featured} promotions={promotions} />
+        <LocationsSection locations={locations} />
+      </>
+    );
+  } catch (error) {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <ErrorState
+          description={
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger la page d'accueil pour le moment."
+          }
+        />
       </div>
-      <Card>
-        <p style={{ color: defaultTokens.colors.textSoft }}>
-          Cette page confirme que le site consomme correctement le design system partagé. Le catalogue public,
-          le panier et le formulaire de demande seront développés en Phase 5.
-        </p>
-      </Card>
-    </main>
-  );
+    );
+  }
 }

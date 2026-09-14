@@ -20,6 +20,15 @@ export interface ApiRequest {
   body: unknown;
   query: Record<string, string | undefined>;
   /**
+   * Correction "Intégration Site Phase 5" — nécessaire pour la
+   * limitation de fréquence par adresse (rate limiting) des routes
+   * publiques, désormais réellement exposées à un trafic non maîtrisé
+   * pour la première fois (auparavant purement théorique, voir
+   * router.ts). `undefined` si l'adaptateur d'hébergement ne peut pas
+   * la déterminer — jamais une valeur inventée.
+   */
+  ip?: string;
+  /**
    * Renseigné UNIQUEMENT après une validation JWT réelle réussie
    * (Partie 4, point 9 de la correction "Sécurisation de l'API") —
    * jamais présent pour une route publique, jamais renseigné à partir

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+<rect width="800" height="600" fill="#EAF1E7"/>
+<rect x="0" y="440" width="800" height="160" fill="#F4F3EF"/>
+<line x1="0" y1="440" x2="800" y2="440" stroke="#00000022" stroke-width="2"/>
+
+        <rect x="500" y="300" width="220" height="240" rx="16" fill="#FFFFFF" stroke="#D8D8D8" stroke-width="3"/>
+        <ellipse cx="610" cy="330" rx="70" ry="18" fill="#EAF2E8"/>
+        <rect x="60" y="460" width="160" height="80" rx="10" fill="#FFFFFF" stroke="#D8D8D8" stroke-width="3"/>
+        
+<rect x="24" y="24" width="230" height="34" rx="6" fill="#12280Acc"/>
+<text x="36" y="47" font-family="Segoe UI, sans-serif" font-size="16" fill="#FFFFFF">Exemple d'utilisation — salle de bain</text>
+</svg>

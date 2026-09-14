@@ -20,7 +20,7 @@ type Session = { userId: string; identifiant: string; nom: string; role: string 
  * §12-§17) — un type d'opération + son identifiant réel, jamais une
  * correspondance approximative par nom/date/montant.
  */
-export type CibleOperation = { type: "facture"; id: string } | { type: "entree"; id: string } | { type: "transfert"; id: string };
+export type CibleOperation = { type: "facture"; id: string } | { type: "entree"; id: string } | { type: "transfert"; id: string } | { type: "demande"; id: string };
 
 export interface AppRootProps {
   onLoggedOut: () => void;
@@ -42,6 +42,21 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   const [loading, setLoading] = useState(true);
   const [cibleSurbrillance, setCibleSurbrillance] = useState<CibleOperation | null>(null);
   const [factureAPreRemplir, setFactureAPreRemplir] = useState<string | null>(null);
+  const [demandeAPreRemplir, setDemandeAPreRemplir] = useState<string | null>(null);
+  const [demandesActives, setDemandesActives] = useState(0);
+
+  /**
+   * Correction "Workflow réel des demandes", Partie 18/19/20 : compteur
+   * réel, jamais purement visuel — rafraîchi au chargement puis
+   * périodiquement, comme l'indicateur de notifications déjà existant.
+   */
+  async function rafraichirCompteurDemandes() {
+    try {
+      setDemandesActives(await window.maxiEquip.demandesCompterActives());
+    } catch {
+      // Silencieux — un compteur momentanément indisponible ne doit jamais bloquer le reste de l'application.
+    }
+  }
 
   /**
    * Navigation cliquable centralisée (§16-§23 de la consolidation) : reçoit
@@ -51,7 +66,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
    * une correspondance approximative par texte affiché.
    */
   function irVersOperation(cible: CibleOperation) {
-    const ecran = cible.type === "facture" ? "factures" : cible.type === "entree" ? "stock" : "transferts";
+    const ecran = cible.type === "facture" ? "factures" : cible.type === "entree" ? "stock" : cible.type === "transfert" ? "transferts" : "demandes";
     setActiveScreen(ecran);
     setCibleSurbrillance(cible);
   }
@@ -63,6 +78,9 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       setPermissions(p);
       setLoading(false);
     })();
+    void rafraichirCompteurDemandes();
+    const intervalle = setInterval(() => void rafraichirCompteurDemandes(), 15000);
+    return () => clearInterval(intervalle);
   }, []);
 
   async function handleLogout() {
@@ -80,7 +98,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     { id: "transferts", label: "Transferts", autorise: permissions.canOperateStock },
     { id: "ventes", label: "Vente", autorise: permissions.canOperateSales },
     { id: "factures", label: "Factures", autorise: permissions.canAccessHistory },
-    { id: "demandes", label: "Demandes", autorise: permissions.canHandleSiteRequests },
+    { id: "demandes", label: "Demandes", autorise: permissions.canHandleSiteRequests, badge: demandesActives > 0 ? demandesActives : undefined },
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
     { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
   ];
@@ -118,6 +136,11 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
             session={{ userId: session!.userId, nom: session!.nom }}
             factureAPreRemplir={factureAPreRemplir}
             onPreRemplissageConsomme={() => setFactureAPreRemplir(null)}
+            demandeAPreRemplir={demandeAPreRemplir}
+            onPreRemplissageDemandeConsomme={() => {
+              setDemandeAPreRemplir(null);
+              void rafraichirCompteurDemandes();
+            }}
           />
         );
       case "factures":
@@ -134,7 +157,17 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
           />
         );
       case "demandes":
-        return <DemandesScreen session={{ userId: session!.userId, nom: session!.nom }} />;
+        return (
+          <DemandesScreen
+            session={{ userId: session!.userId, nom: session!.nom }}
+            cibleSurbrillance={cibleSurbrillance?.type === "demande" ? cibleSurbrillance.id : null}
+            onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
+            onTraiterDemande={(demandeId) => {
+              setDemandeAPreRemplir(demandeId);
+              setActiveScreen("ventes");
+            }}
+          />
+        );
       case "historique":
         return (
           <HistoriqueScreen
@@ -158,6 +191,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       activeScreen={activeScreen}
       onNavigate={setActiveScreen}
       onLogout={handleLogout}
+      onOuvrirDemande={(demandeId) => irVersOperation({ type: "demande", id: demandeId })}
     >
       {renderScreen()}
     </Shell>

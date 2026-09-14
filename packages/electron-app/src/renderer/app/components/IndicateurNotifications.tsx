@@ -15,7 +15,7 @@ import type { Notification } from "@maxi-equip/shared-types";
  * notification comme lue et navigue directement vers l'écran Demandes
  * (Partie 5 : "clic -> ouverture directe de la demande concernée").
  */
-export function IndicateurNotifications({ onOuvrirDemandes }: { onOuvrirDemandes: () => void }) {
+export function IndicateurNotifications({ onOuvrirDemande }: { onOuvrirDemande: (demandeId: string) => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [nonLues, setNonLues] = useState(0);
   const [ouvert, setOuvert] = useState(false);
@@ -47,7 +47,7 @@ export function IndicateurNotifications({ onOuvrirDemandes }: { onOuvrirDemandes
       void recharger();
     }
     setOuvert(false);
-    if (n.demandeId) onOuvrirDemandes();
+    if (n.demandeId) onOuvrirDemande(n.demandeId);
   }
 
   return (

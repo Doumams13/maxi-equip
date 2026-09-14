@@ -124,6 +124,9 @@ export interface VentesScreenProps {
   /** Facture annulée à partir de laquelle préremplir une nouvelle vente (§4 de la correction : "Modifier" une facture annulée). */
   factureAPreRemplir?: string | null;
   onPreRemplissageConsomme?: () => void;
+  /** Correction "Workflow réel des demandes", Partie 9/10 : demande du site à partir de laquelle préremplir une vente — jamais une seconde logique de vente, uniquement une source de données pour ce même formulaire. */
+  demandeAPreRemplir?: string | null;
+  onPreRemplissageDemandeConsomme?: () => void;
 }
 
 /**
@@ -136,7 +139,7 @@ export interface VentesScreenProps {
  * vérification par dépôt vient de VenteService, qui appelle lui-même
  * domain.stock.applySortie.
  */
-export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageConsomme }: VentesScreenProps) {
+export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageConsomme, demandeAPreRemplir, onPreRemplissageDemandeConsomme }: VentesScreenProps) {
   const { showSuccess, showWarning, showError } = useToast();
   const [produits, setProduits] = useState<Produit[]>([]);
   const [depots, setDepots] = useState<Emplacement[]>([]);
@@ -150,6 +153,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [factureOrigineId, setFactureOrigineId] = useState<string | null>(null);
+  const [demandeOrigineId, setDemandeOrigineId] = useState<string | null>(null);
   const [snapshotInitial, setSnapshotInitial] = useState<{
     clientNom: string;
     clientTelephone: string;
@@ -223,6 +227,40 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
       onPreRemplissageConsomme?.();
     })();
   }, [factureAPreRemplir]);
+
+  /**
+   * Correction "Workflow réel des demandes", Partie 9/10 : préremplit le
+   * formulaire à partir d'une demande du site — client + articles.
+   * Aucune allocation de dépôt n'est reprise (la demande n'en connaît
+   * pas) : l'utilisateur choisit librement le sourcing ici, exactement
+   * comme pour une vente normale (Partie 10/11 : jamais une seconde
+   * logique de stock/sourcing).
+   */
+  useEffect(() => {
+    if (!demandeAPreRemplir) return;
+    void (async () => {
+      const demande = await window.maxiEquip.demandesObtenir(demandeAPreRemplir);
+      if (!demande) {
+        showError("Demande introuvable", "Impossible de récupérer les données de cette demande.");
+        onPreRemplissageDemandeConsomme?.();
+        return;
+      }
+      setClientNom(demande.clientNom);
+      setClientTelephone(demande.clientTelephone);
+      setDemandeOrigineId(demandeAPreRemplir);
+      const lignesChargees = demande.lignes.map((l) => ({
+        produitId: l.produitId,
+        quantite: String(l.quantite),
+        prixUnitaire: String(l.prixIndicatif),
+        allocations: {},
+        fournisseurExterne: "",
+        prixAchatExterne: "",
+      }));
+      setLignes(lignesChargees.length > 0 ? lignesChargees : [ligneVide()]);
+      showSuccess("Demande chargée", "Complétez le sourcing puis validez pour créer la vente et la facture.");
+      onPreRemplissageDemandeConsomme?.();
+    })();
+  }, [demandeAPreRemplir]);
 
   /**
    * Réinitialise complètement le formulaire (§1 de la correction) —
@@ -348,6 +386,19 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         if (factureOrigineId && result.factureId) {
           await window.maxiEquip.marquerFactureCorrigee(factureOrigineId, result.factureId);
           setFactureOrigineId(null);
+        }
+        // Correction "Workflow réel des demandes", Partie 12/13/14 :
+        // liaison réelle demande -> vente -> facture, UNIQUEMENT après le
+        // succès réel ci-dessus — jamais avant, jamais devinée. Un échec
+        // ici est signalé mais NE remet jamais en cause la vente déjà
+        // créée (elle reste valide même si la liaison échoue).
+        if (demandeOrigineId && result.factureId) {
+          try {
+            await window.maxiEquip.demandesMarquerTraitee(demandeOrigineId, result.factureId);
+          } catch (err) {
+            showError("Vente créée, mais liaison à la demande impossible", err instanceof Error ? err.message : "Erreur inconnue.");
+          }
+          setDemandeOrigineId(null);
         }
         setClientNom("");
         setClientTelephone("");

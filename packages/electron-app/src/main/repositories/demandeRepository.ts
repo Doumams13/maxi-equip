@@ -159,37 +159,41 @@ export class DemandeRepository {
     this.db.prepare("UPDATE demandes SET statut = 'confirmee', facture_id = ?, updated_at = ? WHERE id = ?").run(factureId, new Date().toISOString(), id);
   }
 
-  remplacerLignes(demandeId: string, lignes: NouvelleLigneDemande[]): void {
-    const executer = this.db.transaction(() => {
-      this.db.prepare("DELETE FROM lignes_demande WHERE demande_id = ?").run(demandeId);
-      const inserer = this.db.prepare(
-        "INSERT INTO lignes_demande (id, demande_id, produit_id, motif, taille, quantite, prix_indicatif) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      );
-      for (const ligne of lignes) {
-        inserer.run(randomUUID(), demandeId, ligne.produitId, ligne.motif, ligne.taille, ligne.quantite, ligne.prixIndicatif);
-      }
-      this.db.prepare("UPDATE demandes SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), demandeId);
-    });
-    executer();
+  /**
+   * Correction "Workflow réel des demandes", Partie 5/6/7 : historique
+   * de suivi. Écrit un commentaire (facultatif — Partie 8) à chaque
+   * changement de statut. Jamais utilisé pour confirmer/refuser, qui
+   * gardent leur propre trace explicite (`refus_motif`, `facture_id`).
+   */
+  ajouterSuivi(demandeId: string, statut: DemandeStatut, commentaire: string | null): void {
+    this.db
+      .prepare("INSERT INTO suivi_demande (id, demande_id, statut, commentaire, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(randomUUID(), demandeId, statut, commentaire, new Date().toISOString());
   }
 
-  modifierClient(
-    demandeId: string,
-    champs: { clientNom?: string; clientTelephone?: string; clientAdresse?: string; clientEmail?: string | null; commentaire?: string | null }
-  ): void {
-    const actuelle = this.findById(demandeId);
-    if (!actuelle) return;
-    this.db
-      .prepare("UPDATE demandes SET client_nom = ?, client_telephone = ?, client_adresse = ?, client_email = ?, commentaire = ?, updated_at = ? WHERE id = ?")
-      .run(
-        champs.clientNom ?? actuelle.clientNom,
-        champs.clientTelephone ?? actuelle.clientTelephone,
-        champs.clientAdresse ?? actuelle.clientAdresse,
-        champs.clientEmail !== undefined ? champs.clientEmail : actuelle.clientEmail,
-        champs.commentaire !== undefined ? champs.commentaire : actuelle.commentaire,
-        new Date().toISOString(),
-        demandeId
-      );
+  /** Plus récent en premier (Partie 7). Tri secondaire sur `rowid` (ordre d'insertion réel) car deux entrées créées à la même milliseconde auraient sinon un ordre indéterminé — vérifié réellement : des tests rapides successifs produisent bien des timestamps identiques. */
+  listerSuivi(demandeId: string): { statut: DemandeStatut; commentaire: string | null; createdAt: string }[] {
+    const rows = this.db
+      .prepare("SELECT statut, commentaire, created_at FROM suivi_demande WHERE demande_id = ? ORDER BY created_at DESC, rowid DESC")
+      .all(demandeId) as {
+      statut: DemandeStatut;
+      commentaire: string | null;
+      created_at: string;
+    }[];
+    return rows.map((r) => ({ statut: r.statut, commentaire: r.commentaire, createdAt: r.created_at }));
+  }
+
+  /**
+   * Partie 18/19 : uniquement les demandes réellement actives — jamais
+   * un compteur purement visuel. "contactee" est incluse par sécurité
+   * (donnée historique éventuelle avant la migration de cette
+   * correction), bien que le workflow ne la produise plus.
+   */
+  compterActives(): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) as n FROM demandes WHERE statut IN ('nouvelle', 'a_contacter', 'en_cours', 'contactee')")
+      .get() as { n: number };
+    return row.n;
   }
 
   /**
@@ -206,6 +210,7 @@ export class DemandeRepository {
     const executer = this.db.transaction(() => {
       for (const { id } of aSupprimer) {
         this.db.prepare("DELETE FROM notifications WHERE demande_id = ?").run(id);
+        this.db.prepare("DELETE FROM suivi_demande WHERE demande_id = ?").run(id);
         this.db.prepare("DELETE FROM lignes_demande WHERE demande_id = ?").run(id);
         this.db.prepare("DELETE FROM demandes WHERE id = ?").run(id);
       }

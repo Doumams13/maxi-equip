@@ -235,7 +235,8 @@ app.whenReady().then(async () => {
     // couplage inverse, DemandeService ne connaît jamais SyncService.
     const demandeRepository = new DemandeRepository(db);
     const notificationRepository = new NotificationRepository(db);
-    const demandeService = new DemandeService(demandeRepository, notificationRepository, stockRepository, venteService);
+    // Correction "Workflow réel des demandes" : venteService n'est plus une dépendance de DemandeService — la demande alimente Vente, jamais l'inverse.
+    const demandeService = new DemandeService(demandeRepository, notificationRepository, stockRepository);
 
     const syncService = new SyncService(boiteEnvoiRepository, syncRepository, (payload, sourceEntityId) => {
       const p = payload as {
@@ -273,7 +274,7 @@ app.whenReady().then(async () => {
     registerSyncIpcHandlers(syncService);
 
     // Demandes (Phase 4.1) — Administrateur et Gérant, aucune restriction artificielle (Partie 15).
-    registerDemandeIpcHandlers(demandeService, notificationRepository, sessionManager);
+    registerDemandeIpcHandlers(demandeService, notificationRepository);
     // Purge (Partie 13/14) : au démarrage, jamais une tâche planifiée fragile — protégée par try/catch comme la sauvegarde automatique, un échec ne doit jamais empêcher le démarrage.
     try {
       demandeService.purgerDemandesAnciennes();

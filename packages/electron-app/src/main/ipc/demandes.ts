@@ -1,42 +1,31 @@
 import { ipcMain } from "electron";
-import type { DemandeService, ConfirmerDemandeInput } from "../services/demandeService.js";
+import type { DemandeService } from "../services/demandeService.js";
 import type { NotificationRepository } from "../repositories/notificationRepository.js";
-import type { NouvelleLigneDemande } from "../repositories/demandeRepository.js";
-import type { SessionManager } from "../auth/sessionManager.js";
+import type { DemandeStatut } from "@maxi-equip/shared-types";
 
 /**
- * Phase 4.1, Partie 15 : Administrateur ET Gérant peuvent tout faire ici
- * — aucune restriction artificielle créée, cohérent avec la matrice de
- * droits officielle (l'écran Demandes n'est simplement jamais masqué au
- * Gérant côté Renderer). La traçabilité (Partie 16) est assurée en
- * transmettant systématiquement l'identité de la session réellement
- * connectée (`SessionManager`, déjà utilisé partout ailleurs), jamais
- * une saisie libre venant du Renderer.
+ * Correction "Workflow réel des demandes" — Administrateur ET Gérant
+ * peuvent tout faire ici, aucune restriction artificielle. Plus aucun
+ * canal de modification des lignes/client ni de confirmation-vente :
+ * ces actions vivent désormais réellement dans l'espace Vente
+ * (`ventes:create`, déjà existant) — `demandes:marquer-traitee` ne fait
+ * qu'enregistrer la liaison après coup, jamais une seconde création.
  */
-export function registerDemandeIpcHandlers(demandeService: DemandeService, notificationRepository: NotificationRepository, sessionManager: SessionManager): void {
+export function registerDemandeIpcHandlers(demandeService: DemandeService, notificationRepository: NotificationRepository): void {
   ipcMain.handle("demandes:lister", () => demandeService.listerToutes());
   ipcMain.handle("demandes:obtenir", (_e, id: string) => demandeService.obtenir(id));
   ipcMain.handle("demandes:verifier-stock", (_e, id: string) => demandeService.verifierStock(id));
+  ipcMain.handle("demandes:lister-suivi", (_e, id: string) => demandeService.listerSuivi(id));
+  ipcMain.handle("demandes:compter-actives", () => demandeService.compterActives());
 
-  ipcMain.handle("demandes:modifier-lignes", (_e, id: string, lignes: NouvelleLigneDemande[]) => demandeService.modifierLignes(id, lignes));
-  ipcMain.handle(
-    "demandes:modifier-client",
-    (
-      _e,
-      id: string,
-      champs: { clientNom?: string; clientTelephone?: string; clientAdresse?: string; clientEmail?: string | null; commentaire?: string | null }
-    ) => demandeService.modifierClient(id, champs)
+  ipcMain.handle("demandes:marquer-suivi", (_e, id: string, statut: DemandeStatut, commentaire: string | null) =>
+    demandeService.marquerSuivi(id, statut, commentaire)
   );
 
-  ipcMain.handle("demandes:confirmer", (_e, id: string, input: Omit<ConfirmerDemandeInput, "vendeurUtilisateurId" | "vendeurCompteConnecteNom">) => {
-    const session = sessionManager.get();
-    if (!session) throw new Error("Aucune session active.");
-    return demandeService.confirmer(id, { ...input, vendeurUtilisateurId: session.userId, vendeurCompteConnecteNom: session.nom });
-  });
+  ipcMain.handle("demandes:marquer-traitee", (_e, id: string, factureId: string) => demandeService.marquerTraitee(id, factureId));
 
   ipcMain.handle("demandes:refuser", (_e, id: string, motif: string) => demandeService.refuser(id, motif));
   ipcMain.handle("demandes:annuler", (_e, id: string) => demandeService.annuler(id));
-  ipcMain.handle("demandes:marquer-suivi", (_e, id: string, statut: "en_cours" | "a_contacter" | "contactee") => demandeService.marquerSuivi(id, statut));
 
   ipcMain.handle("notifications:lister", () => notificationRepository.listerRecentes());
   ipcMain.handle("notifications:compter-non-lues", () => notificationRepository.compterNonLues());

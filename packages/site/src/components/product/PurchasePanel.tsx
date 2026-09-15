@@ -3,11 +3,31 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { ProductModel, Promotion } from "@/lib/types/catalog";
-import { getEffectivePrice, promotionsForVariant } from "@/lib/pricing";
+import { getEffectivePrice, getModelDisplayPrice, promotionsForVariant } from "@/lib/pricing";
 import { formatFcfa } from "@/lib/format";
 import { DiscountBadge, PriceTag } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useCart } from "@/lib/cart/CartContext";
+
+/**
+ * Correction "Défaut 4" — la taille présélectionnée à l'arrivée sur la
+ * fiche produit doit être celle réellement affichée sur la carte du
+ * catalogue (`getModelDisplayPrice`, la variante au prix effectif le plus
+ * bas), jamais simplement la première du tableau selon l'ordre de saisie.
+ * Sans ce correctif, un client cliquant sur une carte affichant "à partir
+ * de X FCFA" pourrait arriver sur une fiche présélectionnant une AUTRE
+ * taille à un prix différent — incohérence entre ce qui est montré et ce
+ * qui est réellement sélectionné.
+ */
+function variantIdMatchingCardDisplay(model: ProductModel, promotions: Promotion[]): string {
+  const { effective } = getModelDisplayPrice(model.variants, promotions, model.id);
+  const prixAffiche = effective.promoPriceFcfa ?? effective.normalPriceFcfa;
+  const correspondante = model.variants.find((v) => {
+    const prixVariante = getEffectivePrice(v.priceFcfa, promotionsForVariant(promotions, model.id, v.id));
+    return (prixVariante.promoPriceFcfa ?? prixVariante.normalPriceFcfa) === prixAffiche;
+  });
+  return correspondante?.id ?? model.variants[0]?.id ?? "";
+}
 
 export function PurchasePanel({
   model,
@@ -16,7 +36,7 @@ export function PurchasePanel({
   model: ProductModel;
   promotions: Promotion[];
 }) {
-  const [variantId, setVariantId] = useState(model.variants[0]?.id ?? "");
+  const [variantId, setVariantId] = useState(() => variantIdMatchingCardDisplay(model, promotions));
   const [quantity, setQuantity] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
   const { addLine } = useCart();

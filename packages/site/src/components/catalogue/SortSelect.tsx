@@ -8,8 +8,6 @@ const options: { value: CatalogSort; label: string }[] = [
   { value: "type_size", label: "Type et taille" },
   { value: "relevance", label: "Pertinence" },
   { value: "recent", label: "Plus récents" },
-  { value: "price_asc", label: "Prix croissant" },
-  { value: "price_desc", label: "Prix décroissant" },
   { value: "name_asc", label: "Nom (A → Z)" },
 ];
 

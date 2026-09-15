@@ -4,7 +4,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 
 /**
  * IMPORTANT — pourquoi ce composant navigue "en dur" (window.location)
- * plutôt que via `useRouter().replace()` :
+ * pour la TAILLE et les PROMOTIONS (restés de vrais filtres) :
  *
  * En pratique, `router.replace()` (même suivi de `router.refresh()`) peut
  * laisser le Router Cache côté client de Next.js réafficher une liste de
@@ -20,6 +20,11 @@ import { usePathname, useSearchParams } from "next/navigation";
  * ré-exécuté à chaque clic, sans aucune ambiguïté de cache possible. Le
  * panier n'est pas affecté (il est relu depuis localStorage à chaque
  * chargement de page, voir CartContext).
+ *
+ * CORRECTION "Défaut 2" — le TYPE n'est plus un filtre du tout : cliquer
+ * sur un type ne modifie jamais l'URL de recherche ni la liste affichée,
+ * il fait uniquement défiler la page jusqu'à la section correspondante
+ * (voir handleTypeClick). Toujours toutes les sections restent visibles.
  */
 export function FilterSidebar({
   types,
@@ -31,7 +36,6 @@ export function FilterSidebar({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const currentType = searchParams.get("type") ?? "";
   const currentSize = searchParams.get("size") ?? "";
   const onlyPromotions = searchParams.get("promo") === "1";
 
@@ -46,9 +50,19 @@ export function FilterSidebar({
     return qs ? `${pathname}?${qs}` : pathname;
   }
 
-  const hasActiveFilters = Boolean(
-    currentType || currentSize || onlyPromotions || searchParams.get("search")
-  );
+  function handleTypeClick(e: React.MouseEvent<HTMLAnchorElement>, type: string) {
+    e.preventDefault();
+    document.getElementById(`type-${type}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    history.replaceState(null, "", `#type-${type}`);
+  }
+
+  function handleTousLesTypesClick(e: React.MouseEvent<HTMLAnchorElement>) {
+    e.preventDefault();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    history.replaceState(null, "", pathname);
+  }
+
+  const hasActiveFilters = Boolean(currentSize || onlyPromotions || searchParams.get("search"));
 
   return (
     <aside className="space-y-6" aria-label="Filtres du catalogue">
@@ -56,14 +70,13 @@ export function FilterSidebar({
         <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink-500">
           Type
         </h2>
+        <p className="mt-1 text-xs text-ink-400">Vous amène directement à la section correspondante.</p>
         <ul className="mt-2 space-y-1">
           <li>
             <a
-              href={hrefFor("type", null)}
-              aria-current={currentType === "" ? "true" : undefined}
-              className={`block w-full rounded-md px-2 py-1.5 text-left text-sm ${
-                currentType === "" ? "bg-green-50 font-semibold text-green-700" : "text-ink-600 hover:bg-ink-50"
-              }`}
+              href={pathname}
+              onClick={handleTousLesTypesClick}
+              className="block w-full rounded-md px-2 py-1.5 text-left text-sm text-ink-600 hover:bg-ink-50"
             >
               Tous les types
             </a>
@@ -71,11 +84,9 @@ export function FilterSidebar({
           {types.map((type) => (
             <li key={type}>
               <a
-                href={hrefFor("type", type)}
-                aria-current={currentType === type ? "true" : undefined}
-                className={`block w-full rounded-md px-2 py-1.5 text-left text-sm ${
-                  currentType === type ? "bg-green-50 font-semibold text-green-700" : "text-ink-600 hover:bg-ink-50"
-                }`}
+                href={`#type-${type}`}
+                onClick={(e) => handleTypeClick(e, type)}
+                className="block w-full rounded-md px-2 py-1.5 text-left text-sm text-ink-600 hover:bg-ink-50"
               >
                 {type}
               </a>

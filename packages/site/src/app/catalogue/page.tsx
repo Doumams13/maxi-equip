@@ -8,6 +8,7 @@ import { ProductCard } from "@/components/catalogue/ProductCard";
 import { FilterSidebar } from "@/components/catalogue/FilterSidebar";
 import { SortSelect } from "@/components/catalogue/SortSelect";
 import { SearchBar } from "@/components/catalogue/SearchBar";
+import { ScrollToHashOnLoad } from "@/components/catalogue/ScrollToHashOnLoad";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 
 export const metadata: Metadata = {
@@ -23,6 +24,7 @@ export const dynamic = "force-dynamic";
 interface CataloguePageProps {
   searchParams: {
     search?: string;
+    /** Ancien paramètre de filtre (Défaut 2) — n'est plus jamais utilisé comme filtre, mais reconnu pour rediriger en douceur les anciens liens/favoris vers la bonne section plutôt que de les ignorer silencieusement (voir ScrollToHashOnLoad). */
     type?: string;
     size?: string;
     sort?: string;
@@ -31,35 +33,41 @@ interface CataloguePageProps {
 }
 
 /**
- * Regroupe une liste déjà triée par type (voir MockCatalogRepository, cas
- * "type_size") en sections consécutives, pour un AFFICHAGE explicite du
- * classement "par type puis par taille" — sans quoi le tri, bien que
- * correct côté données, reste invisible dans une grille uniforme.
- * Suppose que `models` est déjà trié par type ; ne re-trie rien lui-même.
+ * Regroupe les modèles par type — TOUJOURS appliqué, quel que soit le tri
+ * choisi (Défaut 2/5 : le catalogue reste une page unique structurée par
+ * type, jamais un filtre qui fait disparaître les autres types). L'ordre
+ * DES TYPES suit `types` (déjà trié alphabétiquement par
+ * `listAvailableTypes()`), pour rester identique à l'ordre des boutons de
+ * `FilterSidebar` — condition nécessaire pour qu'une ancre "type-X" pointe
+ * toujours vers la bonne section, quel que soit le tri actif. L'ORDRE DES
+ * MODÈLES à l'intérieur de chaque section respecte le tri choisi par
+ * l'utilisateur (peu importe qu'ils soient adjacents ou non dans le
+ * tableau reçu).
  */
-function groupByType(models: ProductModel[]): { type: string; models: ProductModel[] }[] {
-  const groups: { type: string; models: ProductModel[] }[] = [];
+function groupByType(models: ProductModel[], types: string[]): { type: string; models: ProductModel[] }[] {
+  const parType = new Map<string, ProductModel[]>();
   for (const model of models) {
-    const currentGroup = groups[groups.length - 1];
-    if (currentGroup && currentGroup.type === model.type) {
-      currentGroup.models.push(model);
-    } else {
-      groups.push({ type: model.type, models: [model] });
-    }
+    const liste = parType.get(model.type) ?? [];
+    liste.push(model);
+    parType.set(model.type, liste);
   }
-  return groups;
+  return types
+    .map((type) => ({ type, models: parType.get(type) ?? [] }))
+    .filter((groupe) => groupe.models.length > 0);
 }
 
 export default async function CataloguePage({ searchParams }: CataloguePageProps) {
   const filters = {
     search: searchParams.search,
-    type: searchParams.type,
     size: searchParams.size,
     onlyPromotions: searchParams.promo === "1",
   };
-  // Tri par défaut : type puis taille (voir DEFAULT_CATALOG_SORT). Le tri
-  // s'applique toujours APRÈS les filtres (recherche, type, taille, prix,
-  // promotions), lesquels sont appliqués en amont dans listModels().
+  // Correction "Défaut 2" : le paramètre `type` n'est JAMAIS transmis comme
+  // filtre — cliquer sur un type ne doit jamais faire disparaître les
+  // autres (voir FilterSidebar.tsx, désormais une simple ancre de
+  // défilement). `CatalogFilters.type` reste défini dans l'interface pour
+  // un usage futur éventuel (ex. une page dédiée par type), mais la page
+  // catalogue elle-même ne l'utilise plus jamais.
   const sort = (searchParams.sort as CatalogSort) ?? DEFAULT_CATALOG_SORT;
 
   try {
@@ -70,17 +78,15 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
       catalogRepository.listAvailableSizes(),
     ]);
 
-    const hasActiveFilters = Boolean(
-      filters.search || filters.type || filters.size || filters.onlyPromotions
-    );
+    const hasActiveFilters = Boolean(filters.search || filters.size || filters.onlyPromotions);
 
-    // On ne regroupe visuellement par type que pour le tri "Type et taille" :
-    // pour les autres tris (prix, nom, récence…) un regroupement par type
-    // n'aurait pas de sens et casserait l'ordre demandé par l'utilisateur.
-    const groups = sort === "type_size" ? groupByType(models) : null;
+    // Toujours regroupé par type (Défaut 2/5) — jamais une liste plate,
+    // pour que chaque section reste une ancre stable et navigable.
+    const groups = groupByType(models, types);
 
     return (
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        <ScrollToHashOnLoad legacyTypeParam={searchParams.type} />
         <h1 className="font-display text-2xl font-bold text-ink-800 sm:text-3xl">Catalogue</h1>
         <p className="mt-1 text-sm text-ink-500">
           {models.length} modèle{models.length > 1 ? "s" : ""} disponible{models.length > 1 ? "s" : ""}
@@ -116,18 +122,16 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
                   ) : undefined
                 }
               />
-            ) : groups ? (
+            ) : (
               <div className="space-y-10">
                 {groups.map((group) => (
-                  <section key={group.type} aria-labelledby={`type-${group.type}`}>
+                  <section key={group.type} id={`type-${group.type}`} aria-labelledby={`type-titre-${group.type}`} className="scroll-mt-4">
                     <h2
-                      id={`type-${group.type}`}
+                      id={`type-titre-${group.type}`}
                       className="mb-4 border-b border-ink-100 pb-2 font-display text-lg font-bold text-ink-800"
                     >
                       {group.type}
-                      <span className="ml-2 text-sm font-normal text-ink-400">
-                        ({group.models.length})
-                      </span>
+                      <span className="ml-2 text-sm font-normal text-ink-400">({group.models.length})</span>
                     </h2>
                     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
                       {group.models.map((m) => (
@@ -135,12 +139,6 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
                       ))}
                     </div>
                   </section>
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {models.map((m) => (
-                  <ProductCard key={m.id} model={m} promotions={promotions} />
                 ))}
               </div>
             )}

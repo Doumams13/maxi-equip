@@ -17,17 +17,16 @@ body {
 }
 
 body {
-  @apply bg-stone-50 font-body text-stone-900 antialiased;
+  @apply bg-paper font-body text-ink antialiased;
 }
 
-/* États focus visibles pour la navigation clavier (exigence accessibilité de la phase). */
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid theme("colors.pine.700");
-  outline-offset: 2px;
+  outline: 2px solid theme("colors.ember.DEFAULT");
+  outline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,30 +1,30 @@
 import type { Config } from "tailwindcss";
 import { tokens } from "./src/design-system/tokens";
 
-// Refonte totale ("Le Journal des Matières") — voir tokens.ts pour le
-// raisonnement complet. Copie locale du design system, à remplacer par
-// un import direct de @maxi-equip/design-system le jour venu.
+// Intégration du design HTML de référence — voir src/design-system/tokens.ts.
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        ink: tokens.colors.ink,
-        paper: tokens.colors.paper,
-        ember: tokens.colors.ember,
-        moss: tokens.colors.moss,
+        bg: tokens.colors.bg,
+        surface: tokens.colors.surface,
+        "surface-soft": tokens.colors.surfaceSoft,
+        ink: tokens.colors.text,
+        "ink-mute": tokens.colors.textMute,
+        forest: tokens.colors.forest,
+        "forest-deep": tokens.colors.forestDeep,
+        sage: tokens.colors.sage,
+        "sage-pale": tokens.colors.sagePale,
+        clay: tokens.colors.clay,
         status: tokens.colors.status,
       },
       fontFamily: {
         display: [...tokens.typography.display],
         body: [...tokens.typography.body],
       },
-      letterSpacing: {
-        tightest: "-0.045em",
-      },
-      fontSize: {
-        "display-1": ["clamp(3rem, 7vw, 7rem)", { lineHeight: "0.95", letterSpacing: "-0.03em" }],
-        "display-2": ["clamp(2.25rem, 4.5vw, 4rem)", { lineHeight: "0.98", letterSpacing: "-0.025em" }],
+      borderRadius: {
+        DEFAULT: "3px",
       },
     },
   },

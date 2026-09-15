@@ -1,28 +1,26 @@
 "use client";
 
 import { formatFcfa } from "@/lib/format";
-import { LinkButton } from "@/components/ui/Button";
+import { LinkButton } from "@/components/ui/primitives";
 
 export function CartSummary({ totalFcfa, itemCount }: { totalFcfa: number; itemCount: number }) {
   return (
-    <div className="border-t-2 border-ink pt-6">
-      <p className="font-display text-lg italic text-ink/50">Récapitulatif</p>
-      <dl className="mt-4 space-y-2.5 text-sm">
-        <div className="flex justify-between">
-          <dt className="text-ink/60">Articles</dt>
-          <dd className="text-ink">{itemCount}</dd>
-        </div>
-        <div className="flex justify-between border-t border-ink/15 pt-3">
-          <dt className="text-ink">Total estimé</dt>
-          <dd className="font-display text-2xl italic text-ink">{formatFcfa(totalFcfa)}</dd>
-        </div>
-      </dl>
-      <p className="mt-4 text-xs leading-relaxed text-ink/45">
-        Ce montant est une estimation. Il ne s&apos;agit pas d&apos;un paiement : votre demande sera confirmée par MAXI EQUIP.
-      </p>
-      <LinkButton href="/demande" size="lg" fullWidth className="mt-6">
+    <div className="sticky top-24 rounded bg-surface-soft p-7">
+      <h3 className="mb-4.5 font-display text-lg">Récapitulatif</h3>
+      <div className="flex justify-between py-2 text-sm text-ink-mute">
+        <span>Articles</span>
+        <span>{itemCount}</span>
+      </div>
+      <div className="mt-2.5 flex justify-between border-t border-ink/[0.14] pt-4 font-display text-base font-bold">
+        <span>Total estimé</span>
+        <span>{formatFcfa(totalFcfa)}</span>
+      </div>
+      <LinkButton href="/demande" fullWidth className="mt-5">
         Envoyer ma demande
       </LinkButton>
+      <p className="mt-3 text-xs leading-relaxed text-ink-mute">
+        Ce total est indicatif. Le prix définitif est confirmé par un conseiller MAXI EQUIP selon les quantités et le mode de retrait.
+      </p>
     </div>
   );
 }

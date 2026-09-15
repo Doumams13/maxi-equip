@@ -1,34 +1,61 @@
 import { catalogRepository } from "@/services/catalog";
-import { locationRepository } from "@/services/location";
 import { Hero } from "@/components/home/Hero";
-import { CollectionsIndex } from "@/components/home/CollectionsIndex";
-import { FeaturedSpreads } from "@/components/home/FeaturedSpreads";
-import { AdvantagesRoom } from "@/components/home/AdvantagesRoom";
-import { LocationsSection } from "@/components/home/LocationsSection";
+import { UniversStrip } from "@/components/home/UniversStrip";
+import { PromoSplit } from "@/components/home/PromoSplit";
+import { Principles } from "@/components/home/Principles";
+import { FormatsGrid } from "@/components/home/FormatsGrid";
 import { ErrorState } from "@/components/ui/states";
 
 export const revalidate = 60;
 
 export default async function HomePage() {
   try {
-    const [featured, promotions, locations] = await Promise.all([
-      catalogRepository.listFeaturedModels(),
+    const [allModels, promotedModels, promotions, types, sizes] = await Promise.all([
+      catalogRepository.listModels({}, "recent"),
+      catalogRepository.listModels({ onlyPromotions: true }, "recent"),
       catalogRepository.listPromotions(),
-      locationRepository.listLocations(),
+      catalogRepository.listAvailableTypes(),
+      catalogRepository.listAvailableSizes(),
     ]);
 
     return (
       <>
-        <Hero featuredModel={featured[0]} />
-        <CollectionsIndex />
-        <FeaturedSpreads models={featured} promotions={promotions} />
-        <AdvantagesRoom />
-        <LocationsSection locations={locations} />
+        <Hero models={allModels} />
+
+        <div className="mx-auto max-w-[1180px] border-t border-ink/[0.08] px-[18px] py-9 sm:px-7 sm:py-16">
+          <div className="mb-9 flex flex-wrap items-end justify-between gap-6">
+            <h2 className="font-display text-[clamp(24px,3vw,34px)]">Nos univers de motifs</h2>
+            <p className="max-w-[38ch] text-[14.5px] text-ink-mute">
+              Chaque univers rassemble plusieurs modèles, du plus minéral au plus graphique.
+            </p>
+          </div>
+          <UniversStrip types={types} models={allModels} />
+        </div>
+
+        {promotedModels.length > 0 && (
+          <div className="mx-auto max-w-[1180px] border-t border-ink/[0.08] px-[18px] py-9 sm:px-7 sm:py-16">
+            <div className="mb-9 flex flex-wrap items-end justify-between gap-6">
+              <h2 className="font-display text-[clamp(24px,3vw,34px)]">En ce moment</h2>
+              <p className="max-w-[38ch] text-[14.5px] text-ink-mute">Une sélection à prix ajusté, pour un temps limité.</p>
+            </div>
+            <PromoSplit models={promotedModels} promotions={promotions} />
+          </div>
+        )}
+
+        <Principles />
+
+        <div className="mx-auto max-w-[1180px] px-[18px] py-9 sm:px-7 sm:py-16">
+          <div className="mb-9 flex flex-wrap items-end justify-between gap-6">
+            <h2 className="font-display text-[clamp(24px,3vw,34px)]">Des formats pensés pour chaque pièce</h2>
+            <p className="max-w-[38ch] text-[14.5px] text-ink-mute">Les formats couvrent l&apos;essentiel des projets, du sol au mur.</p>
+          </div>
+          <FormatsGrid sizes={sizes} models={allModels} />
+        </div>
       </>
     );
   } catch (error) {
     return (
-      <div className="mx-auto max-w-[1400px] px-5 py-24 sm:px-10">
+      <div className="mx-auto max-w-[1180px] px-[18px] py-20 sm:px-7">
         <ErrorState description={error instanceof Error ? error.message : "Impossible de charger la page d'accueil pour le moment."} />
       </div>
     );

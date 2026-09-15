@@ -30,8 +30,8 @@ export function SearchBar() {
         type="search"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Chercher un motif, un type, une référence…"
-        className="w-full border-0 border-b border-ink/25 bg-transparent py-3 font-display text-2xl italic text-ink placeholder:text-ink/35 focus:border-ember sm:text-3xl"
+        placeholder="Rechercher un modèle, une référence…"
+        className="w-full max-w-md rounded border border-ink/[0.14] bg-surface px-3.5 py-2.5 text-[14.5px] text-ink placeholder:text-ink-mute focus:border-forest"
       />
     </label>
   );

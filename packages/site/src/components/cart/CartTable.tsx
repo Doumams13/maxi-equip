@@ -10,57 +10,53 @@ export function CartTable({ lines }: { lines: CartLine[] }) {
   const { setQuantity, removeLine } = useCart();
 
   return (
-    <div className="divide-y divide-ink/15 border-y border-ink/15">
+    <div>
       {lines.map((line) => (
-        <div key={line.variantId} className="flex gap-5 py-6">
-          <div className="relative h-28 w-28 shrink-0 overflow-hidden bg-ink/5">
-            {line.imageUrl && <Image src={line.imageUrl} alt={line.productModelName} fill sizes="112px" className="object-cover" />}
+        <div
+          key={line.variantId}
+          className="grid grid-cols-[64px_1fr] grid-rows-[auto_auto_auto] gap-x-3 gap-y-2 border-b border-ink/[0.08] py-3.5 sm:grid-cols-[78px_1fr_auto_auto] sm:grid-rows-1 sm:items-center sm:gap-x-4.5 sm:py-4.5"
+        >
+          <div className="relative row-span-3 h-16 w-16 overflow-hidden rounded-sm sm:row-span-1 sm:h-[78px] sm:w-[78px]">
+            {line.imageUrl && <Image src={line.imageUrl} alt={line.productModelName} fill sizes="78px" className="object-cover" />}
           </div>
 
-          <div className="flex flex-1 flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div>
-              <Link href={`/catalogue/${line.productModelSlug}`} className="font-display text-xl italic text-ink hover:text-ember">
-                {line.productModelName}
-              </Link>
-              <p className="mt-1 text-xs text-ink/50">
-                Taille {line.size} · Réf. {line.reference}
-              </p>
-              <p className="mt-1.5 font-display text-lg italic text-ink">{formatFcfa(line.unitPriceFcfa)}</p>
-            </div>
-
-            <div className="flex items-center gap-5">
-              <div className="flex items-center border border-ink/20">
-                <button
-                  type="button"
-                  aria-label={`Diminuer la quantité de ${line.productModelName}`}
-                  onClick={() => setQuantity(line.variantId, Math.max(1, line.quantity - 1))}
-                  className="px-3 py-1.5 text-ink hover:bg-ink/5"
-                >
-                  −
-                </button>
-                <span className="w-8 text-center text-sm" aria-live="polite">
-                  {line.quantity}
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Augmenter la quantité de ${line.productModelName}`}
-                  onClick={() => setQuantity(line.variantId, line.quantity + 1)}
-                  className="px-3 py-1.5 text-ink hover:bg-ink/5"
-                >
-                  +
-                </button>
-              </div>
-              <span className="w-24 text-right font-display text-lg italic text-ink">{formatFcfa(line.unitPriceFcfa * line.quantity)}</span>
-              <button
-                type="button"
-                onClick={() => removeLine(line.variantId)}
-                aria-label={`Retirer ${line.productModelName} du panier`}
-                className="text-xs text-ink/40 underline hover:text-status-error"
-              >
-                Retirer
-              </button>
-            </div>
+          <div className="col-start-2 row-start-1">
+            <Link href={`/catalogue/${line.productModelSlug}`} className="text-[15.5px] hover:text-forest">
+              {line.productModelName}
+            </Link>
+            <p className="mt-1 text-[12.5px] text-ink-mute">
+              Format {line.size} · Réf. {line.reference}
+            </p>
+            <button type="button" onClick={() => removeLine(line.variantId)} className="mt-1.5 text-[12.5px] text-ink-mute underline">
+              Retirer
+            </button>
           </div>
+
+          <div className="col-start-2 row-start-2 flex w-fit items-center rounded border border-ink/[0.14] sm:col-auto sm:row-auto">
+            <button
+              type="button"
+              aria-label={`Diminuer la quantité de ${line.productModelName}`}
+              onClick={() => setQuantity(line.variantId, Math.max(1, line.quantity - 1))}
+              className="h-8 w-8 text-sm"
+            >
+              −
+            </button>
+            <span className="w-7 text-center text-sm" aria-live="polite">
+              {line.quantity}
+            </span>
+            <button
+              type="button"
+              aria-label={`Augmenter la quantité de ${line.productModelName}`}
+              onClick={() => setQuantity(line.variantId, line.quantity + 1)}
+              className="h-8 w-8 text-sm"
+            >
+              +
+            </button>
+          </div>
+
+          <span className="col-span-2 row-start-3 text-left font-display text-[15px] font-semibold text-ink sm:col-span-1 sm:row-auto sm:text-right">
+            {formatFcfa(line.unitPriceFcfa * line.quantity)}
+          </span>
         </div>
       ))}
     </div>

@@ -13,7 +13,7 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 
 export const metadata: Metadata = {
   title: "Catalogue de carreaux",
-  description: "Parcourez le catalogue de carreaux MAXI EQUIP : faïence, grès cérame, mosaïque et antidérapant, dans toutes les tailles disponibles.",
+  description: "Parcourez l'ensemble des modèles de carreaux disponibles chez MAXI EQUIP : faïence, grès cérame, mosaïque et antidérapant.",
 };
 
 export const dynamic = "force-dynamic";
@@ -51,58 +51,47 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
       <div>
         <ScrollToHashOnLoad legacyTypeParam={searchParams.type} />
 
-        <div className="mx-auto max-w-[1400px] px-5 pt-16 sm:px-10">
-          <p className="font-display text-lg italic text-ink/50">
-            {models.length} modèle{models.length > 1 ? "s" : ""}
+        <div className="mx-auto max-w-[1180px] px-[18px] pt-8 sm:px-7">
+          <h1 className="font-display text-[clamp(24px,4vw,42px)] text-forest-deep">Catalogue</h1>
+          <p className="mt-2.5 max-w-[52ch] text-[14.5px] text-ink-mute">
+            Parcourez l&apos;ensemble des modèles disponibles chez MAXI EQUIP. Filtrez par univers ou par format pour affiner votre recherche.
           </p>
-          <h1 className="mt-1 font-display text-display-1 italic leading-none text-ink">Le catalogue</h1>
-
-          <div className="mt-10">
-            <Suspense fallback={<div className="h-12 w-full animate-pulse bg-ink/5" />}>
+          <div className="mt-5 max-w-md">
+            <Suspense fallback={<div className="h-11 w-full animate-pulse rounded bg-surface-soft" />}>
               <SearchBar />
             </Suspense>
           </div>
-
-          <Suspense fallback={<div className="mt-6 h-14 w-full animate-pulse bg-ink/5" />}>
+          <Suspense fallback={<div className="mt-4.5 h-8 w-full animate-pulse rounded bg-surface-soft" />}>
             <FilterBar types={types} sizes={sizes} />
           </Suspense>
-
-          <div className="flex justify-end border-b border-ink/15 pb-6">
-            <Suspense fallback={<div className="h-9 w-40 animate-pulse bg-ink/5" />}>
+          <div className="mt-4 flex justify-end">
+            <Suspense fallback={<div className="h-8 w-32 animate-pulse rounded bg-surface-soft" />}>
               <SortSelect />
             </Suspense>
           </div>
         </div>
 
-        <div className="mx-auto max-w-[1400px] px-5 sm:px-10">
+        <div className="mx-auto max-w-[1180px] px-[18px] pb-16 pt-6 sm:px-7">
           {models.length === 0 ? (
             <EmptyState
-              title="Rien à montrer ici"
+              title="Aucun modèle ne correspond à votre recherche"
               description="Essayez d'élargir vos filtres ou d'effacer votre recherche."
               action={
                 hasActiveFilters ? (
-                  <Link href="/catalogue" className="font-display text-lg italic text-ember hover:underline">
+                  <Link href="/catalogue" className="text-sm font-semibold text-forest hover:underline">
                     Voir tout le catalogue
                   </Link>
                 ) : undefined
               }
             />
           ) : (
-            <div className="py-16">
-              {groups.map((group, gi) => (
-                <section
-                  key={group.type}
-                  id={`type-${group.type}`}
-                  aria-labelledby={`type-titre-${group.type}`}
-                  className="scroll-mt-6 border-b border-ink/15 py-16 first:pt-0 last:border-0"
-                >
-                  <div className="mb-10 flex items-baseline gap-4">
-                    <span className="font-display text-lg italic text-ink/30">0{gi + 1}</span>
-                    <h2 id={`type-titre-${group.type}`} className="font-display text-display-2 italic leading-none text-ink">
-                      {group.type}
-                    </h2>
-                  </div>
-                  <div className="grid grid-cols-1 gap-x-8 gap-y-14 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="space-y-14">
+              {groups.map((group) => (
+                <section key={group.type} id={`type-${group.type}`} aria-labelledby={`type-titre-${group.type}`} className="scroll-mt-6">
+                  <h2 id={`type-titre-${group.type}`} className="mb-5 border-b border-ink/[0.08] pb-3 font-display text-2xl text-forest-deep">
+                    {group.type} <span className="text-base font-normal text-ink-mute">({group.models.length})</span>
+                  </h2>
+                  <div className="grid grid-cols-2 gap-x-3.5 gap-y-4 sm:grid-cols-3 sm:gap-x-4.5 sm:gap-y-5.5 lg:grid-cols-4 lg:gap-x-5.5 lg:gap-y-6.5">
                     {group.models.map((m) => (
                       <ProductCard key={m.id} model={m} promotions={promotions} />
                     ))}
@@ -116,7 +105,7 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
     );
   } catch (error) {
     return (
-      <div className="mx-auto max-w-[1400px] px-5 py-24 sm:px-10">
+      <div className="mx-auto max-w-[1180px] px-[18px] py-20 sm:px-7">
         <ErrorState description={error instanceof Error ? error.message : "Impossible de charger le catalogue pour le moment."} />
       </div>
     );

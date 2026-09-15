@@ -10,14 +10,16 @@
   box-sizing: border-box;
 }
 
-html,
-body {
+html {
+  scroll-behavior: smooth;
+}
+html, body {
   padding: 0;
   margin: 0;
 }
 
 body {
-  @apply bg-paper font-body text-ink antialiased;
+  @apply bg-bg font-body text-ink antialiased;
 }
 
 a:focus-visible,
@@ -25,8 +27,8 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid theme("colors.ember.DEFAULT");
-  outline-offset: 3px;
+  outline: 2px solid theme("colors.clay");
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,38 +1,73 @@
-import type { ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
+import Link from "next/link";
 import { formatFcfa } from "@/lib/format";
 import type { EffectivePrice } from "@/lib/types/catalog";
 
-export function Eyebrow({ children, tone = "ink" }: { children: ReactNode; tone?: "ink" | "paper" | "ember" }) {
-  const colors = { ink: "text-ink/60", paper: "text-paper/70", ember: "text-ember" };
-  return <span className={`font-display text-sm italic ${colors[tone]}`}>{children}</span>;
+type Variant = "primary" | "ghost" | "clay";
+
+const base = "inline-flex items-center gap-2 rounded px-6 py-3.5 text-[14.5px] font-semibold transition-colors active:scale-[.97]";
+const variants: Record<Variant, string> = {
+  primary: "bg-forest text-bg hover:bg-forest-deep",
+  ghost: "bg-transparent text-ink border border-ink/[0.14] hover:border-ink",
+  clay: "bg-clay text-white",
+};
+
+interface CommonProps {
+  variant?: Variant;
+  children: ReactNode;
+  className?: string;
+  fullWidth?: boolean;
 }
 
-export function DiscountMark({ percent }: { percent: number }) {
-  return <span className="bg-ember px-3 py-1.5 font-display text-sm italic text-paper">−{percent}% en ce moment</span>;
+type ButtonProps = CommonProps & ButtonHTMLAttributes<HTMLButtonElement> & { href?: undefined };
+interface LinkButtonProps extends CommonProps {
+  href: string;
+  target?: string;
+  rel?: string;
+}
+
+export function Button({ variant = "primary", children, className = "", fullWidth, ...rest }: ButtonProps) {
+  return (
+    <button className={`${base} ${variants[variant]} ${fullWidth ? "w-full justify-center" : ""} ${className}`} {...rest}>
+      {children}
+    </button>
+  );
+}
+
+export function LinkButton({ variant = "primary", children, className = "", fullWidth, href, target, rel }: LinkButtonProps) {
+  return (
+    <Link href={href} target={target} rel={rel} className={`${base} ${variants[variant]} ${fullWidth ? "w-full justify-center" : ""} ${className}`}>
+      {children}
+    </Link>
+  );
+}
+
+export function DiscountBadge({ percent }: { percent: number }) {
+  return <span className="absolute left-3 top-3 rounded-sm bg-surface px-2.5 py-1 text-[11.5px] font-bold text-clay">−{percent}%</span>;
 }
 
 export function PriceTag({
   price,
+  context,
   size = "md",
-  dark = false,
 }: {
   price: EffectivePrice;
+  context: "general" | "selected";
   size?: "sm" | "md" | "lg";
-  dark?: boolean;
 }) {
-  const sizes = { sm: "text-xl", md: "text-2xl", lg: "text-5xl" }[size];
-  const strikeSizes = { sm: "text-xs", md: "text-sm", lg: "text-lg" }[size];
-  const base = dark ? "text-paper" : "text-ink";
-  const muted = dark ? "text-paper/40" : "text-ink/35";
+  const sizes = { sm: "text-[15px]", md: "text-[22px]", lg: "text-[28px]" }[size];
+  const strikeSizes = { sm: "text-[11.5px]", md: "text-sm", lg: "text-[15px]" }[size];
+  const now = price.isPromotionActive && price.promoPriceFcfa !== null ? price.promoPriceFcfa : price.normalPriceFcfa;
 
-  if (price.isPromotionActive && price.promoPriceFcfa !== null) {
-    return (
-      <div className="flex flex-wrap items-baseline gap-x-3">
-        <span className={`font-display italic ${sizes} text-ember`}>{formatFcfa(price.promoPriceFcfa)}</span>
-        <span className={`${strikeSizes} ${muted} line-through`}>{formatFcfa(price.normalPriceFcfa)}</span>
+  return (
+    <div>
+      {context === "general" && <span className="block font-body text-[11px] font-normal text-ink-mute">À partir de</span>}
+      <div className="flex items-baseline gap-2.5">
+        <span className={`font-display font-semibold ${sizes} ${price.isPromotionActive ? "text-clay" : "text-ink"}`}>{formatFcfa(now)}</span>
+        {price.isPromotionActive && price.promoPriceFcfa !== null && (
+          <span className={`${strikeSizes} text-ink-mute line-through`}>{formatFcfa(price.normalPriceFcfa)}</span>
+        )}
       </div>
-    );
-  }
-
-  return <span className={`font-display italic ${sizes} ${base}`}>{formatFcfa(price.normalPriceFcfa)}</span>;
+    </div>
+  );
 }

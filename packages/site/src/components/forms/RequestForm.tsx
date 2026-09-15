@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart/CartContext";
 import { requestRepository } from "@/services/request";
-import { Button } from "@/components/ui/Button";
+import { Button } from "@/components/ui/primitives";
 import { ErrorState } from "@/components/ui/states";
 
 export function RequestForm() {
@@ -28,9 +28,9 @@ export function RequestForm() {
     const websiteHoneypot = String(formData.get("website") ?? "");
 
     const nextFieldErrors: Record<string, string> = {};
-    if (!customerName) nextFieldErrors.customerName = "Votre nom est requis.";
-    if (!phone) nextFieldErrors.phone = "Un numéro de téléphone est requis.";
-    if (!location) nextFieldErrors.location = "Indiquez votre localisation (quartier, ville).";
+    if (!customerName) nextFieldErrors.customerName = "Merci d'indiquer votre nom.";
+    if (!phone) nextFieldErrors.phone = "Merci d'indiquer un numéro de téléphone.";
+    if (!location) nextFieldErrors.location = "Merci d'indiquer une localisation.";
     if (Object.keys(nextFieldErrors).length > 0) {
       setFieldErrors(nextFieldErrors);
       return;
@@ -64,16 +64,16 @@ export function RequestForm() {
   }
 
   if (state.lines.length === 0) {
-    return <ErrorState title="Votre panier est vide" description="Ajoutez au moins un produit depuis le catalogue avant d'envoyer une demande." />;
+    return <ErrorState title="Votre sélection est vide" description="Ajoutez au moins un produit depuis le catalogue avant d'envoyer une demande." />;
   }
 
-  const fieldClass = "mt-2 w-full border-0 border-b border-ink/25 bg-transparent py-2.5 text-lg focus:border-ember";
-  const labelClass = "font-display text-lg italic text-ink";
+  const inputClass = "w-full rounded border border-ink/[0.14] bg-surface px-3.5 py-3 text-[14.5px] text-ink focus:border-forest";
+  const labelClass = "mb-1.5 block text-[13px] font-semibold text-ink";
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-7">
+    <form onSubmit={handleSubmit} noValidate>
       {error && (
-        <div role="alert" className="border border-status-error/30 bg-status-errorBg px-4 py-3 text-sm text-status-error">
+        <div role="alert" className="mb-5 rounded bg-status-errorBg px-4 py-3 text-sm text-clay">
           {error}
         </div>
       )}
@@ -83,82 +83,45 @@ export function RequestForm() {
         <input id="website" name="website" type="text" tabIndex={-1} autoComplete="off" />
       </div>
 
-      <div>
+      <div className="mb-5">
         <label htmlFor="customerName" className={labelClass}>
-          Votre nom
+          Nom complet
         </label>
-        <input
-          id="customerName"
-          name="customerName"
-          type="text"
-          required
-          aria-invalid={Boolean(fieldErrors.customerName)}
-          aria-describedby={fieldErrors.customerName ? "customerName-error" : undefined}
-          className={fieldClass}
-        />
-        {fieldErrors.customerName && (
-          <p id="customerName-error" className="mt-1 text-xs text-status-error">
-            {fieldErrors.customerName}
-          </p>
-        )}
+        <input id="customerName" name="customerName" type="text" placeholder="Votre nom" className={inputClass} aria-invalid={Boolean(fieldErrors.customerName)} />
+        {fieldErrors.customerName && <p className="mt-1.5 text-[12.5px] text-clay">{fieldErrors.customerName}</p>}
       </div>
 
-      <div>
+      <div className="mb-5">
         <label htmlFor="phone" className={labelClass}>
           Téléphone
         </label>
-        <input
-          id="phone"
-          name="phone"
-          type="tel"
-          required
-          aria-invalid={Boolean(fieldErrors.phone)}
-          aria-describedby={fieldErrors.phone ? "phone-error" : undefined}
-          className={fieldClass}
-        />
-        {fieldErrors.phone && (
-          <p id="phone-error" className="mt-1 text-xs text-status-error">
-            {fieldErrors.phone}
-          </p>
-        )}
+        <input id="phone" name="phone" type="tel" placeholder="Votre numéro de téléphone" className={inputClass} aria-invalid={Boolean(fieldErrors.phone)} />
+        {fieldErrors.phone && <p className="mt-1.5 text-[12.5px] text-clay">{fieldErrors.phone}</p>}
       </div>
 
-      <div>
+      <div className="mb-5">
         <label htmlFor="location" className={labelClass}>
-          Localisation
+          Adresse / localisation
         </label>
-        <input
-          id="location"
-          name="location"
-          type="text"
-          required
-          placeholder="Quartier, ville"
-          aria-invalid={Boolean(fieldErrors.location)}
-          aria-describedby={fieldErrors.location ? "location-error" : undefined}
-          className={fieldClass}
-        />
-        {fieldErrors.location && (
-          <p id="location-error" className="mt-1 text-xs text-status-error">
-            {fieldErrors.location}
-          </p>
-        )}
+        <input id="location" name="location" type="text" placeholder="Quartier, ville" className={inputClass} aria-invalid={Boolean(fieldErrors.location)} />
+        {fieldErrors.location && <p className="mt-1.5 text-[12.5px] text-clay">{fieldErrors.location}</p>}
       </div>
 
-      <div>
+      <div className="mb-5">
         <label htmlFor="email" className={labelClass}>
-          Email <span className="text-sm not-italic text-ink/40">(facultatif)</span>
+          Email <span className="font-normal text-ink-mute">(facultatif)</span>
         </label>
-        <input id="email" name="email" type="email" className={fieldClass} />
+        <input id="email" name="email" type="email" placeholder="vous@exemple.com" className={inputClass} />
       </div>
 
-      <div>
+      <div className="mb-5">
         <label htmlFor="comment" className={labelClass}>
-          Un mot pour préciser votre demande <span className="text-sm not-italic text-ink/40">(facultatif)</span>
+          Commentaire <span className="font-normal text-ink-mute">(facultatif)</span>
         </label>
-        <textarea id="comment" name="comment" rows={3} className={fieldClass} />
+        <textarea id="comment" name="comment" placeholder="Précisions sur votre projet, délai souhaité..." className={`${inputClass} min-h-[90px] resize-y`} />
       </div>
 
-      <Button type="submit" size="lg" fullWidth disabled={submitting}>
+      <Button type="submit" fullWidth disabled={submitting}>
         {submitting ? "Envoi en cours…" : "Envoyer ma demande"}
       </Button>
     </form>

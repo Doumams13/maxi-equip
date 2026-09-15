@@ -17,8 +17,8 @@ export function SortSelect() {
   const current = (searchParams.get("sort") as CatalogSort) ?? DEFAULT_CATALOG_SORT;
 
   return (
-    <label className="flex items-center gap-2 text-sm text-ink/60">
-      <span className="hidden sm:inline">Trier</span>
+    <label className="flex items-center gap-2 text-[13px] text-ink-mute">
+      Trier
       <select
         value={current}
         onChange={(e) => {
@@ -26,7 +26,7 @@ export function SortSelect() {
           params.set("sort", e.target.value);
           window.location.href = `${pathname}?${params.toString()}`;
         }}
-        className="border-0 border-b border-ink/30 bg-transparent py-1 font-display text-base italic text-ink focus:border-ember"
+        className="rounded border border-ink/[0.14] bg-surface px-2.5 py-1.5 text-[13px] text-ink focus:border-forest"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

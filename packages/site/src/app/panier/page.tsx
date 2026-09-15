@@ -10,23 +10,21 @@ export default function CartPage() {
   const { state, totalFcfa, itemCount } = useCart();
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-16 sm:px-10">
-      <h1 className="font-display text-display-1 italic leading-none text-ink">Votre panier</h1>
+    <div className="mx-auto max-w-[1180px] px-[18px] py-8 sm:px-7 sm:pb-16">
+      <h1 className="mb-6 font-display text-[clamp(24px,3vw,36px)] text-forest-deep">Votre sélection</h1>
 
       {state.lines.length === 0 ? (
-        <div className="mt-10">
-          <EmptyState
-            title="Rien ici pour le moment"
-            description="Parcourez le catalogue pour ajouter des carreaux à votre demande."
-            action={
-              <Link href="/catalogue" className="font-display text-lg italic text-ember hover:underline">
-                Voir le catalogue
-              </Link>
-            }
-          />
-        </div>
+        <EmptyState
+          title="Votre sélection est vide"
+          description="Parcourez le catalogue pour ajouter des carreaux à votre demande."
+          action={
+            <Link href="/catalogue" className="text-sm font-semibold text-forest hover:underline">
+              Voir le catalogue
+            </Link>
+          }
+        />
       ) : (
-        <div className="mt-12 grid gap-14 lg:grid-cols-[1fr_320px]">
+        <div className="grid gap-9 md:grid-cols-[1.6fr_1fr] md:items-start">
           <CartTable lines={state.lines} />
           <CartSummary totalFcfa={totalFcfa} itemCount={itemCount} />
         </div>

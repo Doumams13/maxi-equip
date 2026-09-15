@@ -20,7 +20,7 @@ export function SortSelect() {
   const current = (searchParams.get("sort") as CatalogSort) ?? DEFAULT_CATALOG_SORT;
 
   return (
-    <label className="flex items-center gap-2 text-sm text-ink-600">
+    <label className="flex items-center gap-2 text-sm text-stone-600">
       <span className="hidden sm:inline">Trier par</span>
       <select
         value={current}
@@ -33,7 +33,7 @@ export function SortSelect() {
           // sans dépendre du Router Cache client de Next.js.
           window.location.href = `${pathname}?${params.toString()}`;
         }}
-        className="rounded-md border border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-800 focus:border-green-500"
+        className="border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 focus:border-pine-700"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

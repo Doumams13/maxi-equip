@@ -8,7 +8,7 @@ export default function NotFound() {
         title="Page introuvable"
         description="Le contenu que vous cherchez n'existe pas ou a été déplacé."
         action={
-          <Link href="/" className="text-sm font-semibold text-green-700 hover:underline">
+          <Link href="/" className="text-sm font-semibold text-pine-700 hover:underline">
             Retour à l&apos;accueil
           </Link>
         }

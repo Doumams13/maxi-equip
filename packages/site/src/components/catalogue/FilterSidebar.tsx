@@ -67,16 +67,14 @@ export function FilterSidebar({
   return (
     <aside className="space-y-6" aria-label="Filtres du catalogue">
       <div>
-        <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink-500">
-          Type
-        </h2>
-        <p className="mt-1 text-xs text-ink-400">Vous amène directement à la section correspondante.</p>
-        <ul className="mt-2 space-y-1">
+        <h2 className="font-display text-base text-stone-900">Type</h2>
+        <p className="mt-1 text-xs text-stone-400">Vous amène directement à la section correspondante.</p>
+        <ul className="mt-3 space-y-1">
           <li>
             <a
               href={pathname}
               onClick={handleTousLesTypesClick}
-              className="block w-full rounded-md px-2 py-1.5 text-left text-sm text-ink-600 hover:bg-ink-50"
+              className="block w-full py-1.5 text-left text-sm text-stone-600 hover:text-pine-700"
             >
               Tous les types
             </a>
@@ -86,7 +84,7 @@ export function FilterSidebar({
               <a
                 href={`#type-${type}`}
                 onClick={(e) => handleTypeClick(e, type)}
-                className="block w-full rounded-md px-2 py-1.5 text-left text-sm text-ink-600 hover:bg-ink-50"
+                className="block w-full py-1.5 text-left text-sm text-stone-600 hover:text-pine-700"
               >
                 {type}
               </a>
@@ -96,15 +94,13 @@ export function FilterSidebar({
       </div>
 
       <div>
-        <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink-500">
-          Taille
-        </h2>
-        <div className="mt-2 flex flex-wrap gap-2">
+        <h2 className="font-display text-base text-stone-900">Taille</h2>
+        <div className="mt-3 flex flex-wrap gap-2">
           <a
             href={hrefFor("size", null)}
             aria-current={currentSize === "" ? "true" : undefined}
-            className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-              currentSize === "" ? "border-green-600 bg-green-50 text-green-700" : "border-ink-200 text-ink-600 hover:border-ink-300"
+            className={`border px-3 py-1 text-xs font-medium ${
+              currentSize === "" ? "border-pine-700 bg-pine-50 text-pine-700" : "border-stone-300 text-stone-600 hover:border-stone-500"
             }`}
           >
             Toutes
@@ -114,8 +110,8 @@ export function FilterSidebar({
               key={size}
               href={hrefFor("size", size)}
               aria-current={currentSize === size ? "true" : undefined}
-              className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                currentSize === size ? "border-green-600 bg-green-50 text-green-700" : "border-ink-200 text-ink-600 hover:border-ink-300"
+              className={`border px-3 py-1 text-xs font-medium ${
+                currentSize === size ? "border-pine-700 bg-pine-50 text-pine-700" : "border-stone-300 text-stone-600 hover:border-stone-500"
               }`}
             >
               {size}
@@ -125,15 +121,11 @@ export function FilterSidebar({
       </div>
 
       <div>
-        <a
-          href={hrefFor("promo", onlyPromotions ? null : "1")}
-          aria-current={onlyPromotions ? "true" : undefined}
-          className="flex items-center gap-2 text-sm text-ink-700"
-        >
+        <a href={hrefFor("promo", onlyPromotions ? null : "1")} aria-current={onlyPromotions ? "true" : undefined} className="flex items-center gap-2.5 text-sm text-stone-700">
           <span
             aria-hidden="true"
-            className={`flex h-4 w-4 items-center justify-center rounded border ${
-              onlyPromotions ? "border-green-600 bg-green-600 text-white" : "border-ink-300 bg-white"
+            className={`flex h-4 w-4 items-center justify-center border ${
+              onlyPromotions ? "border-pine-700 bg-pine-700 text-white" : "border-stone-300 bg-white"
             }`}
           >
             {onlyPromotions && (
@@ -147,10 +139,7 @@ export function FilterSidebar({
       </div>
 
       {hasActiveFilters && (
-        <a
-          href={pathname}
-          className="inline-block text-sm font-semibold text-ink-500 underline hover:text-ink-700"
-        >
+        <a href={pathname} className="inline-block text-sm font-medium text-stone-500 underline decoration-1 underline-offset-4 hover:text-stone-800">
           Effacer les filtres
         </a>
       )}

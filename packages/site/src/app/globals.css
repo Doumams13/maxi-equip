@@ -17,7 +17,7 @@ body {
 }
 
 body {
-  @apply bg-white font-body text-ink-800 antialiased;
+  @apply bg-stone-50 font-body text-stone-900 antialiased;
 }
 
 /* États focus visibles pour la navigation clavier (exigence accessibilité de la phase). */
@@ -26,7 +26,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid theme("colors.green.600");
+  outline: 2px solid theme("colors.pine.700");
   outline-offset: 2px;
 }
 

@@ -8,11 +8,18 @@
  */
 export const siteConfig = {
   companyName: "MAXI EQUIP",
-  legalName: "MAXI EQUIP — Quincaillerie et Vente de Matériaux de Construction",
-  tagline: "Équiper aujourd'hui vos projets de demain",
+  /**
+   * Correction — la refonte précise explicitement : "MAXI EQUIP vend
+   * UNIQUEMENT des CARREAUX. Il ne s'agit pas d'une entreprise générale
+   * de matériaux de construction." L'ancienne valeur ("Quincaillerie et
+   * Vente de Matériaux de Construction") contredisait directement cette
+   * règle — corrigée pour refléter fidèlement l'activité réelle.
+   */
+  legalName: "MAXI EQUIP — Spécialiste du carrelage",
+  tagline: "Le carrelage qui donne du caractère à vos espaces",
   slogan: "Construire Ensemble",
   description:
-    "Vente de carreaux et matériaux de construction à Libreville, Gabon : faïence, grès cérame, mosaïque et antidérapant pour tous vos projets.",
+    "MAXI EQUIP est spécialiste du carrelage à Libreville, Gabon : faïence, grès cérame, mosaïque et antidérapant, dans toutes les tailles, pour tous vos projets.",
   city: "Libreville, Gabon",
 
   // Source : DOCUMENTS/MAXI EQUIP Entete..pdf et Facture_MAXI_EQUIP (1).pdf

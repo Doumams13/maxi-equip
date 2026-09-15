@@ -7,29 +7,21 @@ const categories = [
   { type: "Mosaïque", description: "Crédences et touches décoratives" },
 ];
 
+/**
+ * Refonte — une rangée séparée par des liserés fins (joints de pose),
+ * jamais quatre cartes identiques à bordure/fond. Le clic amène à la
+ * section correspondante du catalogue par défilement fluide, jamais un
+ * filtre (voir ScrollToHashOnLoad côté catalogue).
+ */
 export function CategoryGrid() {
-  // Correction "Défaut 5" — le lien pointe vers l'ancre de la section
-  // correspondante sur la page catalogue (jamais un paramètre de filtre
-  // `?type=`), pour un comportement cohérent avec le Défaut 2 : le
-  // catalogue reste toujours une page unique montrant tous les types,
-  // l'utilisateur est simplement amené à la bonne section par un
-  // défilement fluide (voir ScrollToHashOnLoad côté catalogue).
   return (
-    <section className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
-      <h2 className="font-display text-xl font-bold text-ink-800 sm:text-2xl">
-        Parcourir par type
-      </h2>
-      <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+      <h2 className="font-display text-2xl text-stone-900 sm:text-3xl">Nos univers</h2>
+      <div className="mt-8 grid grid-cols-1 divide-y divide-stone-200 border-t border-stone-200 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
         {categories.map((c) => (
-          <Link
-            key={c.type}
-            href={`/catalogue#type-${encodeURIComponent(c.type)}`}
-            className="group rounded-lg border border-ink-100 p-4 transition-colors hover:border-green-300 hover:bg-green-50"
-          >
-            <h3 className="font-display text-sm font-semibold text-ink-800 group-hover:text-green-700">
-              {c.type}
-            </h3>
-            <p className="mt-1 text-xs text-ink-500">{c.description}</p>
+          <Link key={c.type} href={`/catalogue#type-${encodeURIComponent(c.type)}`} className="group px-1 py-6 first:pl-0 sm:px-6">
+            <h3 className="font-display text-lg text-stone-900 transition-colors group-hover:text-pine-700">{c.type}</h3>
+            <p className="mt-1.5 text-sm text-stone-500">{c.description}</p>
           </Link>
         ))}
       </div>

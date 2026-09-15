@@ -5,8 +5,8 @@ import { siteConfig } from "@/config/site";
 export function Footer() {
   const year = new Date().getFullYear();
   return (
-    <footer className="border-t border-ink-100 bg-ink-800 text-ink-100">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-3">
+    <footer className="bg-pine-800 text-stone-200">
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-3">
         <div>
           <Image
             src="/logo/maxi-equip-logo.png"
@@ -15,33 +15,29 @@ export function Footer() {
             height={41}
             className="h-9 w-auto brightness-0 invert"
           />
-          <p className="mt-4 max-w-xs text-sm text-ink-300">{siteConfig.description}</p>
+          <p className="mt-5 max-w-xs font-display text-lg italic leading-snug text-stone-100">{siteConfig.tagline}</p>
         </div>
 
         <div>
-          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink-200">
-            Navigation
-          </h2>
-          <ul className="mt-3 space-y-2 text-sm">
-            <li><Link href="/" className="hover:text-white">Accueil</Link></li>
-            <li><Link href="/catalogue" className="hover:text-white">Catalogue</Link></li>
-            <li><Link href="/contact" className="hover:text-white">Contact</Link></li>
+          <h2 className="font-display text-base text-stone-50">Navigation</h2>
+          <ul className="mt-4 space-y-2.5 text-sm text-stone-300">
+            <li><Link href="/" className="hover:text-stone-50">Accueil</Link></li>
+            <li><Link href="/catalogue" className="hover:text-stone-50">Catalogue</Link></li>
+            <li><Link href="/contact" className="hover:text-stone-50">Contact</Link></li>
           </ul>
         </div>
 
         <div>
-          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink-200">
-            Contact
-          </h2>
-          <ul className="mt-3 space-y-2 text-sm text-ink-300">
+          <h2 className="font-display text-base text-stone-50">Nous joindre</h2>
+          <ul className="mt-4 space-y-2.5 text-sm text-stone-300">
             <li>{siteConfig.city}</li>
             <li>
-              <a className="hover:text-white" href={`tel:${siteConfig.contact.phoneDisplay.replace(/\s/g, "")}`}>
-                Tél. {siteConfig.contact.phoneDisplay}
+              <a className="hover:text-stone-50" href={`tel:${siteConfig.contact.phoneDisplay.replace(/\s/g, "")}`}>
+                {siteConfig.contact.phoneDisplay}
               </a>
             </li>
             <li>
-              <a className="hover:text-white" href={`mailto:${siteConfig.contact.email}`}>
+              <a className="hover:text-stone-50" href={`mailto:${siteConfig.contact.email}`}>
                 {siteConfig.contact.email}
               </a>
             </li>
@@ -49,8 +45,8 @@ export function Footer() {
         </div>
       </div>
 
-      <div className="border-t border-ink-700">
-        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-4 text-xs text-ink-400 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <div className="border-t border-pine-700">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-4 text-xs text-stone-400 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p>© {year} {siteConfig.legalName}. Tous droits réservés.</p>
           <p>RCCM {siteConfig.legalMentions.rccm} — NIF {siteConfig.legalMentions.nif}</p>
         </div>

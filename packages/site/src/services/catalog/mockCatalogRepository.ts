@@ -1,7 +1,7 @@
 import { mockProducts } from "@/mock/products";
 import { mockPromotions } from "@/mock/promotions";
 import type { ProductModel, Promotion } from "@/lib/types/catalog";
-import { getEffectivePrice, promotionsForVariant } from "@/lib/pricing";
+import { getEffectivePrice, getModelDisplayPrice, promotionsForVariant } from "@/lib/pricing";
 import { getSmallestVariantSortValue } from "@/lib/tileSize";
 import type {
   CatalogFilters,
@@ -14,11 +14,24 @@ function delay<T>(value: T, ms = 250): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
 }
 
-function modelHasActivePromotion(model: ProductModel, promotions: Promotion[]): boolean {
-  return model.variants.some((variant) => {
-    const applicable = promotionsForVariant(promotions, model.id, variant.id);
-    return getEffectivePrice(variant.priceFcfa, applicable).isPromotionActive;
-  });
+/**
+ * Correction "Défaut 3" — un modèle ne doit être considéré "en promotion"
+ * (pour le filtre ET pour tout autre usage) QUE si la variante réellement
+ * AFFICHÉE sur sa carte (la moins chère — voir `getModelDisplayPrice`) est
+ * elle-même en promotion. Vérifié avec les données réelles : "Marbre Blanc"
+ * a une promotion sur son 60x60 (15 000 → 12 500 FCFA), mais son 40x40
+ * (9 500 FCFA, sans promotion) reste moins cher — la carte affiche donc
+ * "à partir de 9 500 FCFA" sans aucun badge. Avant cette correction, le
+ * filtre l'incluait quand même car IL SUFFISAIT qu'UNE variante quelconque
+ * ait une promotion, sans jamais vérifier que c'est bien CELLE affichée.
+ *
+ * Remplace l'ancienne fonction `modelHasActivePromotion` (qui vérifiait
+ * "au moins une variante a une promo active", sans lien avec l'affichage
+ * réel de la carte) — jamais gardée en parallèle, pour ne jamais risquer
+ * une désynchronisation future entre le filtre et la carte.
+ */
+function modelDisplayedPriceIsPromoted(model: ProductModel, promotions: Promotion[]): boolean {
+  return getModelDisplayPrice(model.variants, promotions, model.id).effective.isPromotionActive;
 }
 
 function modelMinPrice(model: ProductModel, promotions: Promotion[]): number {
@@ -51,7 +64,7 @@ export class MockCatalogRepository implements CatalogRepository {
       results = results.filter((m) => m.variants.some((v) => v.size === filters.size));
     }
     if (filters.onlyPromotions) {
-      results = results.filter((m) => modelHasActivePromotion(m, promotions));
+      results = results.filter((m) => modelDisplayedPriceIsPromoted(m, promotions));
     }
     if (filters.minPriceFcfa !== undefined) {
       const min = filters.minPriceFcfa;
@@ -78,12 +91,6 @@ export class MockCatalogRepository implements CatalogRepository {
           if (sizeCompare !== 0) return sizeCompare;
           return a.name.localeCompare(b.name, "fr");
         });
-        break;
-      case "price_asc":
-        results.sort((a, b) => modelMinPrice(a, promotions) - modelMinPrice(b, promotions));
-        break;
-      case "price_desc":
-        results.sort((a, b) => modelMinPrice(b, promotions) - modelMinPrice(a, promotions));
         break;
       case "name_asc":
         results.sort((a, b) => a.name.localeCompare(b.name, "fr"));

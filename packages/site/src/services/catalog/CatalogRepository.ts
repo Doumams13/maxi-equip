@@ -12,8 +12,6 @@ export interface CatalogFilters {
 export type CatalogSort =
   | "type_size"
   | "relevance"
-  | "price_asc"
-  | "price_desc"
   | "name_asc"
   | "recent";
 

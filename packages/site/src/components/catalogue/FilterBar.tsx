@@ -1,8 +1,17 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
-export function FilterBar({ types, sizes }: { types: string[]; sizes: string[] }) {
+/**
+ * Modification 2 — le tri ("Trier") n'est plus isolé à l'extrémité
+ * droite sur sa propre ligne : `trailingSlot` (SortSelect, voir
+ * catalogue/page.tsx) est désormais rendu à la fin de CETTE MÊME
+ * rangée de filtres, dans le flux naturel gauche-à-droite, jamais
+ * flotté à droite sur une ligne séparée. Logique de filtrage et design
+ * des pastilles de filtre strictement inchangés.
+ */
+export function FilterBar({ types, sizes, trailingSlot }: { types: string[]; sizes: string[]; trailingSlot?: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -53,6 +62,7 @@ export function FilterBar({ types, sizes }: { types: string[]; sizes: string[] }
       <a href={hrefFor("promo", onlyPromotions ? null : "1")} aria-current={onlyPromotions ? "true" : undefined} className={pill(onlyPromotions)}>
         Promotions
       </a>
+      {trailingSlot && <span className="sm:ml-3">{trailingSlot}</span>}
     </div>
   );
 }

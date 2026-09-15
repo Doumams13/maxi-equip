@@ -30,14 +30,14 @@ export default async function ProductPage({ params }: ProductPageProps) {
     promotions = await catalogRepository.listPromotions();
   } catch (error) {
     return (
-      <div className="mx-auto max-w-[1180px] px-[18px] py-20 sm:px-7">
+      <div className="mx-auto max-w-[1320px] px-[18px] py-20 sm:px-7">
         <ErrorState description={error instanceof Error ? error.message : "Impossible de charger cette fiche produit pour le moment."} />
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-[1180px] px-[18px] py-7 sm:px-7 sm:pb-16">
+    <div className="mx-auto max-w-[1320px] px-[18px] py-7 sm:px-7 sm:pb-16">
       <p className="mb-6.5 text-[13px] text-ink-mute">
         <Link href="/catalogue" className="underline hover:text-ink">
           Catalogue

@@ -5,7 +5,7 @@ export default function ConfirmationPage({ searchParams }: { searchParams: { req
   const requestId = searchParams.requestId;
 
   return (
-    <div className="mx-auto max-w-[1180px] px-[18px] py-[70px] text-center sm:px-7">
+    <div className="mx-auto max-w-[1320px] px-[18px] py-[70px] text-center sm:px-7">
       <h2 className="mb-3 font-display text-[26px]">Demande envoyée</h2>
       <p className="mx-auto max-w-[42ch] text-[14.5px] leading-relaxed text-ink-mute">
         Merci. Un conseiller MAXI EQUIP vous recontacte sous peu au numéro indiqué pour confirmer votre commande.

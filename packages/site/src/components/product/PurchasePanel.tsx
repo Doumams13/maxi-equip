@@ -85,7 +85,7 @@ export function PurchasePanel({
       </div>
 
       <div>
-        <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink-500">
+        <h2 className="font-display text-base text-stone-900">
           Taille
         </h2>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -103,14 +103,14 @@ export function PurchasePanel({
                 type="button"
                 onClick={() => setVariantId(v.id)}
                 aria-pressed={v.id === variantId}
-                className={`flex flex-col items-center rounded-md border px-4 py-2 text-sm font-semibold ${
+                className={`flex flex-col items-center border px-4 py-2 text-sm font-semibold ${
                   v.id === variantId
-                    ? "border-green-600 bg-green-50 text-green-700"
-                    : "border-ink-200 text-ink-700 hover:border-ink-300"
+                    ? "border-pine-700 bg-pine-50 text-pine-700"
+                    : "border-stone-300 text-stone-700 hover:border-stone-500"
                 }`}
               >
                 <span>{v.size}</span>
-                <span className="mt-0.5 text-xs font-normal text-ink-400">
+                <span className="mt-0.5 text-xs font-normal text-stone-400">
                   {variantPrice.isPromotionActive && variantPrice.promoPriceFcfa !== null
                     ? formatFcfa(variantPrice.promoPriceFcfa)
                     : formatFcfa(variantPrice.normalPriceFcfa)}
@@ -119,19 +119,19 @@ export function PurchasePanel({
             );
           })}
         </div>
-        <p className="mt-2 text-xs text-ink-400">Référence : {variant.reference}</p>
+        <p className="mt-2 text-xs text-stone-400">Référence : {variant.reference}</p>
       </div>
 
       <div>
-        <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink-500">
+        <h2 className="font-display text-base text-stone-900">
           Quantité
         </h2>
-        <div className="mt-2 flex w-fit items-center rounded-md border border-ink-200">
+        <div className="mt-2 flex w-fit items-center border border-stone-300">
           <button
             type="button"
             aria-label="Diminuer la quantité"
             onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-            className="px-3 py-2 text-ink-600 hover:bg-ink-50"
+            className="px-3 py-2 text-stone-600 hover:bg-stone-50"
           >
             −
           </button>
@@ -140,14 +140,14 @@ export function PurchasePanel({
             min={1}
             value={quantity}
             onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))}
-            className="w-14 border-x border-ink-200 py-2 text-center text-sm"
+            className="w-14 border-x border-stone-300 py-2 text-center text-sm"
             aria-label="Quantité"
           />
           <button
             type="button"
             aria-label="Augmenter la quantité"
             onClick={() => setQuantity((q) => q + 1)}
-            className="px-3 py-2 text-ink-600 hover:bg-ink-50"
+            className="px-3 py-2 text-stone-600 hover:bg-stone-50"
           >
             +
           </button>
@@ -161,7 +161,7 @@ export function PurchasePanel({
         {justAdded && (
           <Link
             href="/panier"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-700"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-pine-700"
             role="status"
           >
             ✓ Ajouté — voir le panier →
@@ -169,7 +169,7 @@ export function PurchasePanel({
         )}
       </div>
 
-      <p className="text-xs text-ink-400">
+      <p className="text-xs text-stone-400">
         Ceci n&apos;est pas un achat en ligne : ajoutez vos produits au panier, puis envoyez une
         demande — MAXI EQUIP vous recontactera pour finaliser.
       </p>

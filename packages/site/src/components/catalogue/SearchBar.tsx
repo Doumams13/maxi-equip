@@ -37,7 +37,7 @@ export function SearchBar() {
       <div className="relative">
         <svg
           aria-hidden="true"
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400"
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400"
           width="18"
           height="18"
           viewBox="0 0 24 24"
@@ -53,7 +53,7 @@ export function SearchBar() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="Rechercher un modèle, un type, une référence…"
-          className="w-full rounded-md border border-ink-200 py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 focus:border-green-500"
+          className="w-full border border-stone-300 py-2.5 pl-10 pr-3 text-sm text-stone-800 placeholder:text-stone-400 focus:border-pine-700"
         />
       </div>
     </label>

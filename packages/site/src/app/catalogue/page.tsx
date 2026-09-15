@@ -85,63 +85,68 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
     const groups = groupByType(models, types);
 
     return (
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <div>
         <ScrollToHashOnLoad legacyTypeParam={searchParams.type} />
-        <h1 className="font-display text-2xl font-bold text-ink-800 sm:text-3xl">Catalogue</h1>
-        <p className="mt-1 text-sm text-ink-500">
-          {models.length} modèle{models.length > 1 ? "s" : ""} disponible{models.length > 1 ? "s" : ""}
-        </p>
-
-        <div className="mt-6 mb-6">
-          <Suspense fallback={<div className="h-11 w-full animate-pulse rounded-md bg-ink-100" />}>
-            <SearchBar />
-          </Suspense>
+        <div className="border-b border-stone-200 bg-white">
+          <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+            <h1 className="font-display text-3xl text-stone-900 sm:text-4xl">Le catalogue</h1>
+            <p className="mt-2 text-sm text-stone-500">
+              {models.length} modèle{models.length > 1 ? "s" : ""} disponible{models.length > 1 ? "s" : ""}
+            </p>
+          </div>
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-[220px_1fr]">
-          <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-md bg-ink-100" />}>
-            <FilterSidebar types={types} sizes={sizes} />
-          </Suspense>
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+          <div className="mb-8">
+            <Suspense fallback={<div className="h-11 w-full animate-pulse bg-stone-100" />}>
+              <SearchBar />
+            </Suspense>
+          </div>
 
-          <div>
-            <div className="mb-4 flex items-center justify-end">
-              <Suspense fallback={<div className="h-9 w-40 animate-pulse rounded-md bg-ink-100" />}>
-                <SortSelect />
-              </Suspense>
-            </div>
+          <div className="grid gap-10 lg:grid-cols-[220px_1fr]">
+            <Suspense fallback={<div className="h-64 w-full animate-pulse bg-stone-100" />}>
+              <FilterSidebar types={types} sizes={sizes} />
+            </Suspense>
 
-            {models.length === 0 ? (
-              <EmptyState
-                title="Aucun modèle ne correspond à votre recherche"
-                description="Essayez d'élargir vos filtres ou d'effacer votre recherche."
-                action={
-                  hasActiveFilters ? (
-                    <Link href="/catalogue" className="text-sm font-semibold text-green-700 hover:underline">
-                      Voir tout le catalogue
-                    </Link>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <div className="space-y-10">
-                {groups.map((group) => (
-                  <section key={group.type} id={`type-${group.type}`} aria-labelledby={`type-titre-${group.type}`} className="scroll-mt-4">
-                    <h2
-                      id={`type-titre-${group.type}`}
-                      className="mb-4 border-b border-ink-100 pb-2 font-display text-lg font-bold text-ink-800"
-                    >
-                      {group.type}
-                      <span className="ml-2 text-sm font-normal text-ink-400">({group.models.length})</span>
-                    </h2>
-                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                      {group.models.map((m) => (
-                        <ProductCard key={m.id} model={m} promotions={promotions} />
-                      ))}
-                    </div>
-                  </section>
-                ))}
+            <div>
+              <div className="mb-6 flex items-center justify-end">
+                <Suspense fallback={<div className="h-9 w-40 animate-pulse bg-stone-100" />}>
+                  <SortSelect />
+                </Suspense>
               </div>
-            )}
+
+              {models.length === 0 ? (
+                <EmptyState
+                  title="Aucun modèle ne correspond à votre recherche"
+                  description="Essayez d'élargir vos filtres ou d'effacer votre recherche."
+                  action={
+                    hasActiveFilters ? (
+                      <Link href="/catalogue" className="text-sm font-semibold text-pine-700 hover:underline">
+                        Voir tout le catalogue
+                      </Link>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <div className="space-y-14">
+                  {groups.map((group) => (
+                    <section key={group.type} id={`type-${group.type}`} aria-labelledby={`type-titre-${group.type}`} className="scroll-mt-6">
+                      <div className="mb-6 flex items-baseline gap-3 border-b border-stone-200 pb-3">
+                        <h2 id={`type-titre-${group.type}`} className="font-display text-2xl text-stone-900">
+                          {group.type}
+                        </h2>
+                        <span className="text-sm text-stone-400">{group.models.length}</span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-x-6 gap-y-9 sm:grid-cols-2 xl:grid-cols-3">
+                        {group.models.map((m) => (
+                          <ProductCard key={m.id} model={m} promotions={promotions} />
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

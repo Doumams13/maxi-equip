@@ -10,8 +10,8 @@ export default function CartPage() {
   const { state, totalFcfa, itemCount } = useCart();
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-      <h1 className="font-display text-2xl font-bold text-ink-800 sm:text-3xl">Votre panier</h1>
+    <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+      <h1 className="font-display text-3xl text-stone-900 sm:text-4xl">Votre panier</h1>
 
       {state.lines.length === 0 ? (
         <div className="mt-6">
@@ -19,7 +19,7 @@ export default function CartPage() {
             title="Votre panier est vide"
             description="Parcourez le catalogue pour ajouter des carreaux à votre demande."
             action={
-              <Link href="/catalogue" className="text-sm font-semibold text-green-700 hover:underline">
+              <Link href="/catalogue" className="text-sm font-semibold text-pine-700 hover:underline">
                 Voir le catalogue
               </Link>
             }

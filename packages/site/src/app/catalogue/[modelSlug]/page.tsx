@@ -60,10 +60,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <nav aria-label="Fil d'Ariane" className="mb-6 text-sm text-ink-500">
+      <nav aria-label="Fil d'Ariane" className="mb-6 text-sm text-stone-500">
         <Link href="/catalogue" className="hover:underline">Catalogue</Link>
         <span className="mx-2">/</span>
-        <span className="text-ink-700">{model.name}</span>
+        <span className="text-stone-700">{model.name}</span>
       </nav>
 
       <div className="grid gap-10 lg:grid-cols-2">
@@ -71,12 +71,12 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
         <div>
           <Badge tone="type">{model.type}</Badge>
-          <h1 className="mt-2 font-display text-2xl font-bold text-ink-800 sm:text-3xl">
+          <h1 className="mt-2 font-display text-3xl text-stone-900 sm:text-4xl">
             {model.name}
           </h1>
-          <p className="mt-3 text-sm leading-relaxed text-ink-600">{model.description}</p>
+          <p className="mt-3 text-sm leading-relaxed text-stone-600">{model.description}</p>
 
-          <div className="mt-6 border-t border-ink-100 pt-6">
+          <div className="mt-6 border-t border-stone-100 pt-6">
             <PurchasePanel model={model} promotions={promotions} />
           </div>
         </div>
@@ -84,7 +84,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
       {otherModels.length > 0 && (
         <section className="mt-16">
-          <h2 className="font-display text-xl font-bold text-ink-800">
+          <h2 className="font-display text-2xl text-stone-900">
             Autres modèles en {model.type}
           </h2>
           <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">

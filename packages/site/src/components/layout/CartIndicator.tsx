@@ -9,7 +9,7 @@ export function CartIndicator() {
     <Link
       href="/panier"
       aria-label={`Panier, ${itemCount} article${itemCount > 1 ? "s" : ""}`}
-      className="relative inline-flex items-center rounded-md p-2 text-ink-700 hover:bg-ink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-green-600"
+      className="relative inline-flex items-center rounded-md p-2 text-stone-700 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pine-600"
     >
       <svg
         aria-hidden="true"
@@ -29,7 +29,7 @@ export function CartIndicator() {
         />
       </svg>
       {itemCount > 0 && (
-        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-green-600 px-1 text-[11px] font-bold text-white">
+        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-pine-600 px-1 text-[11px] font-bold text-white">
           {itemCount}
         </span>
       )}

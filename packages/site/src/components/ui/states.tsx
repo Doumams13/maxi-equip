@@ -16,9 +16,9 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-ink-200 bg-ink-50 px-6 py-14 text-center">
-      <p className="font-display text-lg font-semibold text-ink-800">{title}</p>
-      {description && <p className="max-w-md text-sm text-ink-500">{description}</p>}
+    <div className="flex flex-col items-center gap-3 border border-dashed border-stone-300 bg-stone-50 px-6 py-16 text-center">
+      <p className="font-display text-xl text-stone-900">{title}</p>
+      {description && <p className="max-w-md text-sm text-stone-500">{description}</p>}
       {action}
     </div>
   );
@@ -36,10 +36,10 @@ export function ErrorState({
   return (
     <div
       role="alert"
-      className="flex flex-col items-center gap-3 rounded-lg border border-status-error/30 bg-status-errorBg px-6 py-14 text-center"
+      className="flex flex-col items-center gap-3 border border-status-error/30 bg-status-errorBg px-6 py-16 text-center"
     >
-      <p className="font-display text-lg font-semibold text-status-error">{title}</p>
-      {description && <p className="max-w-md text-sm text-ink-600">{description}</p>}
+      <p className="font-display text-xl text-status-error">{title}</p>
+      {description && <p className="max-w-md text-sm text-stone-600">{description}</p>}
       {action}
     </div>
   );
@@ -53,12 +53,12 @@ export function LoadingGrid({ count = 6 }: { count?: number }) {
       className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3"
     >
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="animate-pulse overflow-hidden rounded-lg border border-ink-100 bg-white">
-          <div className="aspect-square bg-ink-100" />
+        <div key={i} className="animate-pulse overflow-hidden border border-stone-200 bg-white">
+          <div className="aspect-square bg-stone-100" />
           <div className="space-y-2 p-4">
-            <div className="h-4 w-2/3 rounded bg-ink-100" />
-            <div className="h-3 w-1/3 rounded bg-ink-100" />
-            <div className="h-5 w-1/2 rounded bg-ink-100" />
+            <div className="h-4 w-2/3 rounded bg-stone-100" />
+            <div className="h-3 w-1/3 rounded bg-stone-100" />
+            <div className="h-5 w-1/2 rounded bg-stone-100" />
           </div>
         </div>
       ))}

@@ -6,10 +6,10 @@ export function Footer() {
   const year = new Date().getFullYear();
   return (
     <footer className="mt-5 border-t border-ink/[0.14] bg-surface-soft text-ink">
-      <div className="mx-auto grid max-w-[1180px] grid-cols-2 gap-9 px-[18px] py-14 sm:px-7 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+      <div className="mx-auto grid max-w-[1320px] grid-cols-2 gap-9 px-[18px] py-14 sm:px-7 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <div className="col-span-2 md:col-span-1">
           <div className="flex items-center gap-2.5">
-            <Image src="/logo/maxi-equip-logo.png" alt="MAXI EQUIP" width={120} height={31} className="h-10 w-auto" />
+            <Image src="/logo/maxi-equip-symbole.png" alt="MAXI EQUIP" width={63} height={40} className="h-10 w-auto" />
             <span className="font-display text-lg font-semibold text-ink">MAXI EQUIP</span>
           </div>
           <p className="mt-3.5 max-w-[32ch] text-[13.5px] leading-relaxed text-ink-mute">
@@ -62,7 +62,7 @@ export function Footer() {
       </div>
 
       <div className="border-t border-ink/[0.14]">
-        <div className="mx-auto flex max-w-[1180px] flex-wrap justify-between gap-2 px-[18px] py-4.5 text-[12.5px] text-ink-mute sm:px-7">
+        <div className="mx-auto flex max-w-[1320px] flex-wrap justify-between gap-2 px-[18px] py-4.5 text-[12.5px] text-ink-mute sm:px-7">
           <span>© {year} {siteConfig.legalName}</span>
           <span>RCCM {siteConfig.legalMentions.rccm} — NIF {siteConfig.legalMentions.nif}</span>
         </div>

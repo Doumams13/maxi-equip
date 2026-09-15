@@ -51,7 +51,7 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
       <div>
         <ScrollToHashOnLoad legacyTypeParam={searchParams.type} />
 
-        <div className="mx-auto max-w-[1180px] px-[18px] pt-8 sm:px-7">
+        <div className="mx-auto max-w-[1320px] px-[18px] pt-8 sm:px-7">
           <h1 className="font-display text-[clamp(24px,4vw,42px)] text-forest-deep">Catalogue</h1>
           <p className="mt-2.5 max-w-[52ch] text-[14.5px] text-ink-mute">
             Parcourez l&apos;ensemble des modèles disponibles chez MAXI EQUIP. Filtrez par univers ou par format pour affiner votre recherche.
@@ -62,16 +62,19 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
             </Suspense>
           </div>
           <Suspense fallback={<div className="mt-4.5 h-8 w-full animate-pulse rounded bg-surface-soft" />}>
-            <FilterBar types={types} sizes={sizes} />
+            <FilterBar
+              types={types}
+              sizes={sizes}
+              trailingSlot={
+                <Suspense fallback={<div className="h-8 w-32 animate-pulse rounded bg-surface-soft" />}>
+                  <SortSelect />
+                </Suspense>
+              }
+            />
           </Suspense>
-          <div className="mt-4 flex justify-end">
-            <Suspense fallback={<div className="h-8 w-32 animate-pulse rounded bg-surface-soft" />}>
-              <SortSelect />
-            </Suspense>
-          </div>
         </div>
 
-        <div className="mx-auto max-w-[1180px] px-[18px] pb-16 pt-6 sm:px-7">
+        <div className="mx-auto max-w-[1320px] px-[18px] pb-16 pt-6 sm:px-7">
           {models.length === 0 ? (
             <EmptyState
               title="Aucun modèle ne correspond à votre recherche"
@@ -105,7 +108,7 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
     );
   } catch (error) {
     return (
-      <div className="mx-auto max-w-[1180px] px-[18px] py-20 sm:px-7">
+      <div className="mx-auto max-w-[1320px] px-[18px] py-20 sm:px-7">
         <ErrorState description={error instanceof Error ? error.message : "Impossible de charger le catalogue pour le moment."} />
       </div>
     );

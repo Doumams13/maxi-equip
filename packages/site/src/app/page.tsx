@@ -22,7 +22,7 @@ export default async function HomePage() {
       <>
         <Hero models={allModels} />
 
-        <div className="mx-auto max-w-[1180px] border-t border-ink/[0.08] px-[18px] py-9 sm:px-7 sm:py-16">
+        <div className="mx-auto max-w-[1320px] border-t border-ink/[0.08] px-[18px] py-9 sm:px-7 sm:py-16">
           <div className="mb-9 flex flex-wrap items-end justify-between gap-6">
             <h2 className="font-display text-[clamp(24px,3vw,34px)]">Nos univers de motifs</h2>
             <p className="max-w-[38ch] text-[14.5px] text-ink-mute">
@@ -33,7 +33,7 @@ export default async function HomePage() {
         </div>
 
         {promotedModels.length > 0 && (
-          <div className="mx-auto max-w-[1180px] border-t border-ink/[0.08] px-[18px] py-9 sm:px-7 sm:py-16">
+          <div className="mx-auto max-w-[1320px] border-t border-ink/[0.08] px-[18px] py-9 sm:px-7 sm:py-16">
             <div className="mb-9 flex flex-wrap items-end justify-between gap-6">
               <h2 className="font-display text-[clamp(24px,3vw,34px)]">En ce moment</h2>
               <p className="max-w-[38ch] text-[14.5px] text-ink-mute">Une sélection à prix ajusté, pour un temps limité.</p>
@@ -44,7 +44,7 @@ export default async function HomePage() {
 
         <Principles />
 
-        <div className="mx-auto max-w-[1180px] px-[18px] py-9 sm:px-7 sm:py-16">
+        <div className="mx-auto max-w-[1320px] px-[18px] py-9 sm:px-7 sm:py-16">
           <div className="mb-9 flex flex-wrap items-end justify-between gap-6">
             <h2 className="font-display text-[clamp(24px,3vw,34px)]">Des formats pensés pour chaque pièce</h2>
             <p className="max-w-[38ch] text-[14.5px] text-ink-mute">Les formats couvrent l&apos;essentiel des projets, du sol au mur.</p>
@@ -55,7 +55,7 @@ export default async function HomePage() {
     );
   } catch (error) {
     return (
-      <div className="mx-auto max-w-[1180px] px-[18px] py-20 sm:px-7">
+      <div className="mx-auto max-w-[1320px] px-[18px] py-20 sm:px-7">
         <ErrorState description={error instanceof Error ? error.message : "Impossible de charger la page d'accueil pour le moment."} />
       </div>
     );

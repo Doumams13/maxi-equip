@@ -21,16 +21,15 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-ink/[0.08] bg-bg/90 backdrop-blur">
-      <div className="mx-auto flex max-w-[1180px] items-center justify-between gap-6 px-[18px] py-3.5 sm:px-7">
+      <div className="mx-auto flex max-w-[1320px] items-center justify-between gap-6 px-[18px] py-3.5 sm:px-7">
         <Link href="/" className="flex items-center gap-2.5">
           <Image
-            src="/logo/maxi-equip-logo.png"
+            src="/logo/maxi-equip-symbole.png"
             alt="MAXI EQUIP"
-            width={140}
+            width={57}
             height={36}
             priority
             className="h-9 w-auto sm:h-[46px]"
-            style={{ mixBlendMode: "multiply" }}
           />
           <span className="font-display text-base font-semibold text-forest-deep sm:text-xl">MAXI EQUIP</span>
         </Link>

@@ -4,7 +4,7 @@ import { Mosaic } from "./Mosaic";
 
 export function Hero({ models }: { models: ProductModel[] }) {
   return (
-    <div className="mx-auto max-w-[1180px] px-[18px] py-8 sm:px-7 sm:py-14">
+    <div className="mx-auto max-w-[1320px] px-[18px] py-8 sm:px-7 sm:py-14">
       <div className="grid grid-cols-1 items-center gap-8 md:grid-cols-[1.05fr_1fr] md:gap-11">
         <div>
           <p className="mb-3.5 text-[13px] tracking-[0.02em] text-sage">Showroom de carrelage — Libreville</p>

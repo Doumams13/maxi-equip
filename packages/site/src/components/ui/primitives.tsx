@@ -42,15 +42,8 @@ export function LinkButton({ variant = "primary", children, className = "", full
   );
 }
 
-/**
- * Ajustement visuel — badge texte "Prix ajusté" plutôt qu'un pourcentage
- * chiffré, pour correspondre à la référence visuelle la plus récente.
- * Le pourcentage réel reste calculé et disponible (jamais supprimé de
- * la logique), simplement plus affiché ici — reste utilisable ailleurs
- * si besoin (ex. fiche produit).
- */
-export function DiscountBadge() {
-  return <span className="absolute left-3 top-3 rounded-sm bg-surface px-2.5 py-1 text-[11.5px] font-semibold text-clay">Prix ajusté</span>;
+export function DiscountBadge({ percent }: { percent: number }) {
+  return <span className="absolute left-3 top-3 rounded-sm bg-surface px-2.5 py-1 text-[11.5px] font-bold text-clay">−{percent}%</span>;
 }
 
 export function PriceTag({

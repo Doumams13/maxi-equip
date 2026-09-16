@@ -51,17 +51,17 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
       <div>
         <ScrollToHashOnLoad legacyTypeParam={searchParams.type} />
 
-        <div className="mx-auto max-w-[1320px] px-[18px] pt-8 sm:px-7">
+        <div className="mx-auto max-w-[1320px] px-5 pt-8 sm:px-7">
           <h1 className="font-display text-[clamp(24px,4vw,42px)] text-forest-deep">Catalogue</h1>
-          <p className="mt-2.5 max-w-[52ch] text-[14.5px] text-ink-mute">
+          <p className="mt-3 max-w-[52ch] text-[14.5px] text-ink-mute sm:mt-2.5">
             Parcourez l&apos;ensemble des modèles disponibles chez MAXI EQUIP. Filtrez par univers ou par format pour affiner votre recherche.
           </p>
-          <div className="mt-5 max-w-md">
+          <div className="mt-6 max-w-md sm:mt-5">
             <Suspense fallback={<div className="h-11 w-full animate-pulse rounded bg-surface-soft" />}>
               <SearchBar />
             </Suspense>
           </div>
-          <Suspense fallback={<div className="mt-4.5 h-8 w-full animate-pulse rounded bg-surface-soft" />}>
+          <Suspense fallback={<div className="mt-5 h-8 w-full animate-pulse rounded bg-surface-soft sm:mt-4.5" />}>
             <FilterBar
               types={types}
               sizes={sizes}
@@ -74,7 +74,7 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
           </Suspense>
         </div>
 
-        <div className="mx-auto max-w-[1320px] px-[18px] pb-16 pt-6 sm:px-7">
+        <div className="mx-auto max-w-[1320px] px-5 pb-16 pt-8 sm:px-7 sm:pt-6">
           {models.length === 0 ? (
             <EmptyState
               title="Aucun modèle ne correspond à votre recherche"
@@ -94,7 +94,7 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
                   <h2 id={`type-titre-${group.type}`} className="mb-5 border-b border-ink/[0.08] pb-3 font-display text-2xl text-forest-deep">
                     {group.type} <span className="text-base font-normal text-ink-mute">({group.models.length})</span>
                   </h2>
-                  <div className="grid grid-cols-2 gap-x-3.5 gap-y-4 sm:grid-cols-3 sm:gap-x-4.5 sm:gap-y-5.5 lg:grid-cols-4 lg:gap-x-5.5 lg:gap-y-6.5">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 sm:gap-x-4.5 sm:gap-y-5.5 lg:grid-cols-4 lg:gap-x-5.5 lg:gap-y-6.5">
                     {group.models.map((m) => (
                       <ProductCard key={m.id} model={m} promotions={promotions} />
                     ))}

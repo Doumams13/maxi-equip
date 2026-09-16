@@ -19,12 +19,12 @@ export function ProductCard({ model, promotions }: { model: ProductModel; promot
         )}
         {effective.isPromotionActive && effective.discountPercent !== null && <DiscountBadge percent={effective.discountPercent} />}
       </div>
-      <div className="mt-2.5 flex justify-between gap-2">
+      <div className="mt-3 flex flex-col gap-1 sm:mt-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-2">
         <div>
           <h4 className="text-[15px] leading-tight">{model.name}</h4>
           <p className="mt-0.5 text-[11.5px] text-ink-mute">{cheapestVariant?.reference}</p>
         </div>
-        <div className="whitespace-nowrap text-right">
+        <div className="sm:whitespace-nowrap sm:text-right">
           <PriceTag price={effective} context="general" size="sm" />
         </div>
       </div>

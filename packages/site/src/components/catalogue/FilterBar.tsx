@@ -42,7 +42,7 @@ export function FilterBar({ types, sizes, trailingSlot }: { types: string[]; siz
     `rounded-full border px-3.5 py-1.5 text-[12.5px] ${active ? "border-forest bg-forest text-bg" : "border-ink/[0.14] bg-surface text-ink-mute"}`;
 
   return (
-    <div className="mt-4.5 flex flex-wrap gap-2">
+    <div className="mt-4.5 flex flex-wrap gap-2.5 sm:gap-2">
       <a href={pathname} onClick={handleTousClick} className={pill(false)}>
         Tous
       </a>

@@ -10,7 +10,7 @@ export function UniversStrip({ types, models }: { types: string[]; models: Produ
         const image = sample ? [...sample.images].sort((a, b) => a.order - b.order)[0] : undefined;
         const count = models.filter((m) => m.type === type).length;
         return (
-          <Link key={type} href={`/catalogue#type-${encodeURIComponent(type)}`} className="w-[168px] shrink-0">
+          <Link key={type} href={`/catalogue?type=${encodeURIComponent(type)}`} className="w-[168px] shrink-0">
             <div className="relative aspect-square overflow-hidden rounded-sm">
               {image && <Image src={image.url} alt={image.alt} fill sizes="168px" className="object-cover" />}
             </div>

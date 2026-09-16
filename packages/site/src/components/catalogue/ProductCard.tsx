@@ -24,7 +24,7 @@ export function ProductCard({ model, promotions }: { model: ProductModel; promot
         ) : (
           <div className="flex h-full items-center justify-center bg-surface-soft text-xs text-ink-mute">Image indisponible</div>
         )}
-        {effective.isPromotionActive && <DiscountBadge />}
+        {effective.isPromotionActive && effective.discountPercent !== null && <DiscountBadge percent={effective.discountPercent} />}
       </div>
       <div className="mt-3 flex flex-col gap-1 sm:mt-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-2">
         <div>

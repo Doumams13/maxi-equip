@@ -58,8 +58,17 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-4">
-          <Link href="/panier" className="flex items-center gap-2 whitespace-nowrap rounded bg-forest px-4 py-2.5 text-sm font-semibold text-bg">
-            Sélection
+          <Link
+            href="/panier"
+            className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded bg-forest px-4 py-2.5 text-sm font-semibold text-bg"
+            aria-label={`Panier, ${itemCount} article${itemCount > 1 ? "s" : ""}`}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="shrink-0">
+              <circle cx="9" cy="21" r="1" />
+              <circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Panier
             <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-clay px-1 text-[11px] text-white">{itemCount}</span>
           </Link>
           <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label="Menu" className="p-2 sm:hidden">

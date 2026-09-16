@@ -4,7 +4,7 @@ import Link from "next/link";
 import { catalogRepository, DEFAULT_CATALOG_SORT } from "@/services/catalog";
 import type { CatalogSort } from "@/services/catalog";
 import { ProductCard } from "@/components/catalogue/ProductCard";
-import { FilterSidebar } from "@/components/catalogue/FilterSidebar";
+import { CatalogueFilters } from "@/components/catalogue/CatalogueFilters";
 import { SortSelect } from "@/components/catalogue/SortSelect";
 import { SearchBar } from "@/components/catalogue/SearchBar";
 import { EmptyState, ErrorState } from "@/components/ui/states";
@@ -53,7 +53,7 @@ export default async function CataloguePage({ searchParams }: CataloguePageProps
 
         <div className="mt-9 grid gap-10 lg:grid-cols-[200px_1fr]">
           <Suspense fallback={<div className="h-64 w-full animate-pulse rounded bg-surface-soft" />}>
-            <FilterSidebar types={types} sizes={sizes} />
+            <CatalogueFilters types={types} sizes={sizes} />
           </Suspense>
 
           <div>

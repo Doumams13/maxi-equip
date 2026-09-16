@@ -1,6 +1,6 @@
 const principles = [
   { title: "Choisi, pas empilé", text: "Chaque référence est sélectionnée pour sa tenue dans le temps et sa disponibilité réelle, pas pour remplir un catalogue." },
-  { title: "Une demande, pas un panier", text: "Vous préparez votre sélection en ligne, un conseiller confirme les quantités et le meilleur prix avec vous." },
+  { title: "Une demande, pas un panier", text: "Vous préparez votre panier en ligne, un conseiller confirme les quantités et le meilleur prix avec vous." },
   { title: "Vu avant d'être acheté", text: "Formats, teintes et finitions sont visibles au showroom pour juger du rendu réel dans votre pièce." },
 ];
 

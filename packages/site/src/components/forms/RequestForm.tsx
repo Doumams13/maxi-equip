@@ -64,7 +64,7 @@ export function RequestForm() {
   }
 
   if (state.lines.length === 0) {
-    return <ErrorState title="Votre sélection est vide" description="Ajoutez au moins un produit depuis le catalogue avant d'envoyer une demande." />;
+    return <ErrorState title="Votre panier est vide" description="Ajoutez au moins un produit depuis le catalogue avant d'envoyer une demande." />;
   }
 
   const inputClass = "w-full rounded border border-ink/[0.14] bg-surface px-3.5 py-3 text-[14.5px] text-ink focus:border-forest";

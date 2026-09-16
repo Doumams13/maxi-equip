@@ -106,14 +106,14 @@ export function PurchasePanel({ model, promotions }: { model: ProductModel; prom
       </div>
 
       <div className="mt-7 flex flex-wrap gap-3.5">
-        <Button onClick={handleAdd}>Ajouter à la sélection</Button>
+        <Button onClick={handleAdd}>Ajouter au panier</Button>
         <Link href="/panier" className="rounded border border-ink/[0.14] px-6 py-3.5 text-[14.5px] font-semibold text-ink hover:border-ink">
-          Voir la sélection
+          Voir le panier
         </Link>
       </div>
       {justAdded && (
         <p role="status" className="mt-3.5 text-[13.5px] text-forest">
-          Ajouté à votre sélection.
+          Ajouté à votre panier.
         </p>
       )}
 

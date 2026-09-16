@@ -11,11 +11,11 @@ export default function CartPage() {
 
   return (
     <div className="mx-auto max-w-[1320px] px-[18px] py-8 sm:px-7 sm:pb-16">
-      <h1 className="mb-6 font-display text-[clamp(24px,3vw,36px)] text-forest-deep">Votre sélection</h1>
+      <h1 className="mb-6 font-display text-[clamp(24px,3vw,36px)] text-forest-deep">Votre panier</h1>
 
       {state.lines.length === 0 ? (
         <EmptyState
-          title="Votre sélection est vide"
+          title="Votre panier est vide"
           description="Parcourez le catalogue pour ajouter des carreaux à votre demande."
           action={
             <Link href="/catalogue" className="text-sm font-semibold text-forest hover:underline">

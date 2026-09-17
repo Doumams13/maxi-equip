@@ -2,11 +2,11 @@ import { ipcMain } from "electron";
 import { ImageService } from "../services/imageService.js";
 
 export function registerImageIpcHandlers(imageService: ImageService): void {
-  ipcMain.handle("images:list", (_e, produitId: string) => imageService.listWithDataUrls(produitId));
+  ipcMain.handle("images:list", (_e, modeleId: string) => imageService.listWithDataUrls(modeleId));
 
-  ipcMain.handle("images:pickAndAdd", async (_e, produitId: string) => {
+  ipcMain.handle("images:pickAndAdd", async (_e, modeleId: string) => {
     try {
-      const result = await imageService.pickAndAddImages(produitId);
+      const result = await imageService.pickAndAddImages(modeleId);
       return { success: true, added: result.added };
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -15,8 +15,8 @@ export function registerImageIpcHandlers(imageService: ImageService): void {
     }
   });
 
-  ipcMain.handle("images:setPrincipale", (_e, produitId: string, imageId: string) => {
-    imageService.setPrincipale(produitId, imageId);
+  ipcMain.handle("images:setPrincipale", (_e, modeleId: string, imageId: string) => {
+    imageService.setPrincipale(modeleId, imageId);
     return { success: true };
   });
 
@@ -25,7 +25,6 @@ export function registerImageIpcHandlers(imageService: ImageService): void {
     return { success: true };
   });
 
-  // --- Mécanisme de "staging" pour le formulaire de création (correction 2) ---
   ipcMain.handle("images:pickFilesToStaging", async () => {
     try {
       const staged = await imageService.pickFilesToStaging();
@@ -37,8 +36,8 @@ export function registerImageIpcHandlers(imageService: ImageService): void {
     }
   });
 
-  ipcMain.handle("images:commitStaged", (_e, produitId: string, stagingIds: string[], principaleStagingId: string | null) => {
-    imageService.commitStaged(produitId, stagingIds, principaleStagingId);
+  ipcMain.handle("images:commitStaged", (_e, modeleId: string, stagingIds: string[], principaleStagingId: string | null) => {
+    imageService.commitStaged(modeleId, stagingIds, principaleStagingId);
     return { success: true };
   });
 

@@ -7,6 +7,7 @@ describe("shared-types (Phase 0 smoke test)", () => {
       id: "00000000-0000-4000-8000-000000000001",
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
+      modeleId: null,
       motif: "Marbre Blanc",
       largeur: 60,
       hauteur: 60,

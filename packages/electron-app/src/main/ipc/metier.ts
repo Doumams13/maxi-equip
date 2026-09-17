@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, dialog } from "electron";
 import { copyFile, readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { ProduitRepository } from "../repositories/produitRepository.js";
+import { ModeleRepository } from "../repositories/modeleRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
 import { StockRepository } from "../repositories/stockRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
@@ -44,28 +45,189 @@ export function registerMetierIpcHandlers(
   venteService: VenteService,
   imageService: ImageService,
   sessionManager: SessionManager,
+  modeleRepository?: ModeleRepository,
   promotionRepository?: PromotionRepository
 ): void {
   // --- Catalogue ---
   ipcMain.handle("catalogue:list", () => {
     const produits = produitRepository.list();
     const produitIds = produits.map((p) => p.id);
-    const miniatures = imageService.getPrincipalesDataUrlsForProduits(produitIds);
-    const compteurs = imageService.countForProduits(produitIds);
+    const modeleIds = [...new Set(produits.map((p) => p.modeleId).filter((id): id is string => id !== null))];
+    const miniatures = imageService.getPrincipalesDataUrlsForModeles(modeleIds);
+    const compteurs = imageService.countForModeles(modeleIds);
     const stockTotaux = stockRepository.getTotalsForProduits(produitIds);
     return produits.map((p) => ({
       ...p,
-      imagePrincipaleDataUrl: miniatures[p.id] ?? null,
-      nombreImages: compteurs[p.id] ?? 0,
+      imagePrincipaleDataUrl: p.modeleId ? (miniatures[p.modeleId] ?? null) : null,
+      nombreImages: p.modeleId ? (compteurs[p.modeleId] ?? 0) : 0,
       stockTotal: stockTotaux.get(p.id) ?? 0,
     }));
   });
 
   ipcMain.handle("catalogue:suggestions", () => ({
-    types: produitRepository.distinctTypes(),
+    types: modeleRepository ? modeleRepository.distinctTypes() : produitRepository.distinctTypes(),
     tailles: produitRepository.distinctTailles(),
   }));
 
+  // --- Catalogue modèles (multi-format) ---
+  ipcMain.handle("catalogue:listModeles", () => {
+    if (!modeleRepository) return [];
+    const modeles = modeleRepository.list();
+    return modeles.map((m) => {
+      const variantes = produitRepository.listByModele(m.id);
+      const varianteIds = variantes.map((v) => v.id);
+      const stockTotaux = stockRepository.getTotalsForProduits(varianteIds);
+      const imagePrincipaleDataUrl = imageService.getPrincipaleDataUrl(m.id);
+      const nombreImages = imageService.countByModele(m.id);
+      return {
+        ...m,
+        imagePrincipaleDataUrl,
+        nombreImages,
+        variantes: variantes.map((v) => ({
+          id: v.id,
+          modeleId: v.modeleId,
+          taille: v.taille,
+          tailleTri: v.tailleTri,
+          largeur: v.largeur,
+          hauteur: v.hauteur,
+          reference: v.reference,
+          prix: v.prix,
+          seuilAlerte: v.seuilAlerte,
+          deletedAt: v.deletedAt,
+          stockTotal: stockTotaux.get(v.id) ?? 0,
+        })),
+      };
+    });
+  });
+
+  type VarianteInput = {
+    taille: string;
+    tailleTri?: number;
+    largeur?: number | null;
+    hauteur?: number | null;
+    reference: string;
+    prix: number;
+    seuilAlerte?: number;
+  };
+
+  ipcMain.handle(
+    "catalogue:creerModele",
+    (
+      _e,
+      input: { motif: string; type: string; variantes: VarianteInput[]; stagedImages?: string[]; principaleStagingId?: string | null }
+    ) => {
+      if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
+      const session = sessionManager.get();
+      if (!session) return { success: false, message: "Session expirée." };
+
+      const modeleId = modeleRepository.create({ motif: input.motif, type: input.type });
+      for (const v of input.variantes) {
+        const tailleTri = v.tailleTri ?? v.largeur ?? (parseFloat(v.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
+        produitRepository.create({
+          modeleId,
+          motif: input.motif,
+          type: input.type,
+          taille: v.taille,
+          tailleTri,
+          largeur: v.largeur ?? null,
+          hauteur: v.hauteur ?? null,
+          reference: v.reference,
+          prix: v.prix,
+          seuilAlerte: v.seuilAlerte ?? 0,
+        });
+      }
+      if (input.stagedImages && input.stagedImages.length > 0) {
+        imageService.commitStaged(modeleId, input.stagedImages, input.principaleStagingId ?? null);
+      }
+      return { success: true, id: modeleId };
+    }
+  );
+
+  ipcMain.handle("catalogue:modifierModele", (_e, modeleId: string, input: { motif?: string; type?: string }) => {
+    if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
+    modeleRepository.update(modeleId, input);
+    if (input.motif !== undefined || input.type !== undefined) {
+      const variantes = produitRepository.listByModele(modeleId);
+      for (const v of variantes) {
+        produitRepository.update(v.id, {
+          motif: input.motif,
+          type: input.type ?? v.type,
+          taille: v.taille,
+          tailleTri: v.tailleTri,
+          largeur: v.largeur,
+          hauteur: v.hauteur,
+          reference: v.reference,
+          prix: v.prix,
+          seuilAlerte: v.seuilAlerte,
+        });
+      }
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle("catalogue:supprimerModele", (_e, modeleId: string) => {
+    const session = sessionManager.get();
+    if (!session) return { success: false, message: "Session expirée." };
+    if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
+    const variantes = produitRepository.listByModele(modeleId);
+    for (const v of variantes) {
+      produitRepository.softDelete(v.id, session.userId);
+    }
+    modeleRepository.softDelete(modeleId, session.userId);
+    return { success: true };
+  });
+
+  ipcMain.handle("catalogue:ajouterVariante", (_e, modeleId: string, input: VarianteInput) => {
+    if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
+    const modele = modeleRepository.findById(modeleId);
+    if (!modele) return { success: false, message: "Modèle introuvable." };
+    const tailleTri = input.tailleTri ?? input.largeur ?? (parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
+    const id = produitRepository.create({
+      modeleId,
+      motif: modele.motif,
+      type: modele.type,
+      taille: input.taille,
+      tailleTri,
+      largeur: input.largeur ?? null,
+      hauteur: input.hauteur ?? null,
+      reference: input.reference,
+      prix: input.prix,
+      seuilAlerte: input.seuilAlerte ?? 0,
+    });
+    return { success: true, id };
+  });
+
+  ipcMain.handle(
+    "catalogue:modifierVariante",
+    (_e, varianteId: string, input: Partial<VarianteInput & { motif?: string; type?: string }>) => {
+      const existante = produitRepository.findById(varianteId);
+      if (!existante) return { success: false, message: "Variante introuvable." };
+      const taille = input.taille ?? existante.taille;
+      const largeur = input.largeur !== undefined ? (input.largeur ?? null) : existante.largeur;
+      const hauteur = input.hauteur !== undefined ? (input.hauteur ?? null) : existante.hauteur;
+      const tailleTri = input.tailleTri ?? largeur ?? (parseFloat(taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
+      produitRepository.update(varianteId, {
+        type: input.type ?? existante.type,
+        taille,
+        tailleTri,
+        largeur,
+        hauteur,
+        reference: input.reference ?? existante.reference,
+        prix: input.prix ?? existante.prix,
+        seuilAlerte: input.seuilAlerte ?? existante.seuilAlerte,
+      });
+      return { success: true };
+    }
+  );
+
+  ipcMain.handle("catalogue:supprimerVariante", (_e, varianteId: string) => {
+    const session = sessionManager.get();
+    if (!session) return { success: false, message: "Session expirée." };
+    produitRepository.softDelete(varianteId, session.userId);
+    return { success: true };
+  });
+
+  // --- Catalogue legacy (backward compat avec ProduitSelector dans Ventes/Stock/Transferts) ---
   ipcMain.handle(
     "catalogue:create",
     (
@@ -82,14 +244,11 @@ export function registerMetierIpcHandlers(
       }
     ) => {
       const tailleTri = input.largeur ?? (parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
-      // Le "motif" n'est plus un champ obligatoire saisi par l'utilisateur
-      // (correction Phase 2 §3 : "il n'y a pas de champ Nom du produit
-      // obligatoire — la référence est l'information d'identification").
-      // La colonne reste techniquement présente en base (usage interne
-      // futur, recherche, regroupement) ; à défaut de valeur fournie, elle
-      // est initialisée à la référence pour ne jamais laisser de valeur vide.
       const motif = input.motif?.trim() || input.reference.trim();
-      return { id: produitRepository.create({ ...input, motif, tailleTri, largeur: input.largeur ?? null, hauteur: input.hauteur ?? null }) };
+      // Crée aussi un modèle pour maintenir l'intégrité
+      const modeleId = modeleRepository ? modeleRepository.create({ motif, type: input.type }) : null;
+      const id = produitRepository.create({ modeleId, motif, ...input, tailleTri, largeur: input.largeur ?? null, hauteur: input.hauteur ?? null });
+      return { id };
     }
   );
 
@@ -107,8 +266,6 @@ export function registerMetierIpcHandlers(
   );
 
   ipcMain.handle("catalogue:delete", (_e, id: string, deletedBy: string) => {
-    // Suppression douce uniquement (Synthèse §9) — jamais de perte de
-    // données, le produit reste tracé et référencé par l'historique existant.
     produitRepository.softDelete(id, deletedBy);
     return { success: true };
   });

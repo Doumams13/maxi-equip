@@ -40,6 +40,7 @@ import { executerResetDonneesTest } from "./maintenance/resetDonneesTest.js";
 import { executerGenerationDonneesTest } from "./maintenance/genererDonneesTest.js";
 import { UtilisateurService } from "./services/utilisateurService.js";
 import { registerUtilisateursIpcHandlers } from "./ipc/utilisateurs.js";
+import { ModeleRepository } from "./repositories/modeleRepository.js";
 import { PromotionRepository } from "./repositories/promotionRepository.js";
 import { PromotionService } from "./services/promotionService.js";
 import { registerPromotionsIpcHandlers } from "./ipc/promotions.js";
@@ -241,6 +242,7 @@ app.whenReady().then(async () => {
     const parametresRepository = new ParametresRepository(db);
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
     const syncRepository = new SyncRepository(db);
+    const modeleRepository = new ModeleRepository(db);
     const promotionRepository = new PromotionRepository(db);
     const promotionService = new PromotionService(db, promotionRepository, boiteEnvoiRepository);
     registerPromotionsIpcHandlers(promotionService, sessionManager);
@@ -289,6 +291,7 @@ app.whenReady().then(async () => {
       venteService,
       imageService,
       sessionManager,
+      modeleRepository,
       promotionRepository
     );
     registerImageIpcHandlers(imageService);

@@ -27,8 +27,27 @@ CREATE TABLE IF NOT EXISTS emplacements (
 -- ==========================================================
 -- Catalogue
 -- ==========================================================
+
+-- Modèles de carreaux (motif/patron) — regroupe plusieurs variantes (formats).
+-- Les images appartiennent au modèle, pas à une variante spécifique.
+CREATE TABLE IF NOT EXISTS modeles_produit (
+  id          TEXT PRIMARY KEY,
+  motif       TEXT NOT NULL,
+  type        TEXT NOT NULL,
+  deleted_at  TEXT,
+  deleted_by  TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_modeles_produit_type ON modeles_produit (type);
+CREATE INDEX IF NOT EXISTS idx_modeles_produit_updated_at ON modeles_produit (updated_at);
+
+-- Variantes (formats/tailles) d'un modèle — chacune a son propre prix et sa
+-- propre référence. Le motif/type sont dénormalisés depuis le modèle pour
+-- l'affichage dans les factures/mouvements sans jointure supplémentaire.
 CREATE TABLE IF NOT EXISTS produits (
   id            TEXT PRIMARY KEY,
+  modele_id     TEXT REFERENCES modeles_produit (id),
   motif         TEXT NOT NULL,
   type          TEXT NOT NULL,
   taille        TEXT NOT NULL,
@@ -45,25 +64,25 @@ CREATE TABLE IF NOT EXISTS produits (
 );
 CREATE INDEX IF NOT EXISTS idx_produits_taille_tri ON produits (taille_tri);
 CREATE INDEX IF NOT EXISTS idx_produits_updated_at ON produits (updated_at);
+CREATE INDEX IF NOT EXISTS idx_produits_modele_id ON produits (modele_id);
 -- Unicité de la référence UNIQUEMENT parmi les produits actifs (correction
 -- Phase 2 §5) : un produit réellement supprimé (soft delete) ne doit
 -- jamais bloquer la réutilisation de sa référence par un nouveau produit.
--- Un index PARTIEL (WHERE deleted_at IS NULL) plutôt qu'une contrainte
--- UNIQUE au niveau de la colonne, qui s'appliquerait à tort aux lignes
--- supprimées conservées pour l'historique.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_produits_reference_actif ON produits (reference) WHERE deleted_at IS NULL;
 
+-- Images de carreaux — liées au modèle (pas à une variante), une même
+-- galerie couvre toutes les tailles d'un même motif.
 CREATE TABLE IF NOT EXISTS images_produit (
-  id          TEXT PRIMARY KEY,
-  produit_id  TEXT NOT NULL REFERENCES produits (id),
-  kind        TEXT NOT NULL CHECK (kind IN ('produit', 'logo')),
+  id           TEXT PRIMARY KEY,
+  modele_id    TEXT NOT NULL REFERENCES modeles_produit (id),
+  kind         TEXT NOT NULL CHECK (kind IN ('produit', 'logo')),
   chemin_local TEXT NOT NULL,
-  url_cloud   TEXT,
-  ordre       INTEGER NOT NULL DEFAULT 0,
+  url_cloud    TEXT,
+  ordre        INTEGER NOT NULL DEFAULT 0,
   est_principale INTEGER NOT NULL DEFAULT 0 CHECK (est_principale IN (0, 1)),
-  sync_status TEXT NOT NULL CHECK (sync_status IN ('pending', 'sent', 'confirmed', 'error')),
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
+  sync_status  TEXT NOT NULL CHECK (sync_status IN ('pending', 'sent', 'confirmed', 'error')),
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
 );
 
 -- ==========================================================

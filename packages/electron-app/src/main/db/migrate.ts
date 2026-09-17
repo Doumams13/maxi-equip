@@ -27,6 +27,12 @@ export function runMigrations(db: Database.Database): void {
   retirerContrainteProduitIdLignesDemandeSiPresente(db);
   migrerTablePromotionsSiAncienSchema(db);
   ajouterColonnesPromoLignesFactureSiAbsentes(db);
+  // SCHEMA v6 — multi-format produits
+  creerTableModelesProductsSiAbsente(db);
+  ajouterModeleIdAuxProduitsSiAbsent(db);
+  creerModelesPourProduitsExistants(db);
+  migrerImagesVersModeles(db);
+  ajouterIndexModeleIdProduitsSiAbsent(db);
   setSchemaVersion(db);
 }
 
@@ -140,7 +146,7 @@ function ajouterSourceEntityIdDemandesSiAbsent(db: Database.Database): void {
  * plus tard, par la restauration (Phase 3.9) pour valider la
  * compatibilité d'une sauvegarde avant de l'appliquer.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 function setSchemaVersion(db: Database.Database): void {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -541,4 +547,126 @@ function migrateFacturesPourAnnulationEtLivraison(db: Database.Database): void {
   }
 
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_factures_numero_actif ON factures (numero) WHERE annulee_le IS NULL;");
+}
+
+// ===========================================================
+// SCHEMA v6 — multi-format produits
+// ===========================================================
+
+/**
+ * Crée la table `modeles_produit` si elle n'existe pas encore. Idempotente
+ * (CREATE TABLE IF NOT EXISTS suffira sur les nouvelles bases, mais la
+ * migration doit aussi couvrir les bases existantes qui n'ont jamais eu
+ * cette table dans schema.sql).
+ */
+function creerTableModelesProductsSiAbsente(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS modeles_produit (
+      id          TEXT PRIMARY KEY,
+      motif       TEXT NOT NULL,
+      type        TEXT NOT NULL,
+      deleted_at  TEXT,
+      deleted_by  TEXT,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_modeles_produit_type ON modeles_produit (type);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_modeles_produit_updated_at ON modeles_produit (updated_at);");
+}
+
+/**
+ * Ajoute la colonne `modele_id` à `produits` sur une base créée avant
+ * cette évolution. Nullable — les lignes existantes sans modèle sont
+ * migrées ensuite par `creerModelesPourProduitsExistants`.
+ */
+function ajouterModeleIdAuxProduitsSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(produits)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "modele_id")) {
+    db.exec("ALTER TABLE produits ADD COLUMN modele_id TEXT REFERENCES modeles_produit(id)");
+  }
+}
+
+/**
+ * Ajoute l'index sur `produits.modele_id` (ne peut être créé qu'après que
+ * la colonne existe, donc séparé de schema.sql).
+ */
+function ajouterIndexModeleIdProduitsSiAbsent(db: Database.Database): void {
+  db.exec("CREATE INDEX IF NOT EXISTS idx_produits_modele_id ON produits (modele_id);");
+}
+
+/**
+ * Pour chaque `produit` existant sans `modele_id`, crée (ou réutilise) un
+ * modèle ayant le même (motif, type). Les variantes d'un même motif/type
+ * sont ainsi regroupées sous un modèle commun. Idempotente.
+ */
+function creerModelesPourProduitsExistants(db: Database.Database): void {
+  const produits = db
+    .prepare("SELECT id, motif, type, created_at, updated_at FROM produits WHERE modele_id IS NULL")
+    .all() as { id: string; motif: string; type: string; created_at: string; updated_at: string }[];
+  if (produits.length === 0) return;
+
+  const migrer = db.transaction(() => {
+    for (const p of produits) {
+      const existant = db
+        .prepare("SELECT id FROM modeles_produit WHERE motif = ? AND type = ? AND deleted_at IS NULL LIMIT 1")
+        .get(p.motif, p.type) as { id: string } | undefined;
+      const modeleId = existant?.id ?? randomUUID();
+      if (!existant) {
+        db.prepare(
+          "INSERT INTO modeles_produit (id, motif, type, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?)"
+        ).run(modeleId, p.motif, p.type, p.created_at, p.updated_at);
+      }
+      db.prepare("UPDATE produits SET modele_id = ? WHERE id = ?").run(modeleId, p.id);
+    }
+  });
+  migrer();
+}
+
+/**
+ * Migre `images_produit` de `produit_id` (variant-level) vers `modele_id`
+ * (model-level). Détection : si la colonne `modele_id` est absente de la
+ * table actuelle, la table est recréée avec la nouvelle structure et les
+ * données existantes sont transférées via JOIN sur `produits.modele_id`
+ * (les images dont le produit n'a pas encore de modèle sont perdues, mais
+ * cela ne peut arriver qu'en cas d'incohérence grave — toujours après
+ * `creerModelesPourProduitsExistants`). Idempotente.
+ */
+function migrerImagesVersModeles(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(images_produit)").all() as { name: string }[];
+  if (columns.some((c) => c.name === "modele_id")) return; // Déjà migré.
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    const migrer = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE images_produit_nouvelle (
+          id           TEXT PRIMARY KEY,
+          modele_id    TEXT NOT NULL REFERENCES modeles_produit (id),
+          kind         TEXT NOT NULL CHECK (kind IN ('produit', 'logo')),
+          chemin_local TEXT NOT NULL,
+          url_cloud    TEXT,
+          ordre        INTEGER NOT NULL DEFAULT 0,
+          est_principale INTEGER NOT NULL DEFAULT 0 CHECK (est_principale IN (0, 1)),
+          sync_status  TEXT NOT NULL CHECK (sync_status IN ('pending', 'sent', 'confirmed', 'error')),
+          created_at   TEXT NOT NULL,
+          updated_at   TEXT NOT NULL
+        );
+      `);
+      db.exec(`
+        INSERT INTO images_produit_nouvelle
+          (id, modele_id, kind, chemin_local, url_cloud, ordre, est_principale, sync_status, created_at, updated_at)
+        SELECT img.id, p.modele_id, img.kind, img.chemin_local, img.url_cloud,
+               img.ordre, img.est_principale, img.sync_status, img.created_at, img.updated_at
+        FROM images_produit img
+        JOIN produits p ON img.produit_id = p.id
+        WHERE p.modele_id IS NOT NULL;
+      `);
+      db.exec("DROP TABLE images_produit;");
+      db.exec("ALTER TABLE images_produit_nouvelle RENAME TO images_produit;");
+    });
+    migrer();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
 }

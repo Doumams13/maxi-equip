@@ -4,6 +4,7 @@ import type { Produit } from "@maxi-equip/shared-types";
 
 interface ProduitRow {
   id: string;
+  modele_id: string | null;
   motif: string;
   type: string;
   taille: string;
@@ -22,6 +23,7 @@ interface ProduitRow {
 function rowToProduit(row: ProduitRow): Produit {
   return {
     id: row.id,
+    modeleId: row.modele_id,
     motif: row.motif,
     type: row.type,
     taille: row.taille,
@@ -109,7 +111,16 @@ export class ProduitRepository {
     ).map((r) => r.taille);
   }
 
+  /** Variantes d'un modèle donné (actives uniquement). */
+  listByModele(modeleId: string): Produit[] {
+    const rows = this.db
+      .prepare("SELECT * FROM produits WHERE modele_id = ? AND deleted_at IS NULL ORDER BY taille_tri, taille")
+      .all(modeleId) as ProduitRow[];
+    return rows.map(rowToProduit);
+  }
+
   create(input: {
+    modeleId?: string | null;
     motif: string;
     type: string;
     taille: string;
@@ -124,11 +135,12 @@ export class ProduitRepository {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO produits (id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, seuil_alerte, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO produits (id, modele_id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, seuil_alerte, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
+        input.modeleId ?? null,
         input.motif,
         input.type,
         input.taille,
@@ -144,10 +156,11 @@ export class ProduitRepository {
     return id;
   }
 
-  /** Modifie un produit existant. Ne touche jamais aux images (gérées séparément — ImageService). */
+  /** Modifie une variante. Ne touche jamais aux images (gérées séparément via ImageService). */
   update(
     id: string,
     input: {
+      motif?: string;
       type: string;
       taille: string;
       tailleTri: number;
@@ -159,24 +172,23 @@ export class ProduitRepository {
     }
   ): void {
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE produits
-         SET type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, seuil_alerte = ?, updated_at = ?
-         WHERE id = ? AND deleted_at IS NULL`
-      )
-      .run(
-        input.type,
-        input.taille,
-        input.tailleTri,
-        input.largeur ?? null,
-        input.hauteur ?? null,
-        input.reference,
-        input.prix,
-        input.seuilAlerte,
-        now,
-        id
-      );
+    if (input.motif !== undefined) {
+      this.db
+        .prepare(
+          `UPDATE produits
+           SET motif = ?, type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, seuil_alerte = ?, updated_at = ?
+           WHERE id = ? AND deleted_at IS NULL`
+        )
+        .run(input.motif, input.type, input.taille, input.tailleTri, input.largeur ?? null, input.hauteur ?? null, input.reference, input.prix, input.seuilAlerte, now, id);
+    } else {
+      this.db
+        .prepare(
+          `UPDATE produits
+           SET type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, seuil_alerte = ?, updated_at = ?
+           WHERE id = ? AND deleted_at IS NULL`
+        )
+        .run(input.type, input.taille, input.tailleTri, input.largeur ?? null, input.hauteur ?? null, input.reference, input.prix, input.seuilAlerte, now, id);
+    }
   }
 
   /**

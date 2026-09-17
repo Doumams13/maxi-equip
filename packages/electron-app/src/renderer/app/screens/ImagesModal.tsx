@@ -10,42 +10,39 @@ interface ImageAffichable {
 }
 
 export interface ImagesModalProps {
-  produitId: string;
-  produitMotif: string;
+  modeleId: string;
+  modeleMotif: string;
   onClose: () => void;
   onImagesChanged: () => void;
 }
 
 /**
- * Galerie d'images d'un produit — correction Phase 2 (§5/§6). Reflète
- * uniquement les images réellement associées au produit (aucune image
- * fictive — §17). Toutes les opérations passent par IPC : le Renderer ne
- * manipule jamais de chemin de fichier, seulement des données déjà
- * encodées reçues du Main process (§12).
+ * Galerie d'images d'un modèle de carreau — images partagées par toutes les
+ * variantes du même motif. Toutes les opérations passent par IPC.
  */
-export function ImagesModal({ produitId, produitMotif, onClose, onImagesChanged }: ImagesModalProps) {
+export function ImagesModal({ modeleId, modeleMotif, onClose, onImagesChanged }: ImagesModalProps) {
   const { showSuccess, showError } = useToast();
   const [images, setImages] = useState<ImageAffichable[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
 
   async function refresh() {
-    const list = await window.maxiEquip.listImages(produitId);
+    const list = await window.maxiEquip.listImages(modeleId);
     setImages(list);
     setLoading(false);
   }
 
   useEffect(() => {
     void refresh();
-  }, [produitId]);
+  }, [modeleId]);
 
   async function handleAdd() {
     setAdding(true);
     try {
-      const result = await window.maxiEquip.pickAndAddImages(produitId);
+      const result = await window.maxiEquip.pickAndAddImages(modeleId);
       if (result.success) {
         if (result.added && result.added > 0) {
-          showSuccess("Images ajoutées", `${result.added} image(s) ajoutée(s) au produit.`);
+          showSuccess("Images ajoutées", `${result.added} image(s) ajoutée(s) au modèle.`);
           await refresh();
           onImagesChanged();
         }
@@ -62,7 +59,7 @@ export function ImagesModal({ produitId, produitMotif, onClose, onImagesChanged 
   }
 
   async function handleSetPrincipale(imageId: string) {
-    await window.maxiEquip.setImagePrincipale(produitId, imageId);
+    await window.maxiEquip.setImagePrincipale(modeleId, imageId);
     showSuccess("Image principale mise à jour", "Cette image sera utilisée comme miniature.");
     await refresh();
     onImagesChanged();
@@ -70,7 +67,7 @@ export function ImagesModal({ produitId, produitMotif, onClose, onImagesChanged 
 
   async function handleRemove(imageId: string) {
     await window.maxiEquip.removeImage(imageId);
-    showSuccess("Image supprimée", "L'image a été retirée du produit.");
+    showSuccess("Image supprimée", "L'image a été retirée du modèle.");
     await refresh();
     onImagesChanged();
   }
@@ -87,7 +84,7 @@ export function ImagesModal({ produitId, produitMotif, onClose, onImagesChanged 
     >
       <Card elevated style={{ width: "min(560px, 92vw)", maxHeight: "80vh", overflowY: "auto", boxSizing: "border-box" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h2 style={{ margin: 0, fontFamily: defaultTokens.typography.display, fontSize: 17 }}>Images — {produitMotif}</h2>
+          <h2 style={{ margin: 0, fontFamily: defaultTokens.typography.display, fontSize: 17 }}>Images — {modeleMotif}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }} aria-label="Fermer">
             <X size={18} color={defaultTokens.colors.textFaint} />
           </button>
@@ -111,7 +108,7 @@ export function ImagesModal({ produitId, produitMotif, onClose, onImagesChanged 
               }}
             >
               {principale?.dataUrl ? (
-                <img src={principale.dataUrl} alt={`Carreau ${produitMotif}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img src={principale.dataUrl} alt={`Carreau ${modeleMotif}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, color: defaultTokens.colors.textFaint }}>
                   <ImageOff size={28} />
@@ -135,7 +132,7 @@ export function ImagesModal({ produitId, produitMotif, onClose, onImagesChanged 
                       }}
                     >
                       {img.dataUrl && (
-                        <img src={img.dataUrl} alt={`Vue supplémentaire — ${produitMotif}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        <img src={img.dataUrl} alt={`Vue supplémentaire — ${modeleMotif}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                       )}
                     </div>
                     <div style={{ display: "flex", gap: 3, marginTop: 4, justifyContent: "center" }}>

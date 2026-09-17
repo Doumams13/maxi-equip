@@ -68,6 +68,40 @@ export interface ProduitAvecMiniature extends Produit {
   stockTotal: number;
 }
 
+export interface VarianteProduit {
+  id: string;
+  modeleId: string | null;
+  taille: string;
+  tailleTri: number;
+  largeur: number | null;
+  hauteur: number | null;
+  reference: string;
+  prix: number;
+  seuilAlerte: number;
+  deletedAt: string | null;
+  stockTotal: number;
+}
+
+export interface ModeleProduitAvecVariantes {
+  id: string;
+  motif: string;
+  type: string;
+  deletedAt: string | null;
+  imagePrincipaleDataUrl: string | null;
+  nombreImages: number;
+  variantes: VarianteProduit[];
+}
+
+export interface VarianteInput {
+  taille: string;
+  tailleTri?: number;
+  largeur?: number | null;
+  hauteur?: number | null;
+  reference: string;
+  prix: number;
+  seuilAlerte?: number;
+}
+
 export interface ImageAffichable {
   id: string;
   estPrincipale: boolean;
@@ -352,24 +386,55 @@ const maxiEquipApi = {
     mesSorties: number;
   } | null> => ipcRenderer.invoke("dashboard:summary"),
 
-  // --- Images produit (correction Phase 2) ---
+  // --- Images produit (liées au modèle depuis la migration multi-format) ---
   // Le Renderer ne reçoit jamais de chemin de fichier — uniquement des
-  // images déjà encodées (data URL), lues et converties côté Main (§12).
-  listImages: (produitId: string): Promise<ImageAffichable[]> => ipcRenderer.invoke("images:list", produitId),
-  pickAndAddImages: (produitId: string): Promise<{ success: boolean; added?: number; message?: string }> =>
-    ipcRenderer.invoke("images:pickAndAdd", produitId),
-  setImagePrincipale: (produitId: string, imageId: string): Promise<{ success: boolean }> =>
-    ipcRenderer.invoke("images:setPrincipale", produitId, imageId),
+  // images déjà encodées (data URL), lues et converties côté Main.
+  listImages: (modeleId: string): Promise<ImageAffichable[]> => ipcRenderer.invoke("images:list", modeleId),
+  pickAndAddImages: (modeleId: string): Promise<{ success: boolean; added?: number; message?: string }> =>
+    ipcRenderer.invoke("images:pickAndAdd", modeleId),
+  setImagePrincipale: (modeleId: string, imageId: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke("images:setPrincipale", modeleId, imageId),
   removeImage: (imageId: string): Promise<{ success: boolean }> => ipcRenderer.invoke("images:remove", imageId),
 
   // Mécanisme de "staging" — prévisualisation réelle avant même que le
-  // produit n'existe (formulaire de création, correction 2 §7/§8).
+  // modèle n'existe (formulaire de création).
   pickFilesToStaging: (): Promise<{ success: boolean; staged?: StagedImage[]; message?: string }> =>
     ipcRenderer.invoke("images:pickFilesToStaging"),
-  commitStagedImages: (produitId: string, stagingIds: string[], principaleStagingId: string | null): Promise<{ success: boolean }> =>
-    ipcRenderer.invoke("images:commitStaged", produitId, stagingIds, principaleStagingId),
+  commitStagedImages: (modeleId: string, stagingIds: string[], principaleStagingId: string | null): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke("images:commitStaged", modeleId, stagingIds, principaleStagingId),
   discardStagedImages: (stagingIds: string[]): Promise<{ success: boolean }> =>
     ipcRenderer.invoke("images:discardStaged", stagingIds),
+
+  // --- Catalogue multi-format (modèles + variantes) ---
+  listModelesProduits: (): Promise<ModeleProduitAvecVariantes[]> =>
+    ipcRenderer.invoke("catalogue:listModeles"),
+  creerModeleProduit: (input: {
+    motif: string;
+    type: string;
+    variantes: VarianteInput[];
+    stagedImages?: string[];
+    principaleStagingId?: string | null;
+  }): Promise<{ success: boolean; id?: string; message?: string }> =>
+    ipcRenderer.invoke("catalogue:creerModele", input),
+  modifierModeleProduit: (
+    modeleId: string,
+    input: { motif?: string; type?: string }
+  ): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("catalogue:modifierModele", modeleId, input),
+  supprimerModeleProduit: (modeleId: string): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("catalogue:supprimerModele", modeleId),
+  ajouterVariante: (
+    modeleId: string,
+    input: VarianteInput
+  ): Promise<{ success: boolean; id?: string; message?: string }> =>
+    ipcRenderer.invoke("catalogue:ajouterVariante", modeleId, input),
+  modifierVariante: (
+    varianteId: string,
+    input: Partial<VarianteInput>
+  ): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("catalogue:modifierVariante", varianteId, input),
+  supprimerVariante: (varianteId: string): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("catalogue:supprimerVariante", varianteId),
 
   // --- Promotions ---
   // Lister et gérer les promotions : mutation réservée aux Administrateurs,

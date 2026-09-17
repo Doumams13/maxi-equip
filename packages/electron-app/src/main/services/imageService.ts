@@ -13,21 +13,9 @@ export interface StagedImage {
 }
 
 /**
- * Gestion des images produit — Correction Phase 2. Toutes les opérations
- * système (sélection de fichier, copie, lecture disque) restent dans le
- * Main process (§12 : "le Renderer ne doit pas obtenir des accès système
- * non contrôlés"). Le Renderer ne reçoit jamais de chemin de fichier —
- * uniquement des données d'image encodées (data URL), compatibles avec
- * la politique de sécurité du contenu déjà en place (img-src 'self' data:,
- * Synthèse §3) sans avoir à l'assouplir.
- *
- * Mécanisme de "staging" (2ᵉ correction) : lorsqu'un produit n'existe pas
- * encore (formulaire de création), les images choisies sont copiées dans
- * un dossier temporaire et immédiatement renvoyées en prévisualisation
- * (data URL) — §7/§8 : la prévisualisation doit être réelle et immédiate,
- * pas un simple nom de fichier. Une fois le produit réellement créé, les
- * fichiers "stagés" sont déplacés vers le stockage définitif et associés
- * en base — jamais l'inverse (jamais de ligne en base sans fichier réel).
+ * Gestion des images modèle-produit. Images liées au modèle (motif), pas à
+ * une variante spécifique. Toutes les opérations système restent dans le
+ * Main process — le Renderer ne reçoit jamais de chemins de fichiers.
  */
 export class ImageService {
   private readonly storageDir: string;
@@ -41,7 +29,7 @@ export class ImageService {
     this.stagingDir = join(this.storageDir, "_staging");
     if (!existsSync(this.storageDir)) mkdirSync(this.storageDir, { recursive: true });
     if (!existsSync(this.stagingDir)) mkdirSync(this.stagingDir, { recursive: true });
-    this.clearStaging(); // les fichiers en attente d'une session précédente (fermeture sans validation) ne doivent jamais s'accumuler.
+    this.clearStaging();
   }
 
   private clearStaging(): void {
@@ -49,7 +37,7 @@ export class ImageService {
       try {
         unlinkSync(join(this.stagingDir, f));
       } catch {
-        // Fichier déjà absent ou verrouillé — sans conséquence, ce n'est qu'un nettoyage best-effort.
+        // Nettoyage best-effort.
       }
     }
   }
@@ -72,8 +60,8 @@ export class ImageService {
     return this.fileToDataUrl(join(this.storageDir, cheminLocal));
   }
 
-  listWithDataUrls(produitId: string): { id: string; estPrincipale: boolean; ordre: number; dataUrl: string | null }[] {
-    return this.repository.listByProduit(produitId).map((img) => ({
+  listWithDataUrls(modeleId: string): { id: string; estPrincipale: boolean; ordre: number; dataUrl: string | null }[] {
+    return this.repository.listByModele(modeleId).map((img) => ({
       id: img.id,
       estPrincipale: img.estPrincipale,
       ordre: img.ordre,
@@ -81,55 +69,40 @@ export class ImageService {
     }));
   }
 
-  getPrincipaleDataUrl(produitId: string): string | null {
-    const image = this.repository.getPrincipale(produitId);
+  getPrincipaleDataUrl(modeleId: string): string | null {
+    const image = this.repository.getPrincipale(modeleId);
     return image ? this.toDataUrl(image.cheminLocal) : null;
   }
 
-  getPrincipalesDataUrlsForProduits(produitIds: string[]): Record<string, string> {
-    const map = this.repository.getPrincipalesForProduits(produitIds);
+  getPrincipalesDataUrlsForModeles(modeleIds: string[]): Record<string, string> {
+    const map = this.repository.getPrincipalesForModeles(modeleIds);
     const result: Record<string, string> = {};
-    for (const [produitId, image] of map.entries()) {
+    for (const [modeleId, image] of map.entries()) {
       const dataUrl = this.toDataUrl(image.cheminLocal);
-      if (dataUrl) result[produitId] = dataUrl;
+      if (dataUrl) result[modeleId] = dataUrl;
     }
     return result;
   }
 
-  countByProduit(produitId: string): number {
-    return this.repository.listByProduit(produitId).length;
+  countByModele(modeleId: string): number {
+    return this.repository.listByModele(modeleId).length;
   }
 
-  countForProduits(produitIds: string[]): Record<string, number> {
+  countForModeles(modeleIds: string[]): Record<string, number> {
     const result: Record<string, number> = {};
-    for (const id of produitIds) result[id] = this.repository.listByProduit(id).length;
+    for (const id of modeleIds) result[id] = this.repository.listByModele(id).length;
     return result;
   }
 
-  /**
-   * Restaure le focus de la fenêtre après un dialogue natif (sélecteur de
-   * fichiers). Correction d'un vrai bug signalé (formulaire "bloqué"
-   * après un premier enregistrement) : sous Windows, il arrive que la
-   * fenêtre Electron ne récupère pas correctement le focus clavier/souris
-   * après la fermeture d'un dialogue natif ouvert avec dialog.showOpenDialog
-   * — un comportement connu d'Electron/Chromium, pas un bug applicatif —
-   * laissant les champs du formulaire visuellement présents mais inertes
-   * tant que l'utilisateur ne reclique pas manuellement sur la fenêtre.
-   */
   private restoreWindowFocus(): void {
     if (this.window.isMinimized()) this.window.restore();
     this.window.focus();
     this.window.webContents.focus();
   }
 
-  /**
-   * Ouvre le sélecteur de fichiers natif et copie les fichiers choisis
-   * dans le stockage DÉFINITIF d'un produit qui existe déjà (édition
-   * d'un produit existant — écran "Images" de la liste).
-   */
-  async pickAndAddImages(produitId: string): Promise<{ added: number }> {
+  async pickAndAddImages(modeleId: string): Promise<{ added: number }> {
     const result = await dialog.showOpenDialog(this.window, {
-      title: "Choisir une ou plusieurs images du produit",
+      title: "Choisir une ou plusieurs images du carreau",
       properties: ["openFile", "multiSelections"],
       filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }],
     });
@@ -143,21 +116,15 @@ export class ImageService {
       if (!ACCEPTED_EXTENSIONS.includes(ext)) continue;
       const fileName = `${randomUUID()}${ext}`;
       copyFileSync(sourcePath, join(this.storageDir, fileName));
-      this.repository.create({ produitId, cheminLocal: fileName });
+      this.repository.create({ modeleId, cheminLocal: fileName });
       added += 1;
     }
     return { added };
   }
 
-  /**
-   * Ouvre le sélecteur de fichiers natif et copie les fichiers choisis en
-   * zone de "staging" — utilisé par le formulaire de CRÉATION d'un
-   * produit, avant que celui-ci n'existe en base. Retourne immédiatement
-   * une prévisualisation réelle (data URL), pas un simple nom de fichier.
-   */
   async pickFilesToStaging(): Promise<StagedImage[]> {
     const result = await dialog.showOpenDialog(this.window, {
-      title: "Choisir une ou plusieurs images du produit",
+      title: "Choisir une ou plusieurs images du carreau",
       properties: ["openFile", "multiSelections"],
       filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }],
     });
@@ -178,24 +145,18 @@ export class ImageService {
     return staged;
   }
 
-  /**
-   * Déplace les images "stagées" vers le stockage définitif et les
-   * associe au produit désormais réellement créé. `principaleStagingId`
-   * détermine laquelle devient l'image principale.
-   */
-  commitStaged(produitId: string, stagingIds: string[], principaleStagingId: string | null): void {
+  commitStaged(modeleId: string, stagingIds: string[], principaleStagingId: string | null): void {
     for (const stagingId of stagingIds) {
       const stagingPath = join(this.stagingDir, stagingId);
       if (!existsSync(stagingPath)) continue;
       renameSync(stagingPath, join(this.storageDir, stagingId));
-      const imageId = this.repository.create({ produitId, cheminLocal: stagingId });
+      const imageId = this.repository.create({ modeleId, cheminLocal: stagingId });
       if (stagingId === principaleStagingId) {
-        this.repository.setPrincipale(produitId, imageId);
+        this.repository.setPrincipale(modeleId, imageId);
       }
     }
   }
 
-  /** Annule une sélection en cours (formulaire fermé sans validation) — supprime les fichiers stagés correspondants. */
   discardStaged(stagingIds: string[]): void {
     for (const stagingId of stagingIds) {
       const stagingPath = join(this.stagingDir, stagingId);
@@ -203,8 +164,8 @@ export class ImageService {
     }
   }
 
-  setPrincipale(produitId: string, imageId: string): void {
-    this.repository.setPrincipale(produitId, imageId);
+  setPrincipale(modeleId: string, imageId: string): void {
+    this.repository.setPrincipale(modeleId, imageId);
   }
 
   remove(imageId: string): void {

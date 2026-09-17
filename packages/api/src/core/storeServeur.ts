@@ -16,7 +16,7 @@ import Database from "better-sqlite3-multiple-ciphers";
  * appliquée à `local-dev-server.ts`.
  */
 
-export type TypeOperationSync = "vente" | "annulation" | "entree" | "transfert" | "demande";
+export type TypeOperationSync = "vente" | "annulation" | "entree" | "transfert" | "demande" | "parametres_entreprise";
 
 export interface OperationRecue {
   entityType: TypeOperationSync;
@@ -100,17 +100,35 @@ export function enregistrerOperations(operations: OperationRecue[]): ResultatEnr
   return executerLot(operations);
 }
 
-/** PULL — curseur = le dernier `curseur` déjà reçu par l'appelant ; renvoie tout ce qui a été enregistré après. */
-export function listerOperationsDepuis(curseur: number, limite = 200): OperationStockee[] {
+export interface ResultatPull {
+  operations: OperationStockee[];
+  /** true si le serveur a tronqué la réponse — le client DOIT paginer jusqu'à ce que hasMore soit false. */
+  hasMore: boolean;
+}
+
+/**
+ * PULL — curseur = le dernier `curseur` déjà reçu par l'appelant.
+ * Renvoie au plus `limite` opérations après ce curseur, plus un flag
+ * `hasMore` indiquant explicitement si d'autres opérations restent à
+ * récupérer — le client doit paginer tant que ce flag est true.
+ */
+export function listerOperationsDepuis(curseur: number, limite = 200): ResultatPull {
   const base = getDb();
   const lignes = base
     .prepare("SELECT curseur, entity_type, entity_id, payload_json, recu_le FROM operations_synchronisees WHERE curseur > ? ORDER BY curseur ASC LIMIT ?")
-    .all(curseur, limite) as { curseur: number; entity_type: string; entity_id: string; payload_json: string; recu_le: string }[];
-  return lignes.map((l) => ({
-    curseur: l.curseur,
-    entityType: l.entity_type,
-    entityId: l.entity_id,
-    payload: JSON.parse(l.payload_json),
-    recuLe: l.recu_le,
-  }));
+    .all(curseur, limite + 1) as { curseur: number; entity_type: string; entity_id: string; payload_json: string; recu_le: string }[];
+
+  const hasMore = lignes.length > limite;
+  const page = hasMore ? lignes.slice(0, limite) : lignes;
+
+  return {
+    operations: page.map((l) => ({
+      curseur: l.curseur,
+      entityType: l.entity_type,
+      entityId: l.entity_id,
+      payload: JSON.parse(l.payload_json),
+      recuLe: l.recu_le,
+    })),
+    hasMore,
+  };
 }

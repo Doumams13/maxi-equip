@@ -26,6 +26,13 @@ export class InsufficientStockError extends Error {
   }
 }
 
+export class IncohérenceMouvementError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IncohérenceMouvementError";
+  }
+}
+
 export class InvalidQuantityError extends Error {
   constructor(message: string) {
     super(message);
@@ -101,6 +108,52 @@ export function applyTransfert(
  * La part externe est uniquement destinée au relevé interne
  * d'approvisionnement (module invoicing), jamais au stock.
  */
+/**
+ * Vérifie la cohérence structurelle d'un mouvement avant persistance.
+ * Règle : entree/sortie → emplacementId obligatoire, champs transfert null ;
+ *         transfert → source et destination obligatoires, emplacementId null.
+ */
+/**
+ * Vérifie la cohérence structurelle d'un mouvement avant persistance.
+ *
+ * Règles :
+ * - entree       → emplacementId obligatoire, champs transfert null.
+ * - sortie réelle → emplacementId obligatoire, champs transfert null.
+ * - sortie externe (trace d'appro, emplacementId null) → champs transfert null uniquement.
+ *   Ce cas particulier représente une trace comptable d'un approvisionnement
+ *   externe sans déduction de stock MAXI EQUIP (§7 — "la part externe
+ *   n'est jamais ajoutée au stock").
+ * - transfert    → source et destination obligatoires, emplacementId null.
+ */
+export function assertCoherentMouvement(mouvement: {
+  type: "entree" | "sortie" | "transfert";
+  emplacementId: string | null;
+  emplacementSourceId: string | null;
+  emplacementDestinationId: string | null;
+}): void {
+  if (mouvement.type === "entree") {
+    if (!mouvement.emplacementId) {
+      throw new IncohérenceMouvementError("Un mouvement de type \"entree\" doit avoir emplacementId renseigné.");
+    }
+    if (mouvement.emplacementSourceId !== null || mouvement.emplacementDestinationId !== null) {
+      throw new IncohérenceMouvementError("Un mouvement de type \"entree\" ne doit pas avoir de champs transfert.");
+    }
+  } else if (mouvement.type === "sortie") {
+    if (mouvement.emplacementSourceId !== null || mouvement.emplacementDestinationId !== null) {
+      throw new IncohérenceMouvementError("Un mouvement de type \"sortie\" ne doit pas avoir de champs transfert.");
+    }
+  } else {
+    if (!mouvement.emplacementSourceId || !mouvement.emplacementDestinationId) {
+      throw new IncohérenceMouvementError(
+        "Un mouvement de type \"transfert\" doit avoir emplacementSourceId et emplacementDestinationId renseignés."
+      );
+    }
+    if (mouvement.emplacementId !== null) {
+      throw new IncohérenceMouvementError("Un mouvement de type \"transfert\" ne doit pas avoir emplacementId renseigné.");
+    }
+  }
+}
+
 export interface RepartitionVente {
   quantiteInterne: number;
   quantiteExterne: number;

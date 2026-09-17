@@ -56,7 +56,7 @@ export interface Facture extends MetierEntity {
    * servi de base à une correction — empêche de proposer une seconde
    * correction à partir de la même erreur déjà traitée.
    */
-  corrigeeParFactureId: string | null;
+  corrigeeParFactureId: UUID | null;
 }
 
 export interface LigneFacture {

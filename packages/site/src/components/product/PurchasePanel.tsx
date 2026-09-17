@@ -117,20 +117,7 @@ export function PurchasePanel({ model, promotions }: { model: ProductModel; prom
         </p>
       )}
 
-      <div className="mt-9 flex flex-col gap-2.5 border-t border-ink/[0.08] pt-5">
-        <div className="flex justify-between border-b border-dashed border-ink/[0.08] pb-2 text-[13.5px] text-ink-mute">
-          <span>Univers</span>
-          <b className="font-semibold text-ink">{model.type}</b>
-        </div>
-        <div className="flex justify-between border-b border-dashed border-ink/[0.08] pb-2 text-[13.5px] text-ink-mute">
-          <span>Référence</span>
-          <b className="font-semibold text-ink">{variant.reference}</b>
-        </div>
-        <div className="flex justify-between pb-2 text-[13.5px] text-ink-mute">
-          <span>Disponibilité</span>
-          <b className="font-semibold text-ink">En stock — showroom &amp; entrepôt</b>
-        </div>
-      </div>
+      
     </div>
   );
 }

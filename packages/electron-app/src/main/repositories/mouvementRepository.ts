@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import { randomUUID } from "node:crypto";
 import type { Mouvement } from "@maxi-equip/shared-types";
+import { stock as domainStock } from "@maxi-equip/domain";
 
 interface MouvementRow {
   id: string;
@@ -131,6 +132,7 @@ export class MouvementRepository {
   }
 
   create(input: Omit<Mouvement, "id" | "createdAt" | "updatedAt">): string {
+    domainStock.assertCoherentMouvement(input);
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { unlinkSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import Database from "better-sqlite3-multiple-ciphers";
 import { runMigrations } from "../db/migrate.js";
 import { ProduitRepository } from "../repositories/produitRepository.js";
@@ -19,7 +21,7 @@ import { VenteService } from "./venteService.js";
  * environnement avant la reconstruction du module natif effectuée pour
  * cette étape. Ce fichier est supprimé avant et après la suite de tests.
  */
-const CHEMIN_DB = "/tmp/test-boite-envoi-integration.sqlite";
+const CHEMIN_DB = join(tmpdir(), "test-boite-envoi-integration.sqlite");
 
 function ouvrirBaseDeTest(): Database.Database {
   if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
@@ -191,7 +193,7 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
 });
 
 describe("TEST 6 — persistance réelle après fermeture/réouverture de la base", () => {
-  const cheminPersistance = "/tmp/test-boite-envoi-persistance.sqlite";
+  const cheminPersistance = join(tmpdir(), "test-boite-envoi-persistance.sqlite");
 
   it("les entrées de la boîte d'envoi et les UUID survivent à une vraie fermeture/réouverture de connexion", () => {
     if (existsSync(cheminPersistance)) unlinkSync(cheminPersistance);

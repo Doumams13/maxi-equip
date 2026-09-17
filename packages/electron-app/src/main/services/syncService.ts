@@ -29,6 +29,7 @@ interface ReponsePush {
 interface ReponsePull {
   operations: { curseur: number; entityType: string; entityId: string; payload: unknown; recuLe: string }[];
   cursor: number;
+  hasMore?: boolean;
 }
 
 export class SyncService {
@@ -140,55 +141,66 @@ export class SyncService {
   }
 
   private async effectuerPull(apiUrl: string, jwt: string): Promise<ResultatSynchronisation> {
-    const curseurActuel = this.syncRepository.getDernierCurseur();
+    let curseur = this.syncRepository.getDernierCurseur();
+    let totalRecues = 0;
 
-    let reponse: Response;
-    try {
-      reponse = await fetch(`${apiUrl}/v1/sync/pull?since=${curseurActuel}`, { headers: { Authorization: `Bearer ${jwt}` } });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
-      return { success: false, etape: "pull", message: `Impossible de contacter le serveur pour le PULL : ${message}` };
-    }
-
-    if (reponse.status === 401 || reponse.status === 403) {
-      return { success: false, etape: "pull", message: "Authentification refusée par le serveur lors du PULL." };
-    }
-    if (!reponse.ok) {
-      return { success: false, etape: "pull", message: `Le serveur a refusé le PULL (HTTP ${reponse.status}).` };
-    }
-
-    let corps: ReponsePull;
-    try {
-      corps = (await reponse.json()) as ReponsePull;
-      if (!Array.isArray(corps.operations)) throw new Error("format inattendu");
-    } catch {
-      return { success: false, etape: "pull", message: "Réponse du serveur invalide lors du PULL — aucune donnée locale modifiée." };
-    }
-
-    try {
-      this.syncRepository.enregistrerOperationsRecues(
-        corps.operations.map((o) => ({ entityType: o.entityType, entityId: o.entityId, payload: o.payload, curseurServeur: o.curseur }))
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Erreur inconnue.";
-      return { success: false, etape: "pull", message: `Échec de l'enregistrement technique des opérations reçues : ${message}` };
-    }
-
-    // Application réelle aux données métier — UNIQUEMENT pour "demande"
-    // (Partie 4/17). Chaque échec individuel est isolé : une demande
-    // dont le paiement échoue ne doit jamais faire perdre les autres ni
-    // faire régresser le curseur déjà avancé ci-dessus.
-    if (this.traiterDemandeRecue) {
-      for (const operation of corps.operations) {
-        if (operation.entityType !== "demande") continue;
-        try {
-          this.traiterDemandeRecue(operation.payload, operation.entityId);
-        } catch {
-          // Volontairement silencieux ici — la donnée reste de toute façon disponible dans sync_recu (journal technique), jamais perdue, et n'empêche jamais le reste de la synchronisation.
-        }
+    // Pagination : le serveur peut tronquer sa réponse (hasMore: true).
+    // On continue de paginer jusqu'à ce que hasMore soit false ou absent.
+    do {
+      let reponse: Response;
+      try {
+        reponse = await fetch(`${apiUrl}/v1/sync/pull?since=${curseur}`, { headers: { Authorization: `Bearer ${jwt}` } });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
+        return { success: false, etape: "pull", message: `Impossible de contacter le serveur pour le PULL : ${message}` };
       }
-    }
 
-    return { success: true, pull: { recues: corps.operations.length } };
+      if (reponse.status === 401 || reponse.status === 403) {
+        return { success: false, etape: "pull", message: "Authentification refusée par le serveur lors du PULL." };
+      }
+      if (!reponse.ok) {
+        return { success: false, etape: "pull", message: `Le serveur a refusé le PULL (HTTP ${reponse.status}).` };
+      }
+
+      let corps: ReponsePull;
+      try {
+        corps = (await reponse.json()) as ReponsePull;
+        if (!Array.isArray(corps.operations)) throw new Error("format inattendu");
+      } catch {
+        return { success: false, etape: "pull", message: "Réponse du serveur invalide lors du PULL — aucune donnée locale modifiée." };
+      }
+
+      if (corps.operations.length > 0) {
+        try {
+          this.syncRepository.enregistrerOperationsRecues(
+            corps.operations.map((o) => ({ entityType: o.entityType, entityId: o.entityId, payload: o.payload, curseurServeur: o.curseur }))
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Erreur inconnue.";
+          return { success: false, etape: "pull", message: `Échec de l'enregistrement technique des opérations reçues : ${message}` };
+        }
+
+        // Application réelle aux données métier — UNIQUEMENT pour "demande"
+        // (Partie 4/17). Chaque échec individuel est isolé : une demande
+        // dont le traitement échoue ne doit jamais bloquer le reste de la page.
+        if (this.traiterDemandeRecue) {
+          for (const operation of corps.operations) {
+            if (operation.entityType !== "demande") continue;
+            try {
+              this.traiterDemandeRecue(operation.payload, operation.entityId);
+            } catch {
+              // Volontairement silencieux ici — la donnée reste disponible dans sync_recu, jamais perdue.
+            }
+          }
+        }
+
+        totalRecues += corps.operations.length;
+        curseur = corps.cursor;
+      }
+
+      if (!corps.hasMore) break;
+    } while (true);
+
+    return { success: true, pull: { recues: totalRecues } };
   }
 }

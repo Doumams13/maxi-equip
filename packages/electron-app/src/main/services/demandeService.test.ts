@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { unlinkSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import Database from "better-sqlite3-multiple-ciphers";
 import { runMigrations } from "../db/migrate.js";
 import { ProduitRepository } from "../repositories/produitRepository.js";
@@ -22,7 +24,7 @@ import { DemandeService, DemandeValidationError } from "./demandeService.js";
  * directement via `ventes:create`), puis lier la demande APRÈS coup via
  * `marquerTraitee()`, exactement comme le fera l'application réelle.
  */
-const CHEMIN_DB = "/tmp/test-demande-workflow-integration.sqlite";
+const CHEMIN_DB = join(tmpdir(), "test-demande-workflow-integration.sqlite");
 
 function ouvrirBaseDeTest(): Database.Database {
   if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);

@@ -18,6 +18,21 @@ type LoginOutcome =
   | { success: true; session: auth.SessionLocale }
   | { success: false; reason: auth.AuthenticationFailureReason };
 
+/**
+ * Vue publique d'un utilisateur — définie localement pour éviter tout
+ * import cross-package dans le preload (contrainte sandbox/contextBridge).
+ * Doit rester synchronisée avec UtilisateurPublic de utilisateurRepository.
+ */
+interface UtilisateurPublic {
+  id: string;
+  nom: string;
+  identifiant: string;
+  role: string;
+  actif: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "UNKNOWN";
 type StockOperationResult =
   | { success: true; [key: string]: unknown }
@@ -355,6 +370,34 @@ const maxiEquipApi = {
     ipcRenderer.invoke("images:commitStaged", produitId, stagingIds, principaleStagingId),
   discardStagedImages: (stagingIds: string[]): Promise<{ success: boolean }> =>
     ipcRenderer.invoke("images:discardStaged", stagingIds),
+
+  // --- Gestion des utilisateurs (Administrateur uniquement) ---
+  // Le contrôle d'accès est également appliqué côté Main à chaque appel —
+  // jamais uniquement côté Renderer.
+  utilisateursLister: (): Promise<{ success: boolean; data?: UtilisateurPublic[]; message?: string }> =>
+    ipcRenderer.invoke("utilisateurs:list"),
+  utilisateurCreer: (input: {
+    nom: string;
+    identifiant: string;
+    role: string;
+    motDePasse: string;
+    confirmation: string;
+  }): Promise<{ success: boolean; id?: string; message?: string }> =>
+    ipcRenderer.invoke("utilisateurs:creer", input),
+  utilisateurModifier: (
+    id: string,
+    input: { nom?: string; role?: string; identifiant?: string }
+  ): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("utilisateurs:modifier", id, input),
+  utilisateurReinitialiserMotDePasse: (
+    id: string,
+    input: { motDePasse: string; confirmation: string }
+  ): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("utilisateurs:reinitialiserMotDePasse", id, input),
+  utilisateurDesactiver: (id: string): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("utilisateurs:desactiver", id),
+  utilisateurActiver: (id: string): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("utilisateurs:activer", id),
 };
 
 export type MaxiEquipApi = typeof maxiEquipApi;

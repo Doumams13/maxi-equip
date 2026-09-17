@@ -4,8 +4,10 @@ import {
   applySortie,
   applyTransfert,
   repartirVenteInterneExterne,
+  assertCoherentMouvement,
   InsufficientStockError,
   InvalidQuantityError,
+  IncohérenceMouvementError,
 } from "./index.js";
 
 describe("Stock — entrée", () => {
@@ -55,6 +57,48 @@ describe("Stock — transfert", () => {
 
   it("refuse un transfert dépassant le stock disponible à la source", () => {
     expect(() => applyTransfert("akebe", "shop", 5, 10)).toThrow(InsufficientStockError);
+  });
+});
+
+describe("assertCoherentMouvement — cohérence structurelle", () => {
+  it("accepte une entrée avec emplacementId renseigné", () => {
+    expect(() => assertCoherentMouvement({ type: "entree", emplacementId: "shop", emplacementSourceId: null, emplacementDestinationId: null })).not.toThrow();
+  });
+
+  it("rejette une entrée sans emplacementId", () => {
+    expect(() => assertCoherentMouvement({ type: "entree", emplacementId: null, emplacementSourceId: null, emplacementDestinationId: null })).toThrow(IncohérenceMouvementError);
+  });
+
+  it("rejette une entrée avec des champs transfert renseignés", () => {
+    expect(() => assertCoherentMouvement({ type: "entree", emplacementId: "shop", emplacementSourceId: "akebe", emplacementDestinationId: null })).toThrow(IncohérenceMouvementError);
+  });
+
+  it("accepte une sortie réelle avec emplacementId renseigné", () => {
+    expect(() => assertCoherentMouvement({ type: "sortie", emplacementId: "shop", emplacementSourceId: null, emplacementDestinationId: null })).not.toThrow();
+  });
+
+  it("accepte une sortie externe (trace d'appro, emplacementId null)", () => {
+    expect(() => assertCoherentMouvement({ type: "sortie", emplacementId: null, emplacementSourceId: null, emplacementDestinationId: null })).not.toThrow();
+  });
+
+  it("rejette une sortie avec des champs transfert renseignés", () => {
+    expect(() => assertCoherentMouvement({ type: "sortie", emplacementId: null, emplacementSourceId: "akebe", emplacementDestinationId: "shop" })).toThrow(IncohérenceMouvementError);
+  });
+
+  it("accepte un transfert avec source et destination renseignées, emplacementId null", () => {
+    expect(() => assertCoherentMouvement({ type: "transfert", emplacementId: null, emplacementSourceId: "akebe", emplacementDestinationId: "shop" })).not.toThrow();
+  });
+
+  it("rejette un transfert sans emplacementSourceId", () => {
+    expect(() => assertCoherentMouvement({ type: "transfert", emplacementId: null, emplacementSourceId: null, emplacementDestinationId: "shop" })).toThrow(IncohérenceMouvementError);
+  });
+
+  it("rejette un transfert sans emplacementDestinationId", () => {
+    expect(() => assertCoherentMouvement({ type: "transfert", emplacementId: null, emplacementSourceId: "akebe", emplacementDestinationId: null })).toThrow(IncohérenceMouvementError);
+  });
+
+  it("rejette un transfert avec emplacementId renseigné (doit être null)", () => {
+    expect(() => assertCoherentMouvement({ type: "transfert", emplacementId: "shop", emplacementSourceId: "akebe", emplacementDestinationId: "shop" })).toThrow(IncohérenceMouvementError);
   });
 });
 

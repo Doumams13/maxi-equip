@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
  * `payload_json` contient uniquement les champs métier nécessaires à une
  * future synchronisation, jamais un instantané complet de toute la base.
  */
-export type TypeOperationBoiteEnvoi = "vente" | "annulation" | "entree" | "transfert";
+export type TypeOperationBoiteEnvoi = "vente" | "annulation" | "entree" | "transfert" | "parametres_entreprise";
 export type StatutBoiteEnvoi = "pending" | "sent" | "confirmed" | "error";
 
 export interface EntreeBoiteEnvoi {

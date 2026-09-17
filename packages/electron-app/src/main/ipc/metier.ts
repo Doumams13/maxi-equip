@@ -7,6 +7,7 @@ import { StockRepository } from "../repositories/stockRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
 import { FactureRepository } from "../repositories/factureRepository.js";
 import { ParametresRepository, type IdentiteEntreprise } from "../repositories/parametresRepository.js";
+import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 import { StockService } from "../services/stockService.js";
 import { VenteService, VenteValidationError, type VenteInput } from "../services/venteService.js";
 import { ImageService } from "../services/imageService.js";
@@ -37,6 +38,7 @@ export function registerMetierIpcHandlers(
   mouvementRepository: MouvementRepository,
   factureRepository: FactureRepository,
   parametresRepository: ParametresRepository,
+  boiteEnvoiRepository: BoiteEnvoiRepository,
   stockService: StockService,
   venteService: VenteService,
   imageService: ImageService,
@@ -414,6 +416,16 @@ export function registerMetierIpcHandlers(
     }
     try {
       parametresRepository.setIdentite(identite);
+      const updatedIdentite = parametresRepository.getIdentite();
+      boiteEnvoiRepository.creer("parametres_entreprise", "singleton", {
+        nom: updatedIdentite.nom,
+        adresse: updatedIdentite.adresse,
+        quartier: updatedIdentite.quartier,
+        telephones: updatedIdentite.telephones,
+        nomAdministrateur: updatedIdentite.nomAdministrateur,
+        nomGerant: updatedIdentite.nomGerant,
+        updatedAt: updatedIdentite.updatedAt,
+      });
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";

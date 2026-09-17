@@ -98,7 +98,13 @@ export function calculerTotalLigne(ligne: Pick<LigneFacture, "quantite" | "prixU
   return ligne.quantite * ligne.prixUnitaire;
 }
 
-/** Calcule le total d'une facture à partir de ses lignes — toujours recalculé, jamais stocké séparément sans recalcul (§6). */
+/**
+ * Calcule le total d'une facture à partir de ses lignes.
+ * Le résultat est ensuite STOCKÉ dans `Facture.total` (dénormalisation
+ * délibérée : les requêtes SQL d'agrégation — CA du mois, dashboard —
+ * en ont besoin). Ce champ est toujours alimenté par cette fonction à
+ * la création ; il ne doit jamais être mis à jour indépendamment des lignes.
+ */
 export function calculerTotalFacture(lignes: Pick<LigneFacture, "quantite" | "prixUnitaire">[]): number {
   return lignes.reduce((total, ligne) => total + calculerTotalLigne(ligne), 0);
 }

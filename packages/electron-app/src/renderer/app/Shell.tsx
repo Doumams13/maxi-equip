@@ -14,10 +14,11 @@ import {
   History,
   LogOut,
   Settings,
+  Users,
 } from "lucide-react";
 import logoUrl from "../assets/maxi-equip-logo.png";
 
-export type ScreenId = "dashboard" | "produits" | "stock" | "transferts" | "ventes" | "factures" | "demandes" | "historique" | "parametres";
+export type ScreenId = "dashboard" | "produits" | "stock" | "transferts" | "ventes" | "factures" | "demandes" | "historique" | "parametres" | "utilisateurs";
 
 export interface NavItem {
   id: ScreenId;
@@ -49,6 +50,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
   demandes: MessageSquareText,
   historique: History,
   parametres: Settings,
+  utilisateurs: Users,
 };
 
 /**

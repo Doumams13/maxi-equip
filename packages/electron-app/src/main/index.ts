@@ -38,6 +38,8 @@ import { ImageService } from "./services/imageService.js";
 import { registerImageIpcHandlers } from "./ipc/images.js";
 import { executerResetDonneesTest } from "./maintenance/resetDonneesTest.js";
 import { executerGenerationDonneesTest } from "./maintenance/genererDonneesTest.js";
+import { UtilisateurService } from "./services/utilisateurService.js";
+import { registerUtilisateursIpcHandlers } from "./ipc/utilisateurs.js";
 
 // Le processus principal est construit en CommonJS (voir electron.vite.config.ts)
 // — __dirname est donc nativement disponible, pas besoin de la variante ESM
@@ -218,6 +220,11 @@ app.whenReady().then(async () => {
     await bootstrapDefaultUsers(utilisateurRepository, hasher);
     registerAuthIpcHandlers(authService);
 
+    // Gestion des utilisateurs (Phase N) — réservé aux administrateurs,
+    // vérifié côté Main à chaque appel IPC (§13 : jamais uniquement l'UI).
+    const utilisateurService = new UtilisateurService(utilisateurRepository, hasher);
+    registerUtilisateursIpcHandlers(utilisateurService, sessionManager);
+
     // Métier (Phase 2) : dépôts + services assemblant les règles du
     // domaine (§19 : le domaine reste la seule source de vérité).
     const emplacementRepository = new EmplacementRepository(db);
@@ -267,6 +274,7 @@ app.whenReady().then(async () => {
       mouvementRepository,
       factureRepository,
       parametresRepository,
+      boiteEnvoiRepository,
       stockService,
       venteService,
       imageService,

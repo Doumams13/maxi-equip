@@ -16,7 +16,7 @@ import type { OperationRecue, TypeOperationSync } from "./storeServeur.js";
  * parallèle).
  */
 
-const TYPES_SUPPORTES: readonly TypeOperationSync[] = ["vente", "annulation", "entree", "transfert", "demande"];
+const TYPES_SUPPORTES: readonly TypeOperationSync[] = ["vente", "annulation", "entree", "transfert", "demande", "parametres_entreprise"];
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

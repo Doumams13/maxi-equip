@@ -56,18 +56,24 @@ export function getEffectivePrice(
 ): EffectivePrice {
   const now = new Date(atDate).getTime();
 
-  const active = promotions.find((promo) => {
+  let meilleurePromo: Pick<Promotion, "prixPromotionnel" | "dateDebut" | "dateFin"> | null = null;
+
+  for (const promo of promotions) {
+    assertValidPromotion(promo);
     const start = new Date(promo.dateDebut).getTime();
     const end = new Date(promo.dateFin).getTime();
-    return now >= start && now <= end;
-  });
+    if (now < start || now > end) continue;
+    if (meilleurePromo === null || promo.prixPromotionnel < meilleurePromo.prixPromotionnel) {
+      meilleurePromo = promo;
+    }
+  }
 
-  if (!active) {
+  if (!meilleurePromo) {
     return { price: produit.prix, isPromoActive: false, originalPrice: produit.prix };
   }
 
   return {
-    price: active.prixPromotionnel,
+    price: meilleurePromo.prixPromotionnel,
     isPromoActive: true,
     originalPrice: produit.prix,
   };

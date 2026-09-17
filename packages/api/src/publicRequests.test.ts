@@ -38,7 +38,7 @@ describe("Route publique POST /v1/public/requests — Intégration Site Phase 5 
     expect(corps.requestId).toBeDefined();
     expect(corps.submittedAt).toBeDefined();
 
-    const operations = listerOperationsDepuis(0);
+    const { operations } = listerOperationsDepuis(0);
     expect(operations).toHaveLength(1);
     expect(operations[0]!.entityType).toBe("demande");
     expect(operations[0]!.entityId).toBe(corps.requestId);
@@ -52,7 +52,7 @@ describe("Route publique POST /v1/public/requests — Intégration Site Phase 5 
     const router = createRouter();
     const res = await router.dispatch(req({ method: "POST", path: "/v1/public/requests", body: demandeValide({ customerName: "" }) }));
     expect(res.status).toBe(400);
-    expect(listerOperationsDepuis(0)).toHaveLength(0);
+    expect(listerOperationsDepuis(0).operations).toHaveLength(0);
   });
 
   it("TEST 3 — email et commentaire réellement facultatifs", async () => {
@@ -61,7 +61,7 @@ describe("Route publique POST /v1/public/requests — Intégration Site Phase 5 
       req({ method: "POST", path: "/v1/public/requests", body: demandeValide({ email: undefined, comment: undefined }) })
     );
     expect(res.status).toBe(200);
-    const operations = listerOperationsDepuis(0);
+    const { operations } = listerOperationsDepuis(0);
     const payload = operations[0]!.payload as { clientEmail: string | null; commentaire: string | null };
     expect(payload.clientEmail).toBeNull();
     expect(payload.commentaire).toBeNull();
@@ -95,7 +95,7 @@ describe("Route publique POST /v1/public/requests — Intégration Site Phase 5 
     const corps = res.body as { requestId: string };
     expect(corps.requestId).toBeDefined();
 
-    expect(listerOperationsDepuis(0)).toHaveLength(0);
+    expect(listerOperationsDepuis(0).operations).toHaveLength(0);
   });
 
   it("TEST 7 — limitation de fréquence réelle : la 6e requête depuis la même IP en 10 minutes est refusée (429)", async () => {
@@ -137,7 +137,7 @@ describe("Route publique POST /v1/public/requests — Intégration Site Phase 5 
       })
     );
     expect(res.status).toBe(200);
-    const operations = listerOperationsDepuis(0);
+    const { operations } = listerOperationsDepuis(0);
     const payload = operations[0]!.payload as { lignes: { motif: string; taille: string; quantite: number; prixIndicatif: number }[] };
     expect(payload.lignes).toHaveLength(2);
     expect(payload.lignes[1]!.motif).toBe("Grès Anthracite");

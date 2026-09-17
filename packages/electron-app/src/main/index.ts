@@ -127,6 +127,9 @@ function createMainWindow(): BrowserWindow {
 }
 
 function applyContentSecurityPolicy(): void {
+  // En dev, Vite injecte un script inline pour le HMR React (preamble) que
+  // la CSP bloquerait. On l'applique uniquement en production.
+  if (RENDERER_DEV_SERVER_URL) return;
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {

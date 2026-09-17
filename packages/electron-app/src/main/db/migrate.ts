@@ -25,6 +25,8 @@ export function runMigrations(db: Database.Database): void {
   creerTableSuiviDemandeSiAbsente(db);
   migrerAncienStatutContacteeSiPresent(db);
   retirerContrainteProduitIdLignesDemandeSiPresente(db);
+  migrerTablePromotionsSiAncienSchema(db);
+  ajouterColonnesPromoLignesFactureSiAbsentes(db);
   setSchemaVersion(db);
 }
 
@@ -138,7 +140,7 @@ function ajouterSourceEntityIdDemandesSiAbsent(db: Database.Database): void {
  * plus tard, par la restauration (Phase 3.9) pour valider la
  * compatibilité d'une sauvegarde avant de l'appliquer.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 function setSchemaVersion(db: Database.Database): void {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -386,6 +388,76 @@ function createSyncTablesIfMissing(db: Database.Database): void {
       recu_le TEXT NOT NULL
     );
   `);
+}
+
+/**
+ * PROMOTIONS — migration de l'ancien schéma (produit_id + prix_promotionnel)
+ * vers le nouveau (libelle + type_reduction + valeur + perimetre).
+ *
+ * Détection : l'ancienne table possède une colonne `produit_id` — la
+ * nouvelle n'en a pas (les produits ciblés sont dans `promotion_produits`).
+ * Idempotente : sans effet si la nouvelle table est déjà en place.
+ * Les anciennes promotions sont perdues lors de cette migration — elles
+ * portaient des données structurellement incompatibles (prix absolu au
+ * lieu d'une réduction), aucune conversion sans pertes n'est possible ni
+ * souhaitable. Une installation propre repart sans donnée promotionnelle
+ * (comportement correct : les promotions sont recréées par l'Administrateur).
+ */
+function migrerTablePromotionsSiAncienSchema(db: Database.Database): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'promotions'").get() as { sql: string } | undefined;
+  if (!row) return; // Table absente — schema.sql l'a déjà créée dans le bon format.
+  if (!row.sql.includes("produit_id")) return; // Déjà migré.
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    const migrer = db.transaction(() => {
+      db.exec("DROP TABLE IF EXISTS promotions;");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS promotions (
+          id              TEXT PRIMARY KEY,
+          libelle         TEXT NOT NULL,
+          type_reduction  TEXT NOT NULL CHECK (type_reduction IN ('pourcentage', 'montant_fixe')),
+          valeur          REAL NOT NULL CHECK (valeur > 0),
+          perimetre       TEXT NOT NULL CHECK (perimetre IN ('global', 'cible')),
+          date_debut      TEXT NOT NULL,
+          date_fin        TEXT NOT NULL,
+          created_at      TEXT NOT NULL,
+          updated_at      TEXT NOT NULL
+        );
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_promotions_date ON promotions (date_debut, date_fin);");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS promotion_produits (
+          promotion_id  TEXT NOT NULL REFERENCES promotions (id) ON DELETE CASCADE,
+          produit_id    TEXT NOT NULL REFERENCES produits (id),
+          PRIMARY KEY (promotion_id, produit_id)
+        );
+      `);
+    });
+    migrer();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+/**
+ * PROMOTIONS — ajoute les colonnes de promotion sur `lignes_facture` pour
+ * les bases créées avant cette évolution. Toutes nullables : les lignes
+ * existantes sans promotion gardent leurs valeurs NULL (honnête — aucune
+ * promotion n'était active au moment de ces ventes).
+ */
+function ajouterColonnesPromoLignesFactureSiAbsentes(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(lignes_facture)").all() as { name: string }[];
+  const ajouter = (nom: string, definition: string) => {
+    if (!columns.some((c) => c.name === nom)) {
+      db.exec(`ALTER TABLE lignes_facture ADD COLUMN ${definition}`);
+    }
+  };
+  ajouter("prix_unitaire_normal", "prix_unitaire_normal INTEGER");
+  ajouter("promotion_id", "promotion_id TEXT");
+  ajouter("promotion_libelle", "promotion_libelle TEXT");
+  ajouter("promotion_type", "promotion_type TEXT");
+  ajouter("promotion_valeur", "promotion_valeur REAL");
 }
 
 /**

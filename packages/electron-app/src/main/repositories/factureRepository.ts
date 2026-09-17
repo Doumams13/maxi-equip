@@ -159,9 +159,16 @@ export class FactureRepository {
   }
 
   private getLignes(factureId: string): LigneFacture[] {
-    return this.db
-      .prepare("SELECT produit_id as produitId, motif, taille, quantite, prix_unitaire as prixUnitaire FROM lignes_facture WHERE facture_id = ?")
+    const rows = this.db
+      .prepare(
+        `SELECT produit_id as produitId, motif, taille, quantite, prix_unitaire as prixUnitaire,
+                prix_unitaire_normal as prixUnitaireNormal, promotion_id as promotionId,
+                promotion_libelle as promotionLibelle, promotion_type as promotionType,
+                promotion_valeur as promotionValeur
+         FROM lignes_facture WHERE facture_id = ?`
+      )
       .all(factureId) as LigneFacture[];
+    return rows;
   }
 
   /**
@@ -207,11 +214,17 @@ export class FactureRepository {
       );
 
     const insertLigne = this.db.prepare(
-      `INSERT INTO lignes_facture (id, facture_id, produit_id, motif, taille, quantite, prix_unitaire)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO lignes_facture
+         (id, facture_id, produit_id, motif, taille, quantite, prix_unitaire,
+          prix_unitaire_normal, promotion_id, promotion_libelle, promotion_type, promotion_valeur)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const ligne of input.lignes) {
-      insertLigne.run(randomUUID(), id, ligne.produitId, ligne.motif, ligne.taille, ligne.quantite, ligne.prixUnitaire);
+      insertLigne.run(
+        randomUUID(), id, ligne.produitId, ligne.motif, ligne.taille, ligne.quantite, ligne.prixUnitaire,
+        ligne.prixUnitaireNormal ?? null, ligne.promotionId ?? null, ligne.promotionLibelle ?? null,
+        ligne.promotionType ?? null, ligne.promotionValeur ?? null
+      );
     }
 
     return id;

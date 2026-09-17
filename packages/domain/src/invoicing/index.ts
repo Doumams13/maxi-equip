@@ -37,6 +37,12 @@ export interface VenteLigneSource {
   fournisseur?: string;
   /** Coût d'achat unitaire externe — renseigné uniquement si quantiteExterne > 0. */
   prixAchatExterne?: number;
+  /** Promotion appliquée — null si aucune promotion active au moment de la vente. */
+  prixUnitaireNormal?: number | null;
+  promotionId?: string | null;
+  promotionLibelle?: string | null;
+  promotionType?: string | null;
+  promotionValeur?: number | null;
 }
 
 function assertCoherentSource(source: VenteLigneSource): void {
@@ -69,6 +75,11 @@ export function buildLigneFacture(source: VenteLigneSource): LigneFacture {
     taille: source.taille,
     quantite: source.quantiteInterne + source.quantiteExterne,
     prixUnitaire: source.prixUnitaire,
+    prixUnitaireNormal: source.prixUnitaireNormal ?? null,
+    promotionId: source.promotionId ?? null,
+    promotionLibelle: source.promotionLibelle ?? null,
+    promotionType: source.promotionType ?? null,
+    promotionValeur: source.promotionValeur ?? null,
   };
 }
 

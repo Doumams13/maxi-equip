@@ -130,13 +130,20 @@ CREATE TABLE IF NOT EXISTS factures (
 );
 
 CREATE TABLE IF NOT EXISTS lignes_facture (
-  id             TEXT PRIMARY KEY,
-  facture_id     TEXT NOT NULL REFERENCES factures (id),
-  produit_id     TEXT REFERENCES produits (id),
-  motif          TEXT NOT NULL,
-  taille         TEXT NOT NULL,
-  quantite       INTEGER NOT NULL CHECK (quantite > 0),
-  prix_unitaire  INTEGER NOT NULL
+  id                   TEXT PRIMARY KEY,
+  facture_id           TEXT NOT NULL REFERENCES factures (id),
+  produit_id           TEXT REFERENCES produits (id),
+  motif                TEXT NOT NULL,
+  taille               TEXT NOT NULL,
+  quantite             INTEGER NOT NULL CHECK (quantite > 0),
+  prix_unitaire        INTEGER NOT NULL,
+  -- Champs promotion : renseignés uniquement si une promotion était active
+  -- au moment de la vente — conservés même si la promotion est supprimée.
+  prix_unitaire_normal INTEGER,
+  promotion_id         TEXT,
+  promotion_libelle    TEXT,
+  promotion_type       TEXT,
+  promotion_valeur     REAL
   -- Volontairement AUCUN champ fournisseur / prix d'achat ici (Corrections §7/§9 point 12).
 );
 
@@ -211,15 +218,25 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- Promotions
 -- ==========================================================
 CREATE TABLE IF NOT EXISTS promotions (
-  id                TEXT PRIMARY KEY,
-  produit_id        TEXT NOT NULL REFERENCES produits (id),
-  prix_promotionnel INTEGER NOT NULL,
-  date_debut        TEXT NOT NULL,
-  date_fin          TEXT NOT NULL,
-  created_at        TEXT NOT NULL,
-  updated_at        TEXT NOT NULL
+  id              TEXT PRIMARY KEY,
+  libelle         TEXT NOT NULL,
+  type_reduction  TEXT NOT NULL CHECK (type_reduction IN ('pourcentage', 'montant_fixe')),
+  valeur          REAL NOT NULL CHECK (valeur > 0),
+  perimetre       TEXT NOT NULL CHECK (perimetre IN ('global', 'cible')),
+  date_debut      TEXT NOT NULL,
+  date_fin        TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_promotions_produit ON promotions (produit_id);
+CREATE INDEX IF NOT EXISTS idx_promotions_date ON promotions (date_debut, date_fin);
+
+-- Produits ciblés par une promotion de périmètre "cible".
+-- Table vide pour les promotions "global" (les deux ne coexistent jamais).
+CREATE TABLE IF NOT EXISTS promotion_produits (
+  promotion_id  TEXT NOT NULL REFERENCES promotions (id) ON DELETE CASCADE,
+  produit_id    TEXT NOT NULL REFERENCES produits (id),
+  PRIMARY KEY (promotion_id, produit_id)
+);
 
 -- ==========================================================
 -- Utilisateurs (Administrateur / Gérant)

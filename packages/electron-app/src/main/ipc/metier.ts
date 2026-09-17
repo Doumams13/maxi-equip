@@ -8,6 +8,7 @@ import { MouvementRepository } from "../repositories/mouvementRepository.js";
 import { FactureRepository } from "../repositories/factureRepository.js";
 import { ParametresRepository, type IdentiteEntreprise } from "../repositories/parametresRepository.js";
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
+import { PromotionRepository } from "../repositories/promotionRepository.js";
 import { StockService } from "../services/stockService.js";
 import { VenteService, VenteValidationError, type VenteInput } from "../services/venteService.js";
 import { ImageService } from "../services/imageService.js";
@@ -42,7 +43,8 @@ export function registerMetierIpcHandlers(
   stockService: StockService,
   venteService: VenteService,
   imageService: ImageService,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  promotionRepository?: PromotionRepository
 ): void {
   // --- Catalogue ---
   ipcMain.handle("catalogue:list", () => {
@@ -722,9 +724,7 @@ export function registerMetierIpcHandlers(
       // Administrateur — ligne 2 (données globales)
       totalEntrees: mouvementRepository.sommeQuantiteParType("entree"),
       totalSorties: mouvementRepository.sommeQuantiteParType("sortie"),
-      // Promotions : fonctionnalité non développée (Phase 4) — 0 réel et
-      // honnête, pas une donnée inventée pour remplir la case (§4/§24).
-      promotionsActives: 0,
+      promotionsActives: promotionRepository ? promotionRepository.compterActives() : 0,
       // Administrateur — graphique + tableaux (globaux)
       serieEntreesSorties: mouvementRepository.serieEntreesSortiesSeptJours(),
       stockParEmplacement,

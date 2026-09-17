@@ -40,6 +40,9 @@ import { executerResetDonneesTest } from "./maintenance/resetDonneesTest.js";
 import { executerGenerationDonneesTest } from "./maintenance/genererDonneesTest.js";
 import { UtilisateurService } from "./services/utilisateurService.js";
 import { registerUtilisateursIpcHandlers } from "./ipc/utilisateurs.js";
+import { PromotionRepository } from "./repositories/promotionRepository.js";
+import { PromotionService } from "./services/promotionService.js";
+import { registerPromotionsIpcHandlers } from "./ipc/promotions.js";
 
 // Le processus principal est construit en CommonJS (voir electron.vite.config.ts)
 // — __dirname est donc nativement disponible, pas besoin de la variante ESM
@@ -238,8 +241,12 @@ app.whenReady().then(async () => {
     const parametresRepository = new ParametresRepository(db);
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
     const syncRepository = new SyncRepository(db);
+    const promotionRepository = new PromotionRepository(db);
+    const promotionService = new PromotionService(db, promotionRepository, boiteEnvoiRepository);
+    registerPromotionsIpcHandlers(promotionService, sessionManager);
+
     const stockService = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository);
-    const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository);
+    const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository, promotionRepository);
 
     // Demandes du site (Phase 4.1) : instanciés AVANT SyncService pour
     // que celui-ci puisse recevoir le callback d'application réelle des
@@ -281,7 +288,8 @@ app.whenReady().then(async () => {
       stockService,
       venteService,
       imageService,
-      sessionManager
+      sessionManager,
+      promotionRepository
     );
     registerImageIpcHandlers(imageService);
     registerSyncIpcHandlers(syncService);

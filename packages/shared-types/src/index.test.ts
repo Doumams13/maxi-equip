@@ -36,7 +36,7 @@ describe("shared-types (Phase 0 smoke test)", () => {
       vendeurUtilisateurId: "00000000-0000-4000-8000-0000000000aa",
       vendeurNomManuel: null,
       lignes: [
-        { produitId: null, motif: "Marbre Blanc", taille: "60x60 cm", quantite: 30, prixUnitaire: 8500 },
+        { produitId: null, motif: "Marbre Blanc", taille: "60x60 cm", quantite: 30, prixUnitaire: 8500, prixUnitaireNormal: null, promotionId: null, promotionLibelle: null, promotionType: null, promotionValeur: null },
       ],
       total: 255000,
       modeReglement: "Espèces",

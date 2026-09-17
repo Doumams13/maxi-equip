@@ -371,6 +371,27 @@ const maxiEquipApi = {
   discardStagedImages: (stagingIds: string[]): Promise<{ success: boolean }> =>
     ipcRenderer.invoke("images:discardStaged", stagingIds),
 
+  // --- Promotions ---
+  // Lister et gérer les promotions : mutation réservée aux Administrateurs,
+  // lecture des actives disponible aux deux rôles (prix barrés à la vente).
+  promotionsLister: (): Promise<{ success: boolean; data?: import("@maxi-equip/shared-types").Promotion[]; message?: string }> =>
+    ipcRenderer.invoke("promotions:lister"),
+  promotionsActives: (): Promise<{ success: boolean; data?: import("@maxi-equip/shared-types").Promotion[]; message?: string }> =>
+    ipcRenderer.invoke("promotions:actives"),
+  promotionsCompterActives: (): Promise<number> =>
+    ipcRenderer.invoke("promotions:compterActives"),
+  promotionsCreer: (
+    input: Omit<import("@maxi-equip/shared-types").Promotion, "id" | "createdAt" | "updatedAt">
+  ): Promise<{ success: boolean; data?: import("@maxi-equip/shared-types").Promotion; message?: string; conflits?: import("@maxi-equip/shared-types").Promotion[] }> =>
+    ipcRenderer.invoke("promotions:creer", input),
+  promotionsModifier: (
+    id: string,
+    input: Partial<Omit<import("@maxi-equip/shared-types").Promotion, "id" | "createdAt" | "updatedAt">>
+  ): Promise<{ success: boolean; data?: import("@maxi-equip/shared-types").Promotion; message?: string; conflits?: import("@maxi-equip/shared-types").Promotion[] }> =>
+    ipcRenderer.invoke("promotions:modifier", id, input),
+  promotionsSupprimer: (id: string): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("promotions:supprimer", id),
+
   // --- Gestion des utilisateurs (Administrateur uniquement) ---
   // Le contrôle d'accès est également appliqué côté Main à chaque appel —
   // jamais uniquement côté Renderer.

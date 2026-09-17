@@ -12,6 +12,7 @@ import { DemandesScreen } from "./screens/DemandesScreen.js";
 import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
 import { ParametresScreen } from "./screens/ParametresScreen.js";
 import { UtilisateursScreen } from "./screens/UtilisateursScreen.js";
+import { PromotionsScreen } from "./screens/PromotionsScreen.js";
 
 type Session = { userId: string; identifiant: string; nom: string; role: string };
 
@@ -101,6 +102,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     { id: "factures", label: "Factures", autorise: permissions.canAccessHistory },
     { id: "demandes", label: "Demandes", autorise: permissions.canHandleSiteRequests, badge: demandesActives > 0 ? demandesActives : undefined },
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
+    { id: "promotions", label: "Promotions", autorise: permissions.canManagePromotions },
     { id: "utilisateurs", label: "Utilisateurs", autorise: permissions.canManageUsers },
     { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
   ];
@@ -179,6 +181,9 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
             onNaviguerVersOperation={irVersOperation}
           />
         );
+      case "promotions":
+        if (!permissions!.canManagePromotions) return null;
+        return <PromotionsScreen />;
       case "utilisateurs":
         if (!permissions!.canManageUsers) return null;
         return <UtilisateursScreen />;

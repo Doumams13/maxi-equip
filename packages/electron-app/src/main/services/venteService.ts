@@ -1,10 +1,11 @@
-import { stock as domainStock, invoicing as domainInvoicing, vendeur as domainVendeur } from "@maxi-equip/domain";
+import { stock as domainStock, invoicing as domainInvoicing, vendeur as domainVendeur, pricing as domainPricing } from "@maxi-equip/domain";
 import type { LigneFacture, LigneReleveInterne } from "@maxi-equip/shared-types";
 import { StockRepository } from "../repositories/stockRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
 import { FactureRepository } from "../repositories/factureRepository.js";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
+import { PromotionRepository } from "../repositories/promotionRepository.js";
 
 export class VenteValidationError extends Error {
   constructor(message: string) {
@@ -84,7 +85,8 @@ export class VenteService {
     private readonly stockRepository: StockRepository,
     private readonly mouvementRepository: MouvementRepository,
     private readonly factureRepository: FactureRepository,
-    private readonly boiteEnvoiRepository: BoiteEnvoiRepository
+    private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
+    private readonly promotionRepository?: PromotionRepository
   ) {}
 
   enregistrerVente(input: VenteInput): VenteResult {
@@ -162,6 +164,29 @@ export class VenteService {
           });
         }
 
+        // Promotion : déterminer si une promotion est active pour ce produit
+        // au moment exact de la validation (jamais au moment de la création de
+        // la demande, ni à l'ouverture de l'écran Vente).
+        let promotionInfo: { promotionId: string | null; promotionLibelle: string | null; promotionType: string | null; promotionValeur: number | null; prixUnitaireNormal: number | null } =
+          { promotionId: null, promotionLibelle: null, promotionType: null, promotionValeur: null, prixUnitaireNormal: null };
+
+        if (this.promotionRepository) {
+          const promoActives = this.promotionRepository.listActivesParProduit(produit.id);
+          const effectif = domainPricing.getEffectivePrice({ prix: produit.prix }, promoActives);
+          if (effectif.isPromoActive && effectif.promotionId) {
+            const promo = promoActives.find((p) => p.id === effectif.promotionId);
+            if (promo) {
+              promotionInfo = {
+                promotionId: promo.id,
+                promotionLibelle: promo.libelle,
+                promotionType: promo.typeReduction,
+                promotionValeur: promo.valeur,
+                prixUnitaireNormal: produit.prix,
+              };
+            }
+          }
+        }
+
         const ligneFacture = domainInvoicing.buildLigneFacture({
           produitId: produit.id,
           motif: produit.motif,
@@ -171,6 +196,7 @@ export class VenteService {
           quantiteExterne,
           fournisseur: ligne.fournisseurExterne,
           prixAchatExterne: ligne.prixAchatExterne,
+          ...promotionInfo,
         });
         lignesFacture.push(ligneFacture);
 

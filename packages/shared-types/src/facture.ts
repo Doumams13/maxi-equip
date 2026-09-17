@@ -64,8 +64,18 @@ export interface LigneFacture {
   motif: string;
   taille: string;
   quantite: number;
-  /** Prix appliqué à CETTE vente — peut différer du prix catalogue (§6). */
+  /** Prix appliqué à CETTE vente — prix promo si une promotion était active, sinon prix catalogue (§6). */
   prixUnitaire: number;
+  /** Prix catalogue au moment de la vente — renseigné uniquement si une promotion était active (barré sur la facture). */
+  prixUnitaireNormal: number | null;
+  /** Identifiant de la promotion appliquée — null si aucune promotion. */
+  promotionId: string | null;
+  /** Libellé de la promotion — conservé même si la promotion est supprimée ultérieurement. */
+  promotionLibelle: string | null;
+  /** Type de réduction appliquée — "pourcentage" ou "montant_fixe". */
+  promotionType: string | null;
+  /** Valeur de la réduction au moment de la vente. */
+  promotionValeur: number | null;
 }
 
 /**

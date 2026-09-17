@@ -4,6 +4,7 @@ export interface EffectivePrice {
   price: number;
   isPromoActive: boolean;
   originalPrice: number;
+  promotionId: string | null;
 }
 
 export class InvalidPromotionError extends Error {
@@ -14,18 +15,40 @@ export class InvalidPromotionError extends Error {
 }
 
 /**
+ * Calcule le prix après application d'une réduction.
+ * - "pourcentage" : Math.round(prixNormal * (1 - valeur / 100)), jamais < 1.
+ * - "montant_fixe" : prixNormal - valeur, jamais < 1.
+ */
+export function calculerPrixApresReduction(
+  prixNormal: number,
+  typeReduction: Promotion["typeReduction"],
+  valeur: number
+): number {
+  let prix: number;
+  if (typeReduction === "pourcentage") {
+    prix = Math.round(prixNormal * (1 - valeur / 100));
+  } else {
+    prix = prixNormal - valeur;
+  }
+  return Math.max(1, prix);
+}
+
+/**
  * Valide la structure d'une promotion avant qu'elle ne soit prise en
- * compte. Cahier des charges §10 : une promotion a un prix promotionnel
- * et une période de validité — ces deux éléments doivent être cohérents.
- *
- * Invalide si :
- * - le prix promotionnel n'est pas un nombre strictement positif ;
+ * compte. Invalide si :
+ * - la valeur n'est pas un nombre strictement positif ;
+ * - pour "pourcentage", la valeur dépasse 100 ;
  * - la date de début n'est pas strictement antérieure à la date de fin.
  */
-export function assertValidPromotion(promotion: Pick<Promotion, "prixPromotionnel" | "dateDebut" | "dateFin">): void {
-  if (!Number.isFinite(promotion.prixPromotionnel) || promotion.prixPromotionnel <= 0) {
+export function assertValidPromotion(promotion: Pick<Promotion, "typeReduction" | "valeur" | "dateDebut" | "dateFin">): void {
+  if (!Number.isFinite(promotion.valeur) || promotion.valeur <= 0) {
     throw new InvalidPromotionError(
-      `Le prix promotionnel doit être un nombre strictement positif (reçu : ${promotion.prixPromotionnel}).`
+      `La valeur de la réduction doit être un nombre strictement positif (reçu : ${promotion.valeur}).`
+    );
+  }
+  if (promotion.typeReduction === "pourcentage" && promotion.valeur > 100) {
+    throw new InvalidPromotionError(
+      `Un pourcentage de réduction ne peut pas dépasser 100 (reçu : ${promotion.valeur}).`
     );
   }
   const start = new Date(promotion.dateDebut).getTime();
@@ -38,43 +61,49 @@ export function assertValidPromotion(promotion: Pick<Promotion, "prixPromotionne
 /**
  * Calcule le prix effectif d'un produit à une date donnée.
  *
- * Règle métier (cahier des charges §10, Synthèse §6, Corrections §6/§8) :
- * le prix catalogue du produit n'est JAMAIS modifié par une promotion.
- * Le prix affiché ou appliqué à une vente est toujours RECALCULÉ à partir
- * du prix catalogue et d'une promotion active à la date donnée — jamais
- * stocké en double quelque part.
+ * Règle métier : le prix catalogue du produit n'est JAMAIS modifié par
+ * une promotion. Le prix affiché ou appliqué est toujours recalculé.
+ *
+ * Si plusieurs promotions sont actives (ne devrait pas arriver grâce au
+ * contrôle de conflit, mais en cas de données historiques incohérentes),
+ * retient celle qui produit le prix final le plus bas (la plus avantageuse
+ * pour le client).
  *
  * @param produit Le produit dont on veut le prix effectif.
- * @param promotions Les promotions existantes pour CE produit (le tri/filtrage
- *   par produit est laissé à l'appelant, qui a accès au dépôt de données).
+ * @param promotions Les promotions actives pouvant s'appliquer à ce produit
+ *   (filtrage par produitId/périmètre laissé à l'appelant).
  * @param atDate Date de référence (par défaut : maintenant).
  */
 export function getEffectivePrice(
   produit: Pick<Produit, "prix">,
-  promotions: Pick<Promotion, "prixPromotionnel" | "dateDebut" | "dateFin">[],
+  promotions: Pick<Promotion, "id" | "typeReduction" | "valeur" | "dateDebut" | "dateFin">[],
   atDate: ISODateTime = new Date().toISOString()
 ): EffectivePrice {
   const now = new Date(atDate).getTime();
 
-  let meilleurePromo: Pick<Promotion, "prixPromotionnel" | "dateDebut" | "dateFin"> | null = null;
+  let meilleurePrix: number | null = null;
+  let meilleurePromoId: string | null = null;
 
   for (const promo of promotions) {
     assertValidPromotion(promo);
     const start = new Date(promo.dateDebut).getTime();
     const end = new Date(promo.dateFin).getTime();
     if (now < start || now > end) continue;
-    if (meilleurePromo === null || promo.prixPromotionnel < meilleurePromo.prixPromotionnel) {
-      meilleurePromo = promo;
+    const prixApres = calculerPrixApresReduction(produit.prix, promo.typeReduction, promo.valeur);
+    if (meilleurePrix === null || prixApres < meilleurePrix) {
+      meilleurePrix = prixApres;
+      meilleurePromoId = promo.id;
     }
   }
 
-  if (!meilleurePromo) {
-    return { price: produit.prix, isPromoActive: false, originalPrice: produit.prix };
+  if (meilleurePrix === null) {
+    return { price: produit.prix, isPromoActive: false, originalPrice: produit.prix, promotionId: null };
   }
 
   return {
-    price: meilleurePromo.prixPromotionnel,
+    price: meilleurePrix,
     isPromoActive: true,
     originalPrice: produit.prix,
+    promotionId: meilleurePromoId,
   };
 }

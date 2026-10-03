@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMigrations } from "../db/migrate.js";
-import { BackupService, DELAI_MIN_SAUVEGARDE_AUTOMATIQUE_MS, NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES } from "./backupService.js";
+import { BackupService } from "./backupService.js";
 import { recupererCleAvecMotDePasse } from "./backupCrypto.js";
 
 const CLE_TEST = "cle-de-test-sauvegarde-256-bits-simulee";
@@ -103,7 +103,7 @@ describe("BackupService — sécurité des sauvegardes manuelles", () => {
     // La vérification de concordance elle-même est testée dans backupCrypto.test.ts (validerMotDePasse) — ici on confirme qu'aucun effet de bord n'existe côté service tant qu'il n'est pas appelé.
   });
 
-  it("TEST G — sauvegardes automatiques : fonctionnent toujours, anti-spam 24h, purge à 10, jamais de clé (ni en clair ni protégée)", () => {
+  it("TEST G — sauvegardes automatiques : fonctionnent toujours, anti-spam 24h, jamais de clé (ni en clair ni protégée)", () => {
     const service = creerService();
     const resultat = service.creerSauvegardeAutomatiqueSiNecessaire();
     expect(resultat!.success).toBe(true);
@@ -115,18 +115,55 @@ describe("BackupService — sécurité des sauvegardes manuelles", () => {
 
     expect(service.creerSauvegardeAutomatiqueSiNecessaire()).toBeNull();
 
-    for (let i = 0; i < NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES + 2; i++) {
-      const entrees = service.listerSauvegardesAutomatiques();
-      const derniere = entrees[0]!;
-      const m = JSON.parse(readFileSync(join(derniere.chemin, "metadata.json"), "utf-8"));
-      m.backup.createdAt = new Date(Date.now() - DELAI_MIN_SAUVEGARDE_AUTOMATIQUE_MS - 1000).toISOString();
-      writeFileSync(join(derniere.chemin, "metadata.json"), JSON.stringify(m));
-      service.creerSauvegardeAutomatiqueSiNecessaire();
-    }
-    expect(service.listerSauvegardesAutomatiques().length).toBe(NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES);
-
     const manuelle = service.creerSauvegardeManuelle(join(dossierTravail, "destination-manuelle"), MOT_DE_PASSE);
     expect(existsSync(manuelle.chemin!)).toBe(true);
+  });
+
+  it("TEST G2 — rotation par paliers (Bloc 5, 14/8/12) appliquée réellement par purgerAnciennesSauvegardesAutomatiques() sur disque, jamais l'ancien plafond plat à 10", () => {
+    const service = creerService();
+    const dossierAuto = join(dossierTravail, "backups", "auto");
+    const JOUR_MS = 24 * 60 * 60 * 1000;
+    const maintenant = Date.now();
+
+    // Crée directement sur disque des sauvegardes à des âges variés
+    // (0 à 20 jours, 3 par jour représentatif) — simulation directe des
+    // métadonnées, même technique que TEST 5, pour ne pas dépendre du
+    // temps réel qui s'écoule pendant le test.
+    function creerFausseSauvegarde(nom: string, joursAvant: number): void {
+      const dossier = join(dossierAuto, nom);
+      mkdirSync(dossier, { recursive: true });
+      writeFileSync(join(dossier, "database.sqlite"), "contenu-simule");
+      writeFileSync(
+        join(dossier, "metadata.json"),
+        JSON.stringify({
+          format: "MAXI_EQUIP_BACKUP",
+          formatVersion: 2,
+          application: { name: "MAXI-EQUIP", version: "0.1.0" },
+          backup: { createdAt: new Date(maintenant - joursAvant * JOUR_MS).toISOString(), type: "automatic" },
+          database: { filename: "database.sqlite", schemaVersion: 1 },
+        })
+      );
+    }
+
+    // 20 sauvegardes quotidiennes consécutives (jours 0 à 19) — dépasse
+    // largement l'ancien plafond plat de 10, doit toutes être conservées
+    // au palier quotidien (14) + hebdomadaire pour le reste (jours 14-19).
+    for (let j = 0; j < 20; j++) creerFausseSauvegarde(`auto-j${j}`, j);
+    // Une sauvegarde bien plus ancienne (mois distinct) doit être promue au palier mensuel.
+    creerFausseSauvegarde("auto-ancienne", 200);
+
+    service.purgerAnciennesSauvegardesAutomatiques();
+
+    const restantes = new Set(service.listerSauvegardesAutomatiques().map((e) => e.chemin.split(/[\\/]/).pop()));
+
+    // Les 14 plus récentes (jours 0-13) : jamais supprimées (palier quotidien).
+    for (let j = 0; j < 14; j++) {
+      expect(restantes.has(`auto-j${j}`)).toBe(true);
+    }
+    // Plus de 10 sauvegardes doivent survivre — preuve directe que l'ancien plafond plat n'est plus appliqué.
+    expect(restantes.size).toBeGreaterThan(10);
+    // La sauvegarde très ancienne (200 jours), seule dans son mois, doit être promue et conservée.
+    expect(restantes.has("auto-ancienne")).toBe(true);
   });
 
   it("TEST 5 — une ancienne sauvegarde au format v1 (clé en clair) est détectée comme vulnérable, jamais confondue avec une sauvegarde saine", () => {

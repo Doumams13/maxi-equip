@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { getSchemaVersion } from "../db/migrate.js";
+import { resolveNativeBindingPath } from "../db/nativeSqliteBinding.js";
 import { type CleProtegeeParMotDePasse, protegerCleParMotDePasse, recupererCleAvecMotDePasse, LONGUEUR_MIN_MOT_DE_PASSE } from "./backupCrypto.js";
+import { calculerSauvegardesAConserver, POLITIQUE_ROTATION_PAR_DEFAUT, type PolitiqueRotation } from "./backupRotation.js";
 
 /**
  * Service de sauvegarde — Phase 3.8, corrigé pour la sécurité des
@@ -86,7 +88,15 @@ export const FORMAT_SAUVEGARDE = "MAXI_EQUIP_BACKUP";
 export const VERSION_FORMAT_SAUVEGARDE = 2;
 
 export const DELAI_MIN_SAUVEGARDE_AUTOMATIQUE_MS = 24 * 60 * 60 * 1000;
-export const NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES = 10;
+/**
+ * Correction Phase Finale, Bloc 5 : remplace l'ancien plafond plat (10
+ * sauvegardes les plus récentes, sans distinction) par la politique à
+ * paliers validée (14 quotidiennes / 8 hebdomadaires / 12 mensuelles —
+ * voir backupRotation.ts). Conservé ici UNIQUEMENT pour compatibilité de
+ * lecture d'anciens imports ; la valeur réellement appliquée est
+ * `POLITIQUE_ROTATION_PAR_DEFAUT.quotidien`.
+ */
+export const NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES = POLITIQUE_ROTATION_PAR_DEFAUT.quotidien;
 
 interface Metadata {
   format: string;
@@ -154,7 +164,7 @@ export class BackupService {
         if (!motDePasse) throw new Error("Un mot de passe est obligatoire pour une sauvegarde manuelle.");
 
         const cleAleatoire = randomBytes(32).toString("hex");
-        const copie = new DatabaseCtor(cheminBaseCopie);
+        const copie = new DatabaseCtor(cheminBaseCopie, { nativeBinding: resolveNativeBindingPath() });
         try {
           copie.pragma(`key='${this.cleChiffrement}'`);
           copie.pragma("cipher_version");
@@ -212,7 +222,7 @@ export class BackupService {
       cleAVerifier = this.cleChiffrement;
     }
 
-    const copie = new DatabaseCtor(cheminBase, { readonly: true });
+    const copie = new DatabaseCtor(cheminBase, { readonly: true, nativeBinding: resolveNativeBindingPath() });
     try {
       copie.pragma(`key='${cleAVerifier}'`);
       copie.pragma("cipher_version");
@@ -272,11 +282,21 @@ export class BackupService {
     return entrees.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   }
 
-  purgerAnciennesSauvegardesAutomatiques(): void {
+  /**
+   * Correction Phase Finale, Bloc 5 — politique à paliers (14/8/12),
+   * voir backupRotation.ts. Une sauvegarde détectée `vulnerable` (ancien
+   * format v1, clé en clair — Test 5) n'est JAMAIS incluse dans le
+   * calcul de rotation : ni comptée, ni supprimée automatiquement,
+   * exactement comme avant cette correction (règle inchangée).
+   */
+  purgerAnciennesSauvegardesAutomatiques(politique: PolitiqueRotation = POLITIQUE_ROTATION_PAR_DEFAUT): void {
     const toutes = this.listerSauvegardesAutomatiques();
-    const aSupprimer = toutes.slice(NOMBRE_MAX_SAUVEGARDES_AUTOMATIQUES);
-    for (const entree of aSupprimer) {
-      rmSync(entree.chemin, { recursive: true, force: true });
+    const saines = toutes.filter((e) => !e.vulnerable);
+    const aConserver = calculerSauvegardesAConserver(saines, politique);
+    for (const entree of saines) {
+      if (!aConserver.has(entree.chemin)) {
+        rmSync(entree.chemin, { recursive: true, force: true });
+      }
     }
   }
 

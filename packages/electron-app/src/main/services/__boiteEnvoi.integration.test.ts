@@ -127,6 +127,8 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
       vendeurCompteConnecteNom: "Testeur",
       vendeurNomManuel: null,
       modeReglement: "Espèces",
+
+      remise: 0,
       lignes: [{ produitId, quantite: 10, prixUnitaire: 10000, allocationsDepots: [{ emplacementId: depotId, quantite: 10 }] }],
     });
     factureId = resultat.factureId;
@@ -165,6 +167,30 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
     const entreeVente = boiteEnvoiRepository.listerParEntite("vente", factureId);
     expect(entreeVente).toHaveLength(1);
     expect(entreeVente[0]!.status).toBe("pending");
+  });
+
+  it("TEST 4b — une sortie de stock crée une entrée boîte d'envoi de type 'sortie' avec quantite positive", () => {
+    const { stockService, boiteEnvoiRepository, stockRepository, mouvementRepository } = construireServices(db);
+
+    // Après annulation (TEST 4), depotId a 70 cartons restaurés.
+    stockService.enregistrerSortie(produitId, depotId, 20, "u1");
+
+    expect(stockRepository.getQuantite(produitId, depotId)).toBe(50);
+    const enAttente = boiteEnvoiRepository.listerEnAttente().filter((e) => e.entityType === "sortie");
+    expect(enAttente).toHaveLength(1);
+    expect(enAttente[0]!.status).toBe("pending");
+    const payload = JSON.parse(enAttente[0]!.payloadJson);
+    expect(payload.produitId).toBe(produitId);
+    expect(payload.emplacementId).toBe(depotId);
+    // quantite positive — pas de workaround négatif, "sortie" est un type à part entière.
+    expect(payload.quantite).toBe(20);
+    expect(payload.quantite).toBeGreaterThan(0);
+
+    // listSorties() retrouve le mouvement avec le bon type et la bonne quantite.
+    const sorties = mouvementRepository.listSorties();
+    expect(sorties.length).toBeGreaterThanOrEqual(1);
+    expect(sorties[0]!.type).toBe("sortie");
+    expect(sorties[0]!.quantite).toBe(20);
   });
 
   it("TEST 5 (sans internet) — aucune opération n'a nécessité de réseau : toutes les opérations ci-dessus se sont exécutées sans jamais appeler fetch/http", () => {

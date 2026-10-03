@@ -2,8 +2,7 @@ import PDFDocument from "pdfkit";
 import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
-import type { Facture } from "@maxi-equip/shared-types";
-import type { IdentiteEntreprise } from "../repositories/parametresRepository.js";
+import type { Facture, IdentiteEntrepriseSnapshot } from "@maxi-equip/shared-types";
 import {
   PAGE_WIDTH,
   PAGE_HEIGHT,
@@ -15,6 +14,7 @@ import {
   formaterMontant,
   dessinerEnTeteEtIdentite,
   dessinerPiedDePage,
+  DECALAGE_EN_TETE,
 } from "./factureDocumentService.js";
 
 export interface LigneDocumentInterne {
@@ -29,7 +29,7 @@ export interface LigneDocumentInterne {
 
 export interface DocumentInterneInput {
   facture: Facture;
-  identite: IdentiteEntreprise;
+  identite: IdentiteEntrepriseSnapshot;
   vendeurNomAffiche: string;
   lignes: LigneDocumentInterne[];
 }
@@ -141,24 +141,25 @@ function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, v
   });
 
   // --- Deux boîtes : FACTURÉ À / DÉTAILS DE VENTE — mêmes libellés,
-  // mêmes positions, même style que la facture. ---
-  doc.rect(45.2, 255.5, 259.4, 78.7).fill(FOND_BOITE);
-  doc.rect(304.9, 255.5, 259.2, 78.7).fill(FOND_BOITE);
+  // même style que la facture, décalées de DECALAGE_EN_TETE pour suivre
+  // le même en-tête raccourci (voir factureDocumentService.ts). ---
+  doc.rect(45.2, 255.5 + DECALAGE_EN_TETE, 259.4, 78.7).fill(FOND_BOITE);
+  doc.rect(304.9, 255.5 + DECALAGE_EN_TETE, 259.2, 78.7).fill(FOND_BOITE);
 
   doc.font("Helvetica-Bold").fontSize(8).fillColor(GRIS_LABEL);
-  doc.text("FACTURÉ À", 55.2, 265.2);
-  doc.text("DÉTAILS DE VENTE", 314.7, 265.2);
+  doc.text("FACTURÉ À", 55.2, 265.2 + DECALAGE_EN_TETE);
+  doc.text("DÉTAILS DE VENTE", 314.7, 265.2 + DECALAGE_EN_TETE);
 
   doc.font("Helvetica-Bold").fontSize(9.5).fillColor(NOIR);
-  doc.text(facture.clientNom, 55.2, 279.3);
-  doc.font("Helvetica").text(facture.clientTelephone ?? "—", 55.2, 291.9);
-  doc.text(facture.clientAdresse ?? "—", 55.2, 304.0);
+  doc.text(facture.clientNom, 55.2, 279.3 + DECALAGE_EN_TETE);
+  doc.font("Helvetica").text(facture.clientTelephone ?? "—", 55.2, 291.9 + DECALAGE_EN_TETE);
+  doc.text(facture.clientAdresse ?? "—", 55.2, 304.0 + DECALAGE_EN_TETE);
 
   doc.font("Helvetica").fontSize(9.5).fillColor(NOIR);
-  doc.text(`Magasin : ${identite.nom}`, 314.7, 279.3);
-  doc.text(`Nombre d'articles : ${facture.lignes.length}`, 314.7, 291.9);
-  doc.text(`Mode de règlement : ${facture.modeReglement ?? "—"}`, 314.7, 304.0);
-  doc.text(`Vendeur : ${vendeurNomAffiche}`, 314.7, 316.1);
+  doc.text(`Magasin : ${identite.nom}`, 314.7, 279.3 + DECALAGE_EN_TETE);
+  doc.text(`Nombre d'articles : ${facture.lignes.length}`, 314.7, 291.9 + DECALAGE_EN_TETE);
+  doc.text(`Mode de règlement : ${facture.modeReglement ?? "—"}`, 314.7, 304.0 + DECALAGE_EN_TETE);
+  doc.text(`Vendeur : ${vendeurNomAffiche}`, 314.7, 316.1 + DECALAGE_EN_TETE);
 
   // --- Tableau — même style visuel que la facture (bordures, en-tête,
   // hauteur de ligne). Colonnes EXACTEMENT celles demandées (§5) : une
@@ -176,7 +177,7 @@ function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, v
     { x: 421.5, largeur: 56, titre: "DÉPENSE EXT." },
     { x: 477.5, largeur: 58.6, titre: "MARGE EXT." },
   ];
-  const tableTop = 369.9;
+  const tableTop = 369.9 + DECALAGE_EN_TETE;
   const headerHeight = 24; // en-tête plus haut : 10 colonnes nécessitent des libellés sur deux lignes
   const rowHeight = 21;
 
@@ -243,5 +244,5 @@ function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, v
   doc.text("MARGE SUR ACHAT EXTÉRIEUR", 300, resumeY + 30, { width: 170 });
   doc.text(`${formaterMontant(margeExterieureGenerale)} FCFA`, 470, resumeY + 30, { width: MARGE_DROITE - 470, align: "right" });
 
-  dessinerPiedDePage(doc);
+  dessinerPiedDePage(doc, identite);
 }

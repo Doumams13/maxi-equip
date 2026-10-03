@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Truck, Ban, Plus, FileText, Pencil, X } from "lucide-react";
+import { Eye, Printer, Download, User, ArrowUp, ArrowDown, ChevronsUpDown, Search, Ban, Plus, FileText, Pencil, X } from "lucide-react";
 import type { Facture } from "@maxi-equip/shared-types";
 import { useSurbrillanceOperation } from "../highlight.js";
 import { PdfPreviewModal } from "../components/PdfPreviewModal.js";
 import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
+import { imprimerPdf } from "../lib/imprimerPdf.js";
 
 type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean };
 
@@ -77,6 +78,23 @@ function StatutBadge({ facture }: { facture: Facture }) {
       </span>
     );
   }
+  if (facture.statutPaiement === "reservation") {
+    return (
+      <span
+        style={{
+          display: "inline-block",
+          padding: "3px 10px",
+          borderRadius: defaultTokens.radius.pill,
+          fontSize: 11.5,
+          fontWeight: 700,
+          background: defaultTokens.colors.accentSoft,
+          color: defaultTokens.colors.accent,
+        }}
+      >
+        Réservation
+      </span>
+    );
+  }
   const livree = facture.statutLivraison === "livree";
   return (
     <span
@@ -92,6 +110,64 @@ function StatutBadge({ facture }: { facture: Facture }) {
     >
       {livree ? "Payée — Livrée" : "Payée — En attente"}
     </span>
+  );
+}
+
+/**
+ * Menu de changement de statut — correction "Réservation / Acompte",
+ * remplace l'ancien bouton unique "Marquer comme livrée" (ne couvrait
+ * qu'un seul sens de transition). Les options proposées dépendent du
+ * statut actuel : "Réservation" ne réapparaît jamais comme option une
+ * fois la facture payée (aucun mécanisme pour rendre l'argent déjà
+ * reçu) ; "Payée — non livrée" et "Payée — livrée" restent librement
+ * interchangeables dans les deux sens (aucun verrou "terminus").
+ */
+function SelecteurStatut({
+  facture,
+  disabled,
+  onChanger,
+}: {
+  facture: Facture;
+  disabled: boolean;
+  onChanger: (nouveauStatut: "reservation" | "payee_non_livree" | "payee_livree") => void;
+}) {
+  const valeurActuelle: "reservation" | "payee_non_livree" | "payee_livree" =
+    facture.statutPaiement === "reservation" ? "reservation" : facture.statutLivraison === "livree" ? "payee_livree" : "payee_non_livree";
+
+  const options: { value: "reservation" | "payee_non_livree" | "payee_livree"; label: string }[] =
+    facture.statutPaiement === "reservation"
+      ? [
+          { value: "reservation", label: "Réservation" },
+          { value: "payee_non_livree", label: "Payée — Non livrée" },
+          { value: "payee_livree", label: "Payée — Livrée" },
+        ]
+      : [
+          { value: "payee_non_livree", label: "Payée — Non livrée" },
+          { value: "payee_livree", label: "Payée — Livrée" },
+        ];
+
+  return (
+    <select
+      value={valeurActuelle}
+      disabled={disabled}
+      onChange={(e) => onChanger(e.target.value as "reservation" | "payee_non_livree" | "payee_livree")}
+      style={{
+        padding: "4px 6px",
+        borderRadius: defaultTokens.radius.sm,
+        border: `1px solid ${defaultTokens.colors.border}`,
+        fontFamily: defaultTokens.typography.body,
+        fontSize: 12,
+        color: defaultTokens.colors.textSoft,
+        background: "#fff",
+      }}
+      title="Changer le statut"
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -318,8 +394,8 @@ export function FacturesScreen({
         showError("Impression impossible", genere.message ?? "Impossible de générer la facture.");
         return;
       }
-      const result = await window.maxiEquip.imprimerDocument(genere.chemin);
-      if (!result.success && result.message) showError("Impression annulée", result.message);
+      const result = await imprimerPdf(genere.chemin);
+      if (!result.success && result.message) showError("Impression impossible", result.message);
     } finally {
       setChargementAction(null);
     }
@@ -341,12 +417,21 @@ export function FacturesScreen({
     }
   }
 
-  async function handleMarquerLivree(factureId: string) {
+  async function handleChangerStatut(factureId: string, nouveauStatut: "reservation" | "payee_non_livree" | "payee_livree") {
     setChargementAction(factureId);
     try {
-      await window.maxiEquip.marquerFactureLivree(factureId);
-      showSuccess("Facture mise à jour", "Statut changé en « Payée — Livrée ».");
-      await chargerPage();
+      const result = await window.maxiEquip.changerStatutFacture(factureId, nouveauStatut);
+      if (result.success) {
+        const libelles: Record<typeof nouveauStatut, string> = {
+          reservation: "Réservation",
+          payee_non_livree: "Payée — Non livrée",
+          payee_livree: "Payée — Livrée",
+        };
+        showSuccess("Facture mise à jour", `Statut changé en « ${libelles[nouveauStatut]} ».`);
+        await chargerPage();
+      } else {
+        showError("Changement de statut impossible", result.message ?? "Une erreur inattendue s'est produite.");
+      }
     } finally {
       setChargementAction(null);
     }
@@ -515,7 +600,12 @@ export function FacturesScreen({
                       </td>
                       <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700 }}>{f.total.toLocaleString("fr-FR")} FCFA</td>
                       <td style={{ padding: "10px 16px" }}>
-                        <StatutBadge facture={f} />
+                        <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-start" }}>
+                          <StatutBadge facture={f} />
+                          {!f.annuleeLe && (
+                            <SelecteurStatut facture={f} disabled={enTraitement} onChanger={(nouveauStatut) => void handleChangerStatut(f.id, nouveauStatut)} />
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>
                         <Button variant="ghost" onClick={() => void handleVoir(f.id, f.numero)} loading={enTraitement} title="Voir">
@@ -535,11 +625,6 @@ export function FacturesScreen({
                         {f.aAchatExterieur && (
                           <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Document interne — Achat extérieur">
                             <FileText size={15} />
-                          </Button>
-                        )}
-                        {!f.annuleeLe && f.statutLivraison === "en_attente" && (
-                          <Button variant="ghost" onClick={() => void handleMarquerLivree(f.id)} title="Marquer comme livrée">
-                            <Truck size={15} color={defaultTokens.colors.success} />
                           </Button>
                         )}
                         {f.annuleeLe ? (

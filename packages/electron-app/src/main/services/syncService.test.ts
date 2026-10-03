@@ -285,4 +285,84 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
     expect(resultat.success).toBe(true); // La synchronisation elle-même reste réussie.
     expect(syncRepository.getDernierCurseur()).toBe(1); // Le curseur a bien avancé malgré l'échec métier isolé.
   });
+
+  describe("Intégration Site Phase 5, Partie 2 — routage des images", () => {
+    it("une entrée 'image_produit' est envoyée à /v1/app/images/sync, jamais dans le lot /v1/sync/push", async () => {
+      boiteEnvoiRepository.creer("image_produit", "image-1", { operation: "create", imageId: "image-1", modeleId: "modele-1", contentBase64: "abc", contentType: "image/png", updatedAt: "x" });
+
+      const appelsPush: unknown[] = [];
+      const appelsImage: unknown[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, options?: RequestInit) => {
+          if (url.includes("/app/images/sync")) {
+            appelsImage.push(JSON.parse(options!.body as string));
+            return new Response(JSON.stringify({ success: true, url: "http://api/v1/public/images?file=x.png" }), { status: 200 });
+          }
+          if (url.includes("/sync/push")) {
+            appelsPush.push(JSON.parse(options!.body as string));
+            return new Response(JSON.stringify({ results: [] }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+        })
+      );
+
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true, push: { envoyees: 1, confirmees: 1 } });
+      expect(appelsImage).toHaveLength(1);
+      expect(appelsPush).toHaveLength(0); // Aucun appel au lot générique — rien d'autre à envoyer.
+      expect(boiteEnvoiRepository.compterParStatut()["confirmed"]).toBe(1);
+    });
+
+    it("images ET opérations génériques dans la même synchronisation : chacune empruntant son propre chemin, toutes confirmées", async () => {
+      ajouterEntreeBoiteEnvoi(); // une "vente"
+      boiteEnvoiRepository.creer("modele", "modele-1", { operation: "create", modeleId: "modele-1", motif: "X", type: "Y", updatedAt: "x" });
+      boiteEnvoiRepository.creer("image_produit", "image-1", { operation: "delete", imageId: "image-1", modeleId: "modele-1", updatedAt: "x" });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.includes("/app/images/sync")) return new Response(JSON.stringify({ success: true }), { status: 200 });
+          if (url.includes("/sync/push")) {
+            return new Response(
+              JSON.stringify({ results: [{ entityId: "11111111-1111-4111-8111-111111111111", statut: "cree" }, { entityId: "modele-1", statut: "cree" }] }),
+              { status: 200 }
+            );
+          }
+          return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+        })
+      );
+
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true, push: { envoyees: 3, confirmees: 3 } });
+      expect(boiteEnvoiRepository.compterParStatut()["confirmed"]).toBe(3);
+    });
+
+    it("une image en échec n'empêche jamais les autres entrées (génériques ou images) d'être confirmées", async () => {
+      boiteEnvoiRepository.creer("image_produit", "image-echec", { operation: "create", imageId: "image-echec", modeleId: "modele-1", contentBase64: "abc", contentType: "image/png", updatedAt: "x" });
+      boiteEnvoiRepository.creer("image_produit", "image-ok", { operation: "create", imageId: "image-ok", modeleId: "modele-1", contentBase64: "abc", contentType: "image/png", updatedAt: "x" });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, options?: RequestInit) => {
+          if (url.includes("/app/images/sync")) {
+            const corps = JSON.parse(options!.body as string) as { imageId: string };
+            if (corps.imageId === "image-echec") return new Response("erreur serveur", { status: 500 });
+            return new Response(JSON.stringify({ success: true }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+        })
+      );
+
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true, push: { envoyees: 2, confirmees: 1 } });
+      expect(boiteEnvoiRepository.compterParStatut()).toMatchObject({ confirmed: 1, error: 1 });
+    });
+  });
 });

@@ -7,6 +7,8 @@ dist-main/
 .next/
 build/
 out/
+# Bloc 3 (remédiation pré-production) — artefacts de packaging Windows (electron-builder), jamais commités (110+ Mo).
+packages/electron-app/release/
 
 # Base de données locale et clés — ne doivent JAMAIS être commitées
 *.sqlite
@@ -14,11 +16,34 @@ out/
 *.sqlite-wal
 *.sqlite-shm
 *.key
+*.pfx
+# Le .cer (partie PUBLIQUE du certificat de signature, sans clé privée)
+# est volontairement exclu aussi : il est distribué directement au PC
+# Shop pour import dans le magasin de certificats, jamais via le dépôt.
+*.cer
+# Contient le mot de passe de la clé privée du .pfx en clair — seul
+# codesign.config.json.example (sans vrai mot de passe) est commité.
+# Bug réel identifié (2026-10-03) : la variante ".disabled" (fichier
+# renommé pour le désactiver temporairement) contenait le vrai mot de
+# passe en clair et n'était PAS couverte par le motif exact ci-dessous —
+# elle serait partie sur un remote distant au premier push. Jamais
+# committer un fichier "codesign.config.json*" quel que soit son suffixe.
+packages/electron-app/installer-resources/codesign.config.json
+packages/electron-app/installer-resources/codesign.config.json.disabled
+
+# Archive binaire non identifiée, laissée par erreur dans packages/site —
+# jamais committée tant qu'elle n'a pas été examinée.
+packages/site/site.rar
 
 # Variables d'environnement — uniquement les .env.example sont commités
 .env
 .env.local
 .env.*.local
+# Déploiement production (deploy/.env.production) — contient de vrais
+# secrets (mot de passe PostgreSQL, JWT_SIGNING_SECRET...), jamais
+# couvert par les motifs ci-dessus (bug réel identifié : "*.local"
+# n'aurait jamais exclu ce fichier précis).
+deploy/.env.production
 
 # Logs
 *.log

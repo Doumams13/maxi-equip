@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, defaultTokens } from "@maxi-equip/design-system";
-import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowLeftRight, ShoppingCart, Ban, Search, X } from "lucide-react";
+import { ArrowUp, ArrowDown, ChevronsUpDown, ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight, ShoppingCart, Ban, Search, X } from "lucide-react";
 import type { EvenementHistorique } from "../../../preload/index.js";
 import type { CibleOperation } from "../AppRoot.js";
 import { useSurbrillanceOperation } from "../highlight.js";
@@ -16,24 +16,27 @@ const TYPE_LABELS: Record<EvenementHistorique["type"], string> = {
   vente: "Vente effectuée",
   annulation: "Facture annulée",
   entree: "Entrée",
+  sortie: "Sortie",
   transfert: "Transfert",
 };
 const TYPE_COLORS: Record<EvenementHistorique["type"], string> = {
   vente: defaultTokens.colors.success,
   annulation: defaultTokens.colors.danger,
   entree: defaultTokens.colors.success,
+  sortie: defaultTokens.colors.danger,
   transfert: defaultTokens.colors.info,
 };
 const TYPE_ICONS: Record<EvenementHistorique["type"], typeof ArrowDownToLine> = {
   vente: ShoppingCart,
   annulation: Ban,
   entree: ArrowDownToLine,
+  sortie: ArrowUpFromLine,
   transfert: ArrowLeftRight,
 };
 
 function nomEmplacement(e: EvenementHistorique): string {
   if (e.type === "transfert") return `${e.emplacementSourceNom ?? "?"} → ${e.emplacementDestinationNom ?? "?"}`;
-  if (e.type === "entree") return e.emplacementNom ?? "—";
+  if (e.type === "entree" || e.type === "sortie") return e.emplacementNom ?? "—";
   return "—";
 }
 
@@ -141,7 +144,7 @@ export function HistoriqueScreen({
   const [chargementListe, setChargementListe] = useState(true);
   const [recherche, setRecherche] = useState("");
   const [rechercheDebattue, setRechercheDebattue] = useState("");
-  const [typeFiltre, setTypeFiltre] = useState<"tous" | "vente" | "annulation" | "entree" | "transfert">("tous");
+  const [typeFiltre, setTypeFiltre] = useState<"tous" | "vente" | "annulation" | "entree" | "sortie" | "transfert">("tous");
   const [periode, setPeriode] = useState<Periode>("tout");
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
@@ -250,7 +253,7 @@ export function HistoriqueScreen({
             style={inputStyle}
             value={typeFiltre}
             onChange={(e) => {
-              setTypeFiltre(e.target.value as "tous" | "vente" | "annulation" | "entree" | "transfert");
+              setTypeFiltre(e.target.value as "tous" | "vente" | "annulation" | "entree" | "sortie" | "transfert");
               setPage(1);
             }}
           >
@@ -258,6 +261,7 @@ export function HistoriqueScreen({
             <option value="vente">Ventes</option>
             <option value="annulation">Annulations</option>
             <option value="entree">Entrées</option>
+            <option value="sortie">Sorties</option>
             <option value="transfert">Transferts</option>
           </select>
           {(
@@ -401,11 +405,23 @@ export function HistoriqueScreen({
                             </div>
                           ) : (
                             <div>
-                              <span style={{ fontWeight: 600 }}>{e.produitMotif}</span>
+                              <span style={{ fontWeight: 600, textDecoration: e.annuleLe ? "line-through" : undefined }}>{e.produitMotif}</span>
                               <span style={{ color: defaultTokens.colors.textSoft }}>
                                 {" "}
                                 ({e.produitTaille}) · {nomEmplacement(e)} · {e.quantite} ct.
                               </span>
+                              {e.annuleLe && (
+                                // Correction "l'annulation des mouvements doit
+                                // être limitée dans le temps et figurer dans
+                                // l'historique" — une entrée/sortie manuelle
+                                // annulée (voir HistoriqueOperationsTable.tsx
+                                // dans l'écran Stock) reste visible ICI aussi,
+                                // avec son motif, même principe que "Motif :"
+                                // pour une facture annulée ci-dessus.
+                                <div style={{ fontSize: 11.5, color: defaultTokens.colors.danger, fontWeight: 700, marginTop: 2 }}>
+                                  Annulée{e.motifAnnulation ? ` — ${e.motifAnnulation}` : ""}
+                                </div>
+                              )}
                             </div>
                           )}
                           {(e.utilisateurId || e.utilisateurNom) && (

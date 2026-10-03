@@ -2,7 +2,9 @@ import { ipcMain } from "electron";
 import type { Role } from "@maxi-equip/shared-types";
 import type { UtilisateurService } from "../services/utilisateurService.js";
 import type { SessionManager } from "../auth/sessionManager.js";
+import { checkAdminGuard } from "../auth/checkAdminGuard.js";
 import type { UtilisateurPublic } from "../auth/utilisateurRepository.js";
+import { pousserMotDePasseRecuperation } from "../services/recuperationInstallationService.js";
 
 /**
  * Handlers IPC pour la gestion des utilisateurs.
@@ -18,17 +20,7 @@ export function registerUtilisateursIpcHandlers(
   service: UtilisateurService,
   sessionManager: SessionManager
 ): void {
-  /** Vérifie la session et que l'utilisateur courant est administrateur. */
-  function checkAdmin(): { ok: true } | { ok: false; message: string } {
-    const session = sessionManager.get();
-    if (!session) {
-      return { ok: false, message: "Non authentifié." };
-    }
-    if (session.role !== "administrateur") {
-      return { ok: false, message: "Action réservée aux administrateurs." };
-    }
-    return { ok: true };
-  }
+  const checkAdmin = () => checkAdminGuard(sessionManager);
 
   // --- Liste tous les utilisateurs ---
   ipcMain.handle(
@@ -93,7 +85,17 @@ export function registerUtilisateursIpcHandlers(
       const guard = checkAdmin();
       if (!guard.ok) return { success: false, message: guard.message };
       try {
+        // Récupéré AVANT la réinitialisation — le rôle ne change jamais
+        // par cette opération, mais autant lire l'état une seule fois.
+        const cible = service.listerUtilisateurs().find((u) => u.id === id);
         await service.reinitialiserMotDePasse(id, input);
+        // Best-effort (voir recuperationInstallationService.ts) — la
+        // récupération d'installation réutilise le mot de passe d'un
+        // compte Administrateur (décision utilisateur) : seul un
+        // changement sur UN TEL compte doit mettre à jour le hash serveur.
+        if (cible?.role === "administrateur") {
+          void pousserMotDePasseRecuperation(input.motDePasse);
+        }
         return { success: true };
       } catch (err) {
         return { success: false, message: err instanceof Error ? err.message : String(err) };

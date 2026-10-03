@@ -6,6 +6,7 @@ import type { BackupService, TypeSauvegarde } from "./backupService.js";
 import { FORMAT_SAUVEGARDE } from "./backupService.js";
 import { recupererCleAvecMotDePasse, type CleProtegeeParMotDePasse } from "./backupCrypto.js";
 import { SCHEMA_VERSION } from "../db/migrate.js";
+import { resolveNativeBindingPath } from "../db/nativeSqliteBinding.js";
 
 /**
  * Service de restauration — Phase 3.9. Indépendant de l'interface et
@@ -153,7 +154,7 @@ export class BackupRestoreService {
     }
 
     try {
-      const test = new DatabaseCtor(cheminBaseSauvegarde, { readonly: true });
+      const test = new DatabaseCtor(cheminBaseSauvegarde, { readonly: true, nativeBinding: resolveNativeBindingPath() });
       try {
         test.pragma(`key='${cleSauvegarde}'`);
         test.pragma("cipher_version");
@@ -183,20 +184,20 @@ export class BackupRestoreService {
     const dossierLive = dirname(this.cheminBaseLive);
     const cheminStaging = join(dossierLive, `.restore-staging-${randomUUID()}.sqlite`);
     try {
-      const copieTest = new DatabaseCtor(cheminBaseSauvegarde, { readonly: true });
+      const copieTest = new DatabaseCtor(cheminBaseSauvegarde, { readonly: true, nativeBinding: resolveNativeBindingPath() });
       copieTest.pragma(`key='${cleSauvegarde}'`);
       copieTest.pragma("cipher_version");
       copieTest.exec(`VACUUM INTO '${cheminStaging.replace(/'/g, "''")}'`);
       copieTest.close();
 
-      const staging = new DatabaseCtor(cheminStaging);
+      const staging = new DatabaseCtor(cheminStaging, { nativeBinding: resolveNativeBindingPath() });
       staging.pragma(`key='${cleSauvegarde}'`);
       staging.pragma("cipher_version");
       staging.pragma(`rekey='${this.cleInstallation}'`);
       staging.exec("VACUUM");
       staging.close();
 
-      const verifStaging = new DatabaseCtor(cheminStaging, { readonly: true });
+      const verifStaging = new DatabaseCtor(cheminStaging, { readonly: true, nativeBinding: resolveNativeBindingPath() });
       verifStaging.pragma(`key='${this.cleInstallation}'`);
       verifStaging.pragma("cipher_version");
       const integriteStaging = verifStaging.pragma("integrity_check", { simple: true }) as string;
@@ -217,7 +218,7 @@ export class BackupRestoreService {
       }
       renameSync(cheminStaging, this.cheminBaseLive);
 
-      const verifFinale = new DatabaseCtor(this.cheminBaseLive, { readonly: true });
+      const verifFinale = new DatabaseCtor(this.cheminBaseLive, { readonly: true, nativeBinding: resolveNativeBindingPath() });
       verifFinale.pragma(`key='${this.cleInstallation}'`);
       verifFinale.pragma("cipher_version");
       const ok = verifFinale.pragma("integrity_check", { simple: true }) as string;

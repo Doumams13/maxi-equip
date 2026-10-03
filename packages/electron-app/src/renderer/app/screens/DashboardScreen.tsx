@@ -145,6 +145,7 @@ const TYPE_LABELS_EVENEMENT: Record<EvenementHistorique["type"], string> = {
   vente: "Vente effectuée",
   annulation: "Facture annulée",
   entree: MOUVEMENT_LABELS.entree ?? "Entrée",
+  sortie: "Sortie",
   transfert: MOUVEMENT_LABELS.transfert ?? "Transfert",
 };
 

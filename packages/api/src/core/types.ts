@@ -40,6 +40,16 @@ export interface ApiRequest {
 export interface ApiResponse {
   status: number;
   body: unknown;
+  /**
+   * Réponse binaire — correction "Intégration Site Phase 5" (images
+   * catalogue). Quand renseigné, `body` est ignoré par l'adaptateur
+   * d'hébergement (`local-dev-server.ts`) : les octets de `data` sont
+   * envoyés tels quels avec le `Content-Type` indiqué, jamais passés à
+   * `JSON.stringify` (qui corromprait des données binaires). Absent pour
+   * toutes les routes JSON existantes — champ additif, sans impact sur le
+   * contrat déjà utilisé par les routes en place.
+   */
+  raw?: { contentType: string; data: Buffer };
 }
 
 export type Handler = (req: ApiRequest) => Promise<ApiResponse> | ApiResponse;

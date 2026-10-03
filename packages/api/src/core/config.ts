@@ -46,3 +46,57 @@ export function getJwtSecret(): string {
   // Développement et test uniquement.
   return SECRET_DEV_PAR_DEFAUT;
 }
+
+/**
+ * URL publique de base de l'API — correction "Intégration Site Phase 5"
+ * (images catalogue) : utilisée pour construire les URLs absolues
+ * renvoyées au site public (`GET /v1/public/images?file=...`), qui
+ * tourne sur une autre origine et a donc besoin d'une URL complète,
+ * jamais un chemin relatif au serveur API. Valeur de secours stable en
+ * développement (même principe que `getJwtSecret`) — DOIT être définie
+ * explicitement en production (voir .env.example).
+ */
+export function getPublicApiBaseUrl(): string {
+  const environnement = process.env["MAXI_EQUIP_ENV"] ?? "development";
+  const configuree = process.env["PUBLIC_API_BASE_URL"];
+  if (configuree && configuree.trim().length > 0) {
+    return configuree.replace(/\/$/, "");
+  }
+  if (environnement === "production") {
+    throw new ConfigurationSecuriteError(
+      "PUBLIC_API_BASE_URL doit être défini explicitement en production — voir .env.example."
+    );
+  }
+  return `http://localhost:${process.env["PORT"] ?? 8787}`;
+}
+
+export interface B2RecuperationConfig {
+  bucket: string;
+  endpoint: string;
+  keyId: string;
+  applicationKey: string;
+}
+
+/**
+ * Identifiants B2 EN LECTURE SEULE, dédiés au serveur, pour générer des
+ * URLs de téléchargement présignées vers la dernière sauvegarde SQLite du
+ * PC Shop (préfixe "sqlite/") lors d'une restauration d'installation.
+ * DISTINCTS des identifiants d'ÉCRITURE que l'app Electron utilise pour
+ * uploader ses sauvegardes (voir packages/electron-app CLOUD_BACKUP_*) —
+ * jamais la même clé des deux côtés (le PC Shop ne doit jamais pouvoir
+ * lire/lister les sauvegardes, seulement en déposer).
+ *
+ * Fonctionnalité optionnelle : retourne `null` si non configuré, dans
+ * n'importe quel environnement (contrairement à JWT_SIGNING_SECRET), pour
+ * ne jamais empêcher le serveur de démarrer tant que ces clés B2 ne sont
+ * pas encore provisionnées — la route de récupération répond simplement
+ * "non disponible" dans ce cas, plutôt que de faire planter tout le serveur.
+ */
+export function getB2RecuperationConfig(): B2RecuperationConfig | null {
+  const bucket = process.env["RECUPERATION_B2_BUCKET"];
+  const endpoint = process.env["RECUPERATION_B2_ENDPOINT"];
+  const keyId = process.env["RECUPERATION_B2_KEY_ID"];
+  const applicationKey = process.env["RECUPERATION_B2_APPLICATION_KEY"];
+  if (!bucket || !endpoint || !keyId || !applicationKey) return null;
+  return { bucket, endpoint, keyId, applicationKey };
+}

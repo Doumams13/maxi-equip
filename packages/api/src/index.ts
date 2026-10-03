@@ -4,6 +4,14 @@ import { healthRoute as appHealthRoute } from "./routes/v1/app/health.js";
 import { pushRoute } from "./routes/v1/app/sync/push.js";
 import { pullRoute } from "./routes/v1/app/sync/pull.js";
 import { publicSubmitRequestRoute } from "./routes/v1/public/requests.js";
+import { imagesSyncRoute } from "./routes/v1/app/images/sync.js";
+import { publicImageRoute } from "./routes/v1/public/images.js";
+import { publicCatalogModelsRoute } from "./routes/v1/public/catalog.js";
+import { publicPromotionsRoute } from "./routes/v1/public/promotions.js";
+import { publicLocationsRoute } from "./routes/v1/public/locations.js";
+import { publicSettingsRoute } from "./routes/v1/public/settings.js";
+import { definirRecuperationRoute } from "./routes/v1/app/installation/definir-recuperation.js";
+import { verifierRecuperationRoute } from "./routes/v1/public/installation/verifier-recuperation.js";
 
 export function createRouter(): Router {
   const router = new Router();
@@ -12,6 +20,14 @@ export function createRouter(): Router {
   router.register(pushRoute);
   router.register(pullRoute);
   router.register(publicSubmitRequestRoute);
+  router.register(imagesSyncRoute);
+  router.register(publicImageRoute);
+  router.register(publicCatalogModelsRoute);
+  router.register(publicPromotionsRoute);
+  router.register(publicLocationsRoute);
+  router.register(publicSettingsRoute);
+  router.register(definirRecuperationRoute);
+  router.register(verifierRecuperationRoute);
   return router;
 }
 

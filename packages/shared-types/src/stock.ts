@@ -52,4 +52,18 @@ export interface Mouvement extends MetierEntity {
   utilisateurId: UUID | null;
 
   note: string | null;
+
+  /**
+   * Annulation d'un mouvement manuel (entrée/sortie saisie par erreur) —
+   * correction "corriger une erreur de saisie de stock sans fausser le
+   * tableau de bord". Jamais renseigné pour une "sortie" liée à une vente
+   * (voir factureId) : celle-ci se corrige exclusivement via l'annulation
+   * de la facture elle-même (VenteService.annulerVente), jamais ici — un
+   * seul mécanisme d'annulation par type d'origine, jamais deux qui se
+   * chevauchent. Le mouvement reste visible dans l'historique avec son
+   * motif, jamais supprimé (même principe que Facture.annuleeLe).
+   */
+  annuleLe: ISODateTime | null;
+  annulePar: UUID | null;
+  motifAnnulation: string | null;
 }

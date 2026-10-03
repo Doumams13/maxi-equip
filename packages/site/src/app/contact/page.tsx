@@ -1,19 +1,26 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { locationRepository } from "@/services/location";
-import { buildWhatsAppUrl, siteConfig } from "@/config/site";
+import { getEffectiveContactInfo } from "@/services/settings";
+import { buildWhatsAppUrl } from "@/config/site";
 import { LinkButton } from "@/components/ui/primitives";
 import { ErrorState } from "@/components/ui/states";
 import { ContactForm } from "./ContactForm";
 
+const TITRE_CONTACT = "Contact";
+const DESCRIPTION_CONTACT = "Contactez MAXI EQUIP à Libreville : showroom, WhatsApp, téléphone et formulaire de contact.";
+
 export const metadata: Metadata = {
-  title: "Contact",
-  description: "Contactez MAXI EQUIP à Libreville : showroom, WhatsApp, téléphone et formulaire de contact.",
+  title: TITRE_CONTACT,
+  description: DESCRIPTION_CONTACT,
+  alternates: { canonical: "/contact" },
+  openGraph: { title: TITRE_CONTACT, description: DESCRIPTION_CONTACT, images: [{ url: "/images/contact/showroom.png" }] },
+  twitter: { title: TITRE_CONTACT, description: DESCRIPTION_CONTACT, images: ["/images/contact/showroom.png"] },
 };
 
 export default async function ContactPage() {
   try {
-    const locations = await locationRepository.listLocations();
+    const [locations, contact] = await Promise.all([locationRepository.listLocations(), getEffectiveContactInfo()]);
 
     return (
       <div className="mx-auto max-w-[1320px] px-[18px] sm:px-7">
@@ -71,7 +78,7 @@ export default async function ContactPage() {
 
               {/* WhatsApp CTA */}
               <a
-                href={buildWhatsAppUrl(`Bonjour ${siteConfig.companyName}, je souhaite être conseillé.`)}
+                href={buildWhatsAppUrl(`Bonjour ${contact.nom}, je souhaite être conseillé.`, contact.whatsapp)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-[14px] rounded bg-clay p-[18px_20px] text-white"
@@ -100,7 +107,7 @@ export default async function ContactPage() {
                   </span>
                   <span>
                     <div className="text-[12px] text-ink-mute">Téléphone</div>
-                    <div className="text-[15px] font-semibold">{siteConfig.contact.phoneDisplay}</div>
+                    <div className="text-[15px] font-semibold">{contact.telephone}</div>
                   </span>
                 </li>
                 <li className="flex items-center gap-[14px] border-b border-dashed border-ink/[0.14] py-[14px]">
@@ -112,7 +119,7 @@ export default async function ContactPage() {
                   </span>
                   <span>
                     <div className="text-[12px] text-ink-mute">Email</div>
-                    <div className="text-[15px] font-semibold">{siteConfig.contact.email}</div>
+                    <div className="text-[15px] font-semibold">{contact.email}</div>
                   </span>
                 </li>
                 <li className="flex items-center gap-[14px] py-[14px]">
@@ -124,7 +131,11 @@ export default async function ContactPage() {
                   </span>
                   <span>
                     <div className="text-[12px] text-ink-mute">Showroom</div>
-                    <div className="text-[15px] font-semibold">{siteConfig.city}</div>
+                    {/* BUG CORRIGÉ ("adresse configurée dans l'app invisible
+                        sur le site") : même correction que Footer.tsx —
+                        affichée UNIQUEMENT si réellement configurée. */}
+                    {contact.adresse && <div className="text-[15px] font-semibold">{contact.adresse}</div>}
+                    <div className={contact.adresse ? "text-[13px] text-ink-mute" : "text-[15px] font-semibold"}>{contact.quartier}</div>
                   </span>
                 </li>
               </ul>
@@ -179,7 +190,7 @@ export default async function ContactPage() {
               vous répond personnellement.
             </p>
           </div>
-          <ContactForm />
+          <ContactForm whatsappNumero={contact.whatsapp} />
         </section>
 
         {/* ── FINAL CTA ────────────────────────────────────────────────── */}

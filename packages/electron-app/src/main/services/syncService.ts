@@ -85,11 +85,46 @@ export class SyncService {
   }
 
   private async effectuerPush(apiUrl: string, jwt: string): Promise<ResultatSynchronisation> {
-    const aEnvoyer = this.boiteEnvoiRepository.listerPretesPourEnvoi();
-    if (aEnvoyer.length === 0) {
+    const toutesLesEntrees = this.boiteEnvoiRepository.listerPretesPourEnvoi();
+    if (toutesLesEntrees.length === 0) {
       return { success: true, push: { envoyees: 0, confirmees: 0 } };
     }
 
+    // Correction "Intégration Site Phase 5, Partie 2 (pipeline
+    // catalogue)" — les images suivent un chemin SÉPARÉ
+    // (POST /v1/app/images/sync, une requête par image : un fichier réel
+    // dépasse largement la limite générique appliquée au lot JSON
+    // /v1/sync/push, voir validationSync.ts). Tous les autres types
+    // (vente/annulation/entree/sortie/transfert/parametres_entreprise/
+    // promotion/modele/produit) continuent d'emprunter EXACTEMENT le
+    // même lot groupé qu'avant — comportement inchangé.
+    const aEnvoyer = toutesLesEntrees.filter((e) => e.entityType !== "image_produit");
+    const imagesAEnvoyer = toutesLesEntrees.filter((e) => e.entityType === "image_produit");
+
+    let confirmees = 0;
+    let envoyees = 0;
+
+    if (aEnvoyer.length > 0) {
+      const resultatLot = await this.pousserLotGenerique(apiUrl, jwt, aEnvoyer);
+      if (!resultatLot.success) return resultatLot;
+      confirmees += resultatLot.confirmees;
+      envoyees += aEnvoyer.length;
+    }
+
+    if (imagesAEnvoyer.length > 0) {
+      const resultatImages = await this.pousserImages(apiUrl, jwt, imagesAEnvoyer);
+      confirmees += resultatImages.confirmees;
+      envoyees += imagesAEnvoyer.length;
+    }
+
+    return { success: true, push: { envoyees, confirmees } };
+  }
+
+  private async pousserLotGenerique(
+    apiUrl: string,
+    jwt: string,
+    aEnvoyer: ReturnType<BoiteEnvoiRepository["listerPretesPourEnvoi"]>
+  ): Promise<ResultatSynchronisation & { confirmees: number }> {
     let reponse: Response;
     try {
       reponse = await fetch(`${apiUrl}/v1/sync/push`, {
@@ -101,18 +136,18 @@ export class SyncService {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
-      return { success: false, etape: "push", message: `Impossible de contacter le serveur de synchronisation : ${message}` };
+      return { success: false, etape: "push", message: `Impossible de contacter le serveur de synchronisation : ${message}`, confirmees: 0 };
     }
 
     if (reponse.status === 401 || reponse.status === 403) {
-      return { success: false, etape: "push", message: "Authentification refusée par le serveur (jeton invalide ou expiré)." };
+      return { success: false, etape: "push", message: "Authentification refusée par le serveur (jeton invalide ou expiré).", confirmees: 0 };
     }
     if (!reponse.ok) {
       const texte = await reponse.text().catch(() => "");
       for (const entree of aEnvoyer) {
         this.boiteEnvoiRepository.enregistrerErreur(entree.id, `Réponse serveur ${reponse.status} : ${texte.slice(0, 500)}`);
       }
-      return { success: false, etape: "push", message: `Le serveur a refusé la synchronisation (HTTP ${reponse.status}).` };
+      return { success: false, etape: "push", message: `Le serveur a refusé la synchronisation (HTTP ${reponse.status}).`, confirmees: 0 };
     }
 
     let corps: ReponsePush;
@@ -122,7 +157,7 @@ export class SyncService {
       for (const entree of aEnvoyer) {
         this.boiteEnvoiRepository.enregistrerErreur(entree.id, "Réponse serveur illisible (JSON invalide).");
       }
-      return { success: false, etape: "push", message: "Réponse du serveur invalide." };
+      return { success: false, etape: "push", message: "Réponse du serveur invalide.", confirmees: 0 };
     }
 
     let confirmees = 0;
@@ -137,7 +172,42 @@ export class SyncService {
       }
     }
 
-    return { success: true, push: { envoyees: aEnvoyer.length, confirmees } };
+    return { success: true, confirmees };
+  }
+
+  /**
+   * Envoie chaque image individuellement — jamais en lot (voir
+   * commentaire d'`effectuerPush`). Une image en échec (réseau, refus
+   * serveur) ne bloque JAMAIS les autres : chaque entrée est indépendante,
+   * comme le reste de la boîte d'envoi (Partie 17 : ne jamais casser
+   * PUSH/PULL/idempotence pour une seule entrée fautive).
+   */
+  private async pousserImages(
+    apiUrl: string,
+    jwt: string,
+    images: ReturnType<BoiteEnvoiRepository["listerPretesPourEnvoi"]>
+  ): Promise<{ confirmees: number }> {
+    let confirmees = 0;
+    for (const entree of images) {
+      try {
+        const reponse = await fetch(`${apiUrl}/v1/app/images/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+          body: entree.payloadJson,
+        });
+        if (!reponse.ok) {
+          const texte = await reponse.text().catch(() => "");
+          this.boiteEnvoiRepository.enregistrerErreur(entree.id, `Réponse serveur ${reponse.status} : ${texte.slice(0, 500)}`);
+          continue;
+        }
+        this.boiteEnvoiRepository.mettreAJourStatut(entree.id, "confirmed");
+        confirmees++;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
+        this.boiteEnvoiRepository.enregistrerErreur(entree.id, `Impossible de contacter le serveur pour cette image : ${message}`);
+      }
+    }
+    return { confirmees };
   }
 
   private async effectuerPull(apiUrl: string, jwt: string): Promise<ResultatSynchronisation> {
@@ -198,8 +268,8 @@ export class SyncService {
         curseur = corps.cursor;
       }
 
-      if (!corps.hasMore) break;
-    } while (true);
+      if (!corps.hasMore) break; // eslint-disable-line no-constant-condition
+    } while (true); // eslint-disable-line no-constant-condition
 
     return { success: true, pull: { recues: totalRecues } };
   }

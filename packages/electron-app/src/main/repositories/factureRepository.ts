@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import { randomUUID } from "node:crypto";
-import type { Facture, LigneFacture, LigneReleveInterne } from "@maxi-equip/shared-types";
+import type { Facture, IdentiteEntrepriseSnapshot, LigneFacture, LigneReleveInterne } from "@maxi-equip/shared-types";
 
 interface FactureRow {
   id: string;
@@ -14,12 +14,16 @@ interface FactureRow {
   vendeur_nom_manuel: string | null;
   mode_reglement: string | null;
   total: number;
+  remise: number;
+  statut_paiement: "reservation" | "payee";
+  montant_paye: number;
   statut_livraison: "en_attente" | "livree";
   livree_le: string | null;
   annulee_le: string | null;
   annulee_par: string | null;
   motif_annulation: string | null;
   corrigee_par_facture_id: string | null;
+  identite_snapshot_json: string | null;
 }
 
 function rowToFacture(row: FactureRow, lignes: LigneFacture[]): Facture {
@@ -36,15 +40,29 @@ function rowToFacture(row: FactureRow, lignes: LigneFacture[]): Facture {
     modeReglement: row.mode_reglement,
     lignes,
     total: row.total,
+    remise: row.remise,
+    statutPaiement: row.statut_paiement,
+    montantPaye: row.montant_paye,
     statutLivraison: row.statut_livraison,
     livreeLe: row.livree_le,
     annuleeLe: row.annulee_le,
     annuleePar: row.annulee_par,
     motifAnnulation: row.motif_annulation,
     corrigeeParFactureId: row.corrigee_par_facture_id,
+    // Correction Phase Finale, Bloc 6 — jamais reconstruit : `null` si la
+    // facture est antérieure à cette évolution ou si le JSON est illisible.
+    identiteSnapshot: row.identite_snapshot_json ? (safeParseIdentiteSnapshot(row.identite_snapshot_json)) : null,
     createdAt: "",
     updatedAt: "",
   };
+}
+
+function safeParseIdentiteSnapshot(json: string): IdentiteEntrepriseSnapshot | null {
+  try {
+    return JSON.parse(json) as IdentiteEntrepriseSnapshot;
+  } catch {
+    return null; // JSON corrompu — jamais une exception qui bloquerait la lecture de toute la facture.
+  }
 }
 
 export class FactureRepository {
@@ -161,7 +179,7 @@ export class FactureRepository {
   private getLignes(factureId: string): LigneFacture[] {
     const rows = this.db
       .prepare(
-        `SELECT produit_id as produitId, motif, taille, quantite, prix_unitaire as prixUnitaire,
+        `SELECT produit_id as produitId, motif, reference, taille, quantite, prix_unitaire as prixUnitaire,
                 prix_unitaire_normal as prixUnitaireNormal, promotion_id as promotionId,
                 promotion_libelle as promotionLibelle, promotion_type as promotionType,
                 promotion_valeur as promotionValeur
@@ -188,14 +206,22 @@ export class FactureRepository {
     modeReglement: string | null;
     lignes: LigneFacture[];
     total: number;
+    /** Remise commerciale en FCFA — voir shared-types/facture.ts. Jamais optionnel : l'appelant doit toujours trancher explicitement (0 si aucune). */
+    remise: number;
+    /** Statut de paiement — voir shared-types/facture.ts. Jamais optionnel, même valeur de principe que remise. */
+    statutPaiement: "reservation" | "payee";
+    /** Montant réellement encaissé — voir shared-types/facture.ts (déjà validé par domain.validerMontantPaye avant l'appel). */
+    montantPaye: number;
+    /** Correction Phase Finale, Bloc 6 — instantané de l'identité entreprise au moment de la vente, jamais relu en direct plus tard. */
+    identiteSnapshot: IdentiteEntrepriseSnapshot | null;
   }): string {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
       .prepare(
         `INSERT INTO factures
-         (id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse, vendeur_utilisateur_id, vendeur_nom_manuel, mode_reglement, total, statut_livraison, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?)`
+         (id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse, vendeur_utilisateur_id, vendeur_nom_manuel, mode_reglement, total, remise, statut_paiement, montant_paye, statut_livraison, identite_snapshot_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?, ?)`
       )
       .run(
         id,
@@ -209,19 +235,23 @@ export class FactureRepository {
         input.vendeurNomManuel,
         input.modeReglement,
         input.total,
+        input.remise,
+        input.statutPaiement,
+        input.montantPaye,
+        input.identiteSnapshot ? JSON.stringify(input.identiteSnapshot) : null,
         now,
         now
       );
 
     const insertLigne = this.db.prepare(
       `INSERT INTO lignes_facture
-         (id, facture_id, produit_id, motif, taille, quantite, prix_unitaire,
+         (id, facture_id, produit_id, motif, reference, taille, quantite, prix_unitaire,
           prix_unitaire_normal, promotion_id, promotion_libelle, promotion_type, promotion_valeur)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const ligne of input.lignes) {
       insertLigne.run(
-        randomUUID(), id, ligne.produitId, ligne.motif, ligne.taille, ligne.quantite, ligne.prixUnitaire,
+        randomUUID(), id, ligne.produitId, ligne.motif, ligne.reference, ligne.taille, ligne.quantite, ligne.prixUnitaire,
         ligne.prixUnitaireNormal ?? null, ligne.promotionId ?? null, ligne.promotionLibelle ?? null,
         ligne.promotionType ?? null, ligne.promotionValeur ?? null
       );
@@ -230,10 +260,22 @@ export class FactureRepository {
     return id;
   }
 
-  /** Marque une facture comme livrée (§14 de la correction) — jamais l'inverse depuis cet écran, un statut de livraison ne revient pas en arrière par erreur. */
-  marquerLivree(id: string): void {
+  /**
+   * Change le statut (paiement + livraison) d'une facture — correction
+   * "Réservation / Acompte". Remplace l'ancienne `marquerLivree()`, trop
+   * étroite pour couvrir les 3 statuts affichés ("Réservation" / "Payée —
+   * non livrée" / "Payée — livrée") : désormais un seul point d'écriture,
+   * librement réversible dans les deux sens pour les statuts de livraison
+   * (aucun verrou "terminus" — décision explicite), sauf retour en arrière
+   * vers "Réservation" qui n'a pas de sens une fois le solde encaissé
+   * (refusé en amont, dans VenteService, jamais ici).
+   */
+  changerStatut(id: string, statut: { statutPaiement: "reservation" | "payee"; montantPaye: number; statutLivraison: "en_attente" | "livree" }): void {
     const now = new Date().toISOString();
-    this.db.prepare("UPDATE factures SET statut_livraison = 'livree', livree_le = ?, updated_at = ? WHERE id = ?").run(now, now, id);
+    const livreeLe = statut.statutLivraison === "livree" ? now : null;
+    this.db
+      .prepare("UPDATE factures SET statut_paiement = ?, montant_paye = ?, statut_livraison = ?, livree_le = ?, updated_at = ? WHERE id = ?")
+      .run(statut.statutPaiement, statut.montantPaye, statut.statutLivraison, livreeLe, now, id);
   }
 
   /**
@@ -479,6 +521,12 @@ export class FactureRepository {
     clientTelephone: string | null;
     clientAdresse: string | null;
     modeReglement: string | null;
+    /** Remise de la facture d'origine — conservée telle quelle pour la correction (voir VentesScreen, "la remise doit être conservée et recalculée correctement"). */
+    remise: number;
+    /** Statut de paiement de la facture d'origine — conservé pour la correction, même principe que remise. */
+    statutPaiement: "reservation" | "payee";
+    /** Montant payé de la facture d'origine — conservé pour la correction, même principe que remise. */
+    montantPaye: number;
     lignes: {
       produitId: string | null;
       motif: string;
@@ -504,6 +552,9 @@ export class FactureRepository {
       clientTelephone: facture.clientTelephone,
       clientAdresse: facture.clientAdresse,
       modeReglement: facture.modeReglement,
+      remise: facture.remise,
+      statutPaiement: facture.statutPaiement,
+      montantPaye: facture.montantPaye,
       lignes: facture.lignes.map((l) => {
         const doc = documentInterne.find((d) => d.motif === l.motif && d.taille === l.taille);
         const allocations = mouvements.filter((m) => m.produitId === l.produitId).map((m) => ({ emplacementId: m.emplacementId, quantite: m.quantite }));

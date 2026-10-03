@@ -1,0 +1,91 @@
+# Déploiement production MAXI EQUIP — architecture validée (voir contexte
+# infrastructure production) :
+#   INTERNET → maxi-equip.com → NGINX (natif sur le VPS, hors Docker,
+#   pour une gestion HTTPS/certbot standard) → { site, api } → postgres.
+#
+# `api` et `site` ne publient leur port QUE sur 127.0.0.1 — jamais
+# exposés directement sur Internet, uniquement atteignables via Nginx en
+# frontal, qui gère TLS. `postgres` n'a AUCUN port publié (accessible
+# uniquement depuis le réseau Docker interne) — jamais exposé
+# publiquement, conformément à l'exigence explicite.
+#
+# VPS = KVM2 (2 vCPU / 8 Go RAM) — assez de marge pour builder les images
+# directement dessus, pas besoin d'un pipeline CI séparé (GHCR envisagé
+# un temps pour un KVM1, abandonné : trop de protocole pour le gain).
+#
+# Utilisation (depuis la racine du dépôt, sur le VPS) :
+#   cp deploy/.env.production.example deploy/.env.production
+#   # ... remplir deploy/.env.production avec les vraies valeurs ...
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env.production up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - maxiequip_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Aucun "ports:" ici — jamais exposé hors du réseau Docker interne.
+
+  api:
+    build:
+      context: ..
+      dockerfile: packages/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8787
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SIGNING_SECRET: ${JWT_SIGNING_SECRET}
+      MAXI_EQUIP_ENV: production
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      # URL PUBLIQUE de l'API elle-même (jamais l'adresse interne Docker) —
+      # utilisée pour construire les URLs d'images renvoyées aux clients
+      # (routes/v1/app/images/sync.ts). Exigée en production (échec au
+      # démarrage si absente) — jamais une valeur de secours implicite.
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL}
+      # Images catalogue reçues depuis l'application (routes/v1/app/images/sync.ts)
+      # — stockées sur DISQUE LOCAL par le code existant (jamais dans
+      # PostgreSQL, jamais sur B2). Chemin fixe + volume nommé ci-dessous :
+      # sans lui, chaque redéploiement (`--build`) effacerait TOUTES les
+      # images déjà synchronisées (le conteneur repart d'un système de
+      # fichiers neuf à chaque fois).
+      IMAGES_STORAGE_DIR: /data/images
+      # Récupération d'installation (voir core/b2Presigner.ts) — clé B2
+      # DISTINCTE de celle du PC Shop, restreinte au préfixe "backups/".
+      RECUPERATION_B2_BUCKET: ${RECUPERATION_B2_BUCKET}
+      RECUPERATION_B2_ENDPOINT: ${RECUPERATION_B2_ENDPOINT}
+      RECUPERATION_B2_KEY_ID: ${RECUPERATION_B2_KEY_ID}
+      RECUPERATION_B2_APPLICATION_KEY: ${RECUPERATION_B2_APPLICATION_KEY}
+    volumes:
+      - maxiequip_images_data:/data/images
+    ports:
+      - "127.0.0.1:8787:8787"
+
+  site:
+    build:
+      context: ..
+      dockerfile: packages/site/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: 3000
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  maxiequip_postgres_data:
+  maxiequip_images_data:

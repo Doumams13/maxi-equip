@@ -3,6 +3,7 @@ import { createRouter } from "./index.js";
 import type { ApiRequest } from "./core/types.js";
 import { signerJwt } from "./core/jwt.js";
 import { initialiserStockageServeur, fermerStockageServeur, enregistrerOperations, listerOperationsDepuis } from "./core/storeServeur.js";
+import { getIdentiteActuelle } from "./core/identiteStore.js";
 
 function req(overrides: Partial<ApiRequest>): ApiRequest {
   return { method: "GET", path: "/v1/public/health", headers: {}, query: {}, body: undefined, ...overrides };
@@ -72,12 +73,33 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     expect((pullRes.body as { operations: unknown[] }).operations).toHaveLength(0);
   });
 
+  it("TEST 3b — PUSH avec entityType 'sortie' : accepté (200) et stocké correctement", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(
+      req({
+        method: "POST",
+        path: "/v1/sync/push",
+        headers: { authorization: `Bearer ${tokenValide()}` },
+        body: { operations: [{ entityType: "sortie", entityId: UUID_1, payload: { mouvementId: UUID_1, produitId: UUID_2, emplacementId: UUID_2, quantite: 5 } }] },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ results: [{ entityId: UUID_1, statut: "cree" }] });
+
+    // La sortie est retrouvable sur le PULL avec le bon entityType.
+    const pullRes = await router.dispatch(req({ path: "/v1/sync/pull", headers: { authorization: `Bearer ${tokenValide()}` } }));
+    const ops = (pullRes.body as { operations: { entityType: string; entityId: string }[] }).operations;
+    expect(ops).toHaveLength(1);
+    expect(ops[0]!.entityType).toBe("sortie");
+    expect(ops[0]!.entityId).toBe(UUID_1);
+  });
+
   it("TEST 4 — données invalides : 400 dans chaque cas, aucun enregistrement incohérent", async () => {
     const router = createRouter();
     const auth = { authorization: `Bearer ${tokenValide()}` };
 
     const casInvalides = [
-      { operations: [{ entityType: "produit", entityId: UUID_1, payload: {} }] }, // type non supporté
+      { operations: [{ entityType: "utilisateur", entityId: UUID_1, payload: {} }] }, // type non supporté
       { operations: [{ entityType: "vente", entityId: "pas-un-uuid", payload: {} }] }, // UUID invalide
       { operations: [{ entityType: "vente", entityId: UUID_1 }] }, // payload absent
       { operations: [] }, // tableau vide
@@ -109,7 +131,7 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     expect((pullRes.body as { operations: unknown[] }).operations).toHaveLength(1); // Jamais deux lignes.
   });
 
-  it("TEST 6 — transaction : un lot dont une opération échoue est intégralement annulé (rollback)", () => {
+  it("TEST 6 — transaction : un lot dont une opération échoue est intégralement annulé (rollback)", async () => {
     // Test direct de la couche de stockage (contournant la validation
     // HTTP, qui rejetterait déjà ce cas en amont) — pour vérifier
     // spécifiquement la garantie transactionnelle de bas niveau :
@@ -118,16 +140,16 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     const objetCirculaire: Record<string, unknown> = {};
     objetCirculaire["soi_meme"] = objetCirculaire;
 
-    expect(() =>
+    await expect(
       enregistrerOperations([
         { entityType: "entree", entityId: UUID_1, payload: { quantite: 10 } },
         { entityType: "vente", entityId: UUID_2, payload: objetCirculaire },
       ])
-    ).toThrow();
+    ).rejects.toThrow();
 
     // Le rollback garantit qu'AUCUNE des deux opérations n'a été
     // enregistrée — même celle qui, individuellement, était valide.
-    const restant = enregistrerOperations([]);
+    const restant = await enregistrerOperations([]);
     expect(restant).toHaveLength(0);
   });
 
@@ -175,44 +197,44 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     expect((res.body as { operations: unknown[] }).operations).toHaveLength(1);
   });
 
-  it("TEST 10 — listerOperationsDepuis : hasMore = false quand exactement la limite", () => {
+  it("TEST 10 — listerOperationsDepuis : hasMore = false quand exactement la limite", async () => {
     const uuids: string[] = [];
     for (let i = 0; i < 5; i++) {
       uuids.push(`${i.toString().padStart(8, "0")}-0000-4000-8000-000000000000`);
     }
-    enregistrerOperations(uuids.map((id) => ({ entityType: "entree" as const, entityId: id, payload: {} })));
-    const result = listerOperationsDepuis(0, 5);
+    await enregistrerOperations(uuids.map((id) => ({ entityType: "entree" as const, entityId: id, payload: {} })));
+    const result = await listerOperationsDepuis(0, 5);
     expect(result.operations).toHaveLength(5);
     expect(result.hasMore).toBe(false);
   });
 
-  it("TEST 11 — listerOperationsDepuis : hasMore = true quand plus que la limite", () => {
+  it("TEST 11 — listerOperationsDepuis : hasMore = true quand plus que la limite", async () => {
     const uuids: string[] = [];
     for (let i = 0; i < 7; i++) {
       uuids.push(`${i.toString().padStart(8, "0")}-0000-4000-8000-000000000001`);
     }
-    enregistrerOperations(uuids.map((id) => ({ entityType: "entree" as const, entityId: id, payload: {} })));
-    const page1 = listerOperationsDepuis(0, 5);
+    await enregistrerOperations(uuids.map((id) => ({ entityType: "entree" as const, entityId: id, payload: {} })));
+    const page1 = await listerOperationsDepuis(0, 5);
     expect(page1.operations).toHaveLength(5);
     expect(page1.hasMore).toBe(true);
 
-    const page2 = listerOperationsDepuis(page1.operations[4]!.curseur, 5);
+    const page2 = await listerOperationsDepuis(page1.operations[4]!.curseur, 5);
     expect(page2.operations).toHaveLength(2);
     expect(page2.hasMore).toBe(false);
   });
 
-  it("TEST 12 — pagination : aucune opération dupliquée, toutes récupérées", () => {
+  it("TEST 12 — pagination : aucune opération dupliquée, toutes récupérées", async () => {
     const uuids: string[] = [];
     for (let i = 0; i < 9; i++) {
       uuids.push(`${i.toString().padStart(8, "0")}-0000-4000-8000-000000000002`);
     }
-    enregistrerOperations(uuids.map((id) => ({ entityType: "vente" as const, entityId: id, payload: {} })));
+    await enregistrerOperations(uuids.map((id) => ({ entityType: "vente" as const, entityId: id, payload: {} })));
 
     const toutes: string[] = [];
     let curseur = 0;
     let hasMore = true;
     while (hasMore) {
-      const { operations, hasMore: more } = listerOperationsDepuis(curseur, 4);
+      const { operations, hasMore: more } = await listerOperationsDepuis(curseur, 4);
       toutes.push(...operations.map((o) => o.entityId));
       if (operations.length > 0) curseur = operations[operations.length - 1]!.curseur;
       hasMore = more;
@@ -223,19 +245,19 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     expect(toutes).toEqual([...new Set(toutes)]); // Ordre stable.
   });
 
-  it("TEST 13 — curseur avancé correctement après chaque page", () => {
+  it("TEST 13 — curseur avancé correctement après chaque page", async () => {
     const uuids: string[] = [];
     for (let i = 0; i < 6; i++) {
       uuids.push(`${i.toString().padStart(8, "0")}-0000-4000-8000-000000000003`);
     }
-    enregistrerOperations(uuids.map((id) => ({ entityType: "transfert" as const, entityId: id, payload: {} })));
+    await enregistrerOperations(uuids.map((id) => ({ entityType: "transfert" as const, entityId: id, payload: {} })));
 
-    const page1 = listerOperationsDepuis(0, 3);
+    const page1 = await listerOperationsDepuis(0, 3);
     expect(page1.operations).toHaveLength(3);
     expect(page1.hasMore).toBe(true);
     const curseurPage1 = page1.operations[2]!.curseur;
 
-    const page2 = listerOperationsDepuis(curseurPage1, 3);
+    const page2 = await listerOperationsDepuis(curseurPage1, 3);
     expect(page2.operations).toHaveLength(3);
     expect(page2.hasMore).toBe(false);
 
@@ -243,5 +265,108 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     for (const op of page2.operations) {
       expect(op.curseur).toBeGreaterThan(curseurPage1);
     }
+  });
+
+  // ─── Identité entreprise (correction "L'appli gère les infos du site") ───
+
+  it("TEST 14 — PUSH 'parametres_entreprise' avec entityId='singleton' : accepté (200), reflété par /v1/public/settings", async () => {
+    const router = createRouter();
+    const auth = { authorization: `Bearer ${tokenValide()}` };
+
+    const res = await router.dispatch(
+      req({
+        method: "POST",
+        path: "/v1/sync/push",
+        headers: auth,
+        body: {
+          operations: [
+            {
+              entityType: "parametres_entreprise",
+              entityId: "singleton",
+              payload: {
+                nom: "MAXI EQUIP",
+                adresse: "Quartier Beaulieu",
+                quartier: "Akanda",
+                telephones: ["066338730"],
+                whatsapp: "+24166338730",
+                email: "contact@maxi-equip.com",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+          ],
+        },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ results: [{ entityId: "singleton", statut: "cree" }] });
+
+    const settingsRes = await router.dispatch(req({ path: "/v1/public/settings" }));
+    expect(settingsRes.status).toBe(200);
+    expect(settingsRes.body).toMatchObject({
+      settings: { nom: "MAXI EQUIP", adresse: "Quartier Beaulieu", whatsapp: "+24166338730", email: "contact@maxi-equip.com" },
+    });
+  });
+
+  it("TEST 15 — RÉGRESSION bug réel : une DEUXIÈME modification de l'identité est réellement appliquée (jamais silencieusement ignorée)", async () => {
+    const router = createRouter();
+    const auth = { authorization: `Bearer ${tokenValide()}` };
+
+    const pousserIdentite = (nom: string, updatedAt: string) =>
+      router.dispatch(
+        req({
+          method: "POST",
+          path: "/v1/sync/push",
+          headers: auth,
+          body: {
+            operations: [
+              {
+                entityType: "parametres_entreprise",
+                entityId: "singleton",
+                payload: { nom, adresse: "", quartier: "", telephones: [], whatsapp: "", email: "", updatedAt },
+              },
+            ],
+          },
+        })
+      );
+
+    await pousserIdentite("MAXI EQUIP — Premier nom", "2026-01-01T00:00:00.000Z");
+    let identite = await getIdentiteActuelle();
+    expect(identite?.nom).toBe("MAXI EQUIP — Premier nom");
+
+    // AVANT la correction : le journal `operations_synchronisees` (contrainte
+    // UNIQUE(entity_type, entity_id) + INSERT OR IGNORE) aurait ignoré
+    // silencieusement cette deuxième opération sur le même entityId.
+    const deuxieme = await pousserIdentite("MAXI EQUIP — Nom corrigé", "2026-01-02T00:00:00.000Z");
+    expect(deuxieme.status).toBe(200);
+
+    identite = await getIdentiteActuelle();
+    expect(identite?.nom).toBe("MAXI EQUIP — Nom corrigé");
+
+    const settingsRes = await router.dispatch(req({ path: "/v1/public/settings" }));
+    expect(settingsRes.body).toMatchObject({ settings: { nom: "MAXI EQUIP — Nom corrigé" } });
+  });
+
+  it("TEST 16 — PUSH 'parametres_entreprise' avec un entityId autre que 'singleton' : rejeté (400)", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(
+      req({
+        method: "POST",
+        path: "/v1/sync/push",
+        headers: { authorization: `Bearer ${tokenValide()}` },
+        body: {
+          operations: [
+            { entityType: "parametres_entreprise", entityId: UUID_1, payload: { nom: "X", adresse: "", quartier: "", telephones: [], whatsapp: "", email: "", updatedAt: "2026-01-01T00:00:00.000Z" } },
+          ],
+        },
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("TEST 17 — GET /v1/public/settings avant toute synchronisation : nom/champs null, jamais une valeur inventée", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req({ path: "/v1/public/settings" }));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ settings: { nom: null, adresse: null, whatsapp: null, email: null, telephones: [] } });
   });
 });

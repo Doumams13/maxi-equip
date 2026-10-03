@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Plus, Trash2, Pencil, CheckCircle2, X, RotateCcw } from "lucide-react";
-import type { Produit, Emplacement } from "@maxi-equip/shared-types";
+import type { Produit, Emplacement, Promotion } from "@maxi-equip/shared-types";
 import { ProduitSelector } from "../components/ProduitSelector.js";
 
 interface LigneVenteForm {
@@ -50,6 +50,10 @@ function SaleConfirmModal({
   vendeur,
   lignes,
   total,
+  remise,
+  totalNet,
+  estReservation,
+  acompte,
   onModifier,
   onConfirmer,
   confirming,
@@ -58,6 +62,11 @@ function SaleConfirmModal({
   vendeur: string;
   lignes: LigneRecap[];
   total: number;
+  remise: number;
+  totalNet: number;
+  /** Correction "Réservation / Acompte" — affiche Acompte/Solde au lieu de Total Net à payer. */
+  estReservation: boolean;
+  acompte: number;
   onModifier: () => void;
   onConfirmer: () => void;
   confirming: boolean;
@@ -95,9 +104,34 @@ function SaleConfirmModal({
               <div style={{ fontSize: 11, color: defaultTokens.colors.textFaint, marginTop: 2 }}>{l.repartitionInterne}</div>
             </div>
           ))}
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", fontWeight: 800, fontFamily: defaultTokens.typography.display, background: defaultTokens.colors.surfaceAlt }}>
-            <span>Total</span>
-            <span>{total.toLocaleString("fr-FR")} FCFA</span>
+          <div style={{ padding: "10px 14px", background: defaultTokens.colors.surfaceAlt, fontFamily: defaultTokens.typography.display }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+              <span>Total</span>
+              <span>{total.toLocaleString("fr-FR")} FCFA</span>
+            </div>
+            {remise > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 3 }}>
+                <span>Remise</span>
+                <span>{remise.toLocaleString("fr-FR")} FCFA</span>
+              </div>
+            )}
+            {estReservation ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, marginTop: 3, color: defaultTokens.colors.accent }}>
+                  <span>Acompte versé</span>
+                  <span>{acompte.toLocaleString("fr-FR")} FCFA</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, marginTop: 3 }}>
+                  <span>Solde restant</span>
+                  <span>{Math.max(0, totalNet - acompte).toLocaleString("fr-FR")} FCFA</span>
+                </div>
+              </>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, marginTop: 3, color: remise > 0 ? defaultTokens.colors.accent : undefined }}>
+                <span>Total Net à payer</span>
+                <span>{totalNet.toLocaleString("fr-FR")} FCFA</span>
+              </div>
+            )}
           </div>
         </div>
         <p style={{ margin: "0 0 16px", fontSize: 11, color: defaultTokens.colors.textFaint, fontStyle: "italic" }}>
@@ -129,6 +163,22 @@ export interface VentesScreenProps {
   onPreRemplissageDemandeConsomme?: () => void;
 }
 
+/** Calcule le prix effectif côté UI (preview — la source de vérité reste VenteService au moment de la validation). */
+function getPrixEffectif(prixNormal: number, promos: Promotion[], produitId: string): { price: number; isPromoActive: boolean } {
+  const now = Date.now();
+  let best: number | null = null;
+  for (const p of promos) {
+    if (p.perimetre === "cible" && !p.produitIds.includes(produitId)) continue;
+    if (new Date(p.dateDebut).getTime() > now || new Date(p.dateFin).getTime() < now) continue;
+    const reduced = p.typeReduction === "pourcentage"
+      ? Math.round(prixNormal * (1 - p.valeur / 100))
+      : prixNormal - p.valeur;
+    const prix = Math.max(1, reduced);
+    if (best === null || prix < best) best = prix;
+  }
+  return best !== null ? { price: best, isPromoActive: true } : { price: prixNormal, isPromoActive: false };
+}
+
 /**
  * Écran de vente — renommé "Vente" dans toute l'interface (correction
  * Phase 2 §4 : une sortie de stock est, du point de vue utilisateur, une
@@ -150,6 +200,13 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
   const [vendeurNomManuel, setVendeurNomManuel] = useState("");
   const [modeReglement, setModeReglement] = useState("Espèces");
   const [lignes, setLignes] = useState<LigneVenteForm[]>([ligneVide()]);
+  /** Remise commerciale en FCFA, saisie en texte (même pattern que les champs quantité/prix) — correction "Remise / Négociation". */
+  const [remise, setRemise] = useState("0");
+  /** Correction "Réservation / Acompte" — false = vente classique intégralement payée (cas par défaut). */
+  const [estReservation, setEstReservation] = useState(false);
+  /** Acompte versé, pertinent uniquement si estReservation === true — même pattern texte que les autres montants saisis. */
+  const [acompte, setAcompte] = useState("0");
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [factureOrigineId, setFactureOrigineId] = useState<string | null>(null);
@@ -160,6 +217,9 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
     vendeurNomManuel: string;
     modeReglement: string;
     lignes: LigneVenteForm[];
+    remise: string;
+    estReservation: boolean;
+    acompte: string;
   } | null>(null);
   const [showConfirmReset, setShowConfirmReset] = useState<"reset" | "revert" | null>(null);
 
@@ -175,8 +235,9 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
 
   useEffect(() => {
     void (async () => {
-      const [prods, emps] = await Promise.all([window.maxiEquip.listProduits(), window.maxiEquip.listEmplacements()]);
+      const [prods, emps, promoRes] = await Promise.all([window.maxiEquip.listProduits(), window.maxiEquip.listEmplacements(), window.maxiEquip.promotionsActives()]);
       setProduits(prods);
+      if (promoRes.success && promoRes.data) setPromotions(promoRes.data);
       const seulsDepots = emps.filter((e) => !e.estPointDeVente && e.actif);
       const shop = emps.find((e) => e.estPointDeVente) ?? null;
       setDepots(seulsDepots);
@@ -203,6 +264,19 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
       setClientTelephone(donnees.clientTelephone ?? "");
       if (donnees.modeReglement) setModeReglement(donnees.modeReglement);
       setFactureOrigineId(factureAPreRemplir);
+      // Remise conservée telle quelle (§ "Remise / Négociation" : "lors
+      // d'une modification/relecture d'une vente, la remise doit être
+      // conservée") — le total net se recalcule automatiquement plus bas
+      // à partir du nouveau total si les lignes sont modifiées.
+      const remiseChargee = String(donnees.remise);
+      setRemise(remiseChargee);
+      // Statut de paiement conservé telle quelle, même principe que la
+      // remise — une facture corrigée issue d'une réservation reste une
+      // réservation tant que l'utilisateur ne change rien explicitement.
+      const estReservationChargee = donnees.statutPaiement === "reservation";
+      const acompteCharge = String(donnees.montantPaye);
+      setEstReservation(estReservationChargee);
+      setAcompte(acompteCharge);
       const lignesChargees = donnees.lignes.map((l) => ({
         produitId: l.produitId ?? "",
         quantite: String(l.quantite),
@@ -222,6 +296,9 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         vendeurNomManuel: "",
         modeReglement: donnees.modeReglement ?? "Espèces",
         lignes: lignesChargees,
+        remise: remiseChargee,
+        estReservation: estReservationChargee,
+        acompte: acompteCharge,
       });
       showSuccess("Vente reconstituée", "Corrigez les informations nécessaires puis validez pour générer une nouvelle facture.");
       onPreRemplissageConsomme?.();
@@ -249,14 +326,30 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         setClientNom(demande.clientNom);
         setClientTelephone(demande.clientTelephone);
         setDemandeOrigineId(demandeAPreRemplir);
-        const lignesChargees = demande.lignes.map((l) => ({
-          produitId: l.produitId,
-          quantite: String(l.quantite),
-          prixUnitaire: String(l.prixIndicatif),
-          allocations: {},
-          fournisseurExterne: "",
-          prixAchatExterne: "",
-        }));
+        // BUG CORRIGÉ ("demande transformée en vente, promotion mal
+        // affichée") : `prixIndicatif` vient du SITE, capturé au moment
+        // de la demande — potentiellement périmé (promotion expirée
+        // depuis, ou nouvelle promotion apparue depuis). Recalculé ici
+        // via EXACTEMENT la même fonction que pour une sélection manuelle
+        // de produit (`getPrixEffectif`, voir handleProduitChange) —
+        // jamais une seconde règle de prix — pour que le prix ET le badge
+        // "PROMO" affiché plus bas reflètent toujours la promotion
+        // réellement applicable AU MOMENT DE LA VENTE, jamais celle (ou
+        // l'absence de promotion) qui prévalait à la création de la
+        // demande. Repli sur `prixIndicatif` uniquement si le produit
+        // n'existe plus au catalogue — jamais une donnée perdue.
+        const lignesChargees = demande.lignes.map((l) => {
+          const produit = produits.find((p) => p.id === l.produitId);
+          const prixUnitaire = produit ? getPrixEffectif(produit.prix, promotions, l.produitId).price : l.prixIndicatif;
+          return {
+            produitId: l.produitId,
+            quantite: String(l.quantite),
+            prixUnitaire: String(prixUnitaire),
+            allocations: {},
+            fournisseurExterne: "",
+            prixAchatExterne: "",
+          };
+        });
         setLignes(lignesChargees.length > 0 ? lignesChargees : [ligneVide()]);
         showSuccess("Demande chargée", "Complétez le sourcing puis validez pour créer la vente et la facture.");
         onPreRemplissageDemandeConsomme?.();
@@ -283,6 +376,9 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
     setVendeurNomManuel("");
     setModeReglement("Espèces");
     setLignes([ligneVide()]);
+    setRemise("0");
+    setEstReservation(false);
+    setAcompte("0");
     // Un "Réinitialiser" complet abandonne aussi une éventuelle correction
     // de facture annulée en cours — le formulaire redevient une vente
     // neuve et vide, sans lien résiduel (§1 : "aucune information
@@ -305,6 +401,9 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
     setVendeurNomManuel(snapshotInitial.vendeurNomManuel);
     setModeReglement(snapshotInitial.modeReglement);
     setLignes(snapshotInitial.lignes);
+    setRemise(snapshotInitial.remise);
+    setEstReservation(snapshotInitial.estReservation);
+    setAcompte(snapshotInitial.acompte);
     setShowConfirmReset(null);
   }
 
@@ -314,7 +413,12 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
 
   function handleProduitChange(index: number, produitId: string) {
     const produit = produits.find((p) => p.id === produitId);
-    updateLigne(index, { produitId, prixUnitaire: produit ? String(produit.prix) : "", allocations: {} });
+    if (!produit) {
+      updateLigne(index, { produitId, prixUnitaire: "", allocations: {} });
+      return;
+    }
+    const ep = getPrixEffectif(produit.prix, promotions, produitId);
+    updateLigne(index, { produitId, prixUnitaire: String(ep.price), allocations: {} });
   }
 
   function totalAlloue(ligne: LigneVenteForm): number {
@@ -326,6 +430,13 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
   }
 
   const total = lignes.reduce((sum, l) => sum + (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0), 0);
+  /** Remise saisie, bornée à 0 minimum pour l'affichage — la validation réelle (remise <= total) se fait à la soumission, voir handleOuvrirVerification. */
+  const remiseValeur = Math.max(0, Number(remise) || 0);
+  const totalNet = Math.max(0, total - remiseValeur);
+  const remiseDepasseLeTotal = remiseValeur > total;
+  /** Acompte saisi, pertinent uniquement si estReservation — même borne d'affichage que remise, validation réelle à la soumission. */
+  const acompteValeur = Math.max(0, Number(acompte) || 0);
+  const acompteInvalide = estReservation && (acompteValeur <= 0 || acompteValeur >= totalNet);
 
   function validerTelephone(valeur: string): boolean {
     return /^[0-9+()\s-]{6,}$/.test(valeur.trim());
@@ -356,6 +467,18 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         return;
       }
     }
+    if (!Number.isFinite(Number(remise)) || Number(remise) < 0) {
+      showWarning("Remise invalide", "La remise doit être un nombre positif ou nul.");
+      return;
+    }
+    if (remiseDepasseLeTotal) {
+      showWarning("Remise trop élevée", "La remise ne peut pas dépasser le total de la vente.");
+      return;
+    }
+    if (estReservation && acompteInvalide) {
+      showWarning("Acompte invalide", "L'acompte doit être strictement positif et strictement inférieur au total net à payer.");
+      return;
+    }
     setShowConfirm(true);
   }
 
@@ -374,6 +497,9 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         vendeurCompteConnecteNom: session.nom,
         vendeurNomManuel: vendeurNomManuel.trim() || null,
         modeReglement,
+        remise: remiseValeur,
+        statutPaiement: estReservation ? "reservation" : "payee",
+        montantPaye: estReservation ? acompteValeur : undefined,
         lignes: lignesValides.map((l) => ({
           produitId: l.produitId,
           quantite: Number(l.quantite),
@@ -413,6 +539,9 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         setClientTelephone("");
         setVendeurNomManuel("");
         setLignes([ligneVide()]);
+        setRemise("0");
+        setEstReservation(false);
+        setAcompte("0");
         setShowConfirm(false);
         await chargerStocks(depots);
       } else {
@@ -491,7 +620,25 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
                       />
                     </div>
                     <div>
-                      <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Prix unitaire</label>
+                      {(() => {
+                        const prod = produits.find((p) => p.id === ligne.produitId);
+                        const promoInfo = prod ? getPrixEffectif(prod.prix, promotions, ligne.produitId) : null;
+                        return (
+                          <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>
+                            Prix unitaire
+                            {promoInfo?.isPromoActive && prod && (
+                              <>
+                                <span style={{ marginLeft: 6, textDecoration: "line-through", color: defaultTokens.colors.textFaint, fontWeight: 400 }}>
+                                  {prod.prix.toLocaleString("fr-FR")} FCFA
+                                </span>
+                                <span style={{ marginLeft: 4, color: defaultTokens.colors.danger, fontWeight: 700, fontSize: 10, letterSpacing: 0.3 }}>
+                                  PROMO
+                                </span>
+                              </>
+                            )}
+                          </label>
+                        );
+                      })()}
                       <input
                         style={inputStyle}
                         type="number"
@@ -580,22 +727,89 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
           </Button>
         </Card>
 
-        <Card style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 16, fontWeight: 800, fontFamily: defaultTokens.typography.display }}>Total : {total.toLocaleString("fr-FR")} FCFA</div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {snapshotInitial && (
-              <Button type="button" variant="ghost" onClick={() => setShowConfirmReset("revert")}>
+        <Card style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={estReservation}
+              onChange={(e) => {
+                // BUG CORRIGÉ (signalé : "l'acompte était déjà rempli sans
+                // raison") : `acompte` pouvait contenir une valeur sans
+                // rapport (ex. le montant payé intégral d'une facture en
+                // cours de correction via "Modifier", préchargé que la
+                // facture d'origine soit une réservation ou non) — jamais
+                // réinitialisé au moment précis où la case devient
+                // pertinente. Désormais remis à "0" à CHAQUE bascule de la
+                // case, dans les deux sens, pour ne jamais laisser une
+                // valeur périmée invisible derrière un champ masqué.
+                setEstReservation(e.target.checked);
+                setAcompte("0");
+              }}
+            />
+            Réservation (acompte versé, solde à régler plus tard)
+          </label>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 20 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Remise (FCFA)</label>
+                <input
+                  style={{ ...inputStyle, width: 130, borderColor: remiseDepasseLeTotal ? defaultTokens.colors.danger : defaultTokens.colors.border }}
+                  type="number"
+                  min={0}
+                  value={remise}
+                  onChange={(e) => {
+                    const brut = e.target.value;
+                    setRemise(brut === "" ? "" : String(Math.max(0, Number(brut))));
+                  }}
+                />
+                {remiseDepasseLeTotal && (
+                  <p style={{ margin: "4px 0 0", fontSize: 11, color: defaultTokens.colors.danger }}>Ne peut pas dépasser le total.</p>
+                )}
+              </div>
+              {estReservation && (
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Acompte versé (FCFA)</label>
+                  <input
+                    style={{ ...inputStyle, width: 130, borderColor: acompteInvalide ? defaultTokens.colors.danger : defaultTokens.colors.border }}
+                    type="number"
+                    min={0}
+                    value={acompte}
+                    onChange={(e) => {
+                      const brut = e.target.value;
+                      setAcompte(brut === "" ? "" : String(Math.max(0, Number(brut))));
+                    }}
+                  />
+                  {acompteInvalide && (
+                    <p style={{ margin: "4px 0 0", fontSize: 11, color: defaultTokens.colors.danger }}>Doit être positif et inférieur au total net.</p>
+                  )}
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, fontFamily: defaultTokens.typography.display }}>
+                <div style={{ fontSize: 13, color: defaultTokens.colors.textSoft }}>Total : {total.toLocaleString("fr-FR")} FCFA</div>
+                {estReservation ? (
+                  <>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>Acompte : {acompteValeur.toLocaleString("fr-FR")} FCFA</div>
+                    <div style={{ fontSize: 16, fontWeight: 800 }}>Solde restant : {Math.max(0, totalNet - acompteValeur).toLocaleString("fr-FR")} FCFA</div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 16, fontWeight: 800 }}>Total Net à payer : {totalNet.toLocaleString("fr-FR")} FCFA</div>
+                )}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {snapshotInitial && (
+                <Button type="button" variant="ghost" onClick={() => setShowConfirmReset("revert")}>
+                  <RotateCcw size={14} />
+                  Revenir aux informations initiales
+                </Button>
+              )}
+              <Button type="button" variant="ghost" onClick={() => setShowConfirmReset("reset")}>
                 <RotateCcw size={14} />
-                Revenir aux informations initiales
+                Réinitialiser la vente
               </Button>
-            )}
-            <Button type="button" variant="ghost" onClick={() => setShowConfirmReset("reset")}>
-              <RotateCcw size={14} />
-              Réinitialiser la vente
-            </Button>
-            <Button type="submit">Vérifier la vente</Button>
+              <Button type="submit">Vérifier la vente</Button>
+            </div>
           </div>
         </Card>
       </form>
@@ -649,6 +863,10 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
               };
             })}
           total={total}
+          remise={remiseValeur}
+          totalNet={totalNet}
+          estReservation={estReservation}
+          acompte={acompteValeur}
           onModifier={() => setShowConfirm(false)}
           onConfirmer={() => void handleConfirmerVente()}
           confirming={saving}

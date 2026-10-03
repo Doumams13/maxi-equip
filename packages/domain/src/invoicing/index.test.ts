@@ -4,6 +4,12 @@ import {
   buildLignesReleveInterne,
   calculerTotalLigne,
   calculerTotalFacture,
+  calculerTotalNet,
+  validerRemise,
+  InvalidRemiseError,
+  validerMontantPaye,
+  calculerSoldeRestant,
+  InvalidMontantPayeError,
   assertAucuneDonneeInterneExposee,
   InvalidInvoiceLineError,
   type VenteLigneSource,
@@ -14,6 +20,7 @@ describe("Facturation — fusion interne/externe (règle critique §7)", () => {
     const source: VenteLigneSource = {
       produitId: "p1",
       motif: "Marbre Blanc",
+      reference: "REF-MB-6060",
       taille: "60x60 cm",
       prixUnitaire: 8500,
       quantiteInterne: 20,
@@ -26,6 +33,7 @@ describe("Facturation — fusion interne/externe (règle critique §7)", () => {
 
     expect(ligne.quantite).toBe(30);
     expect(ligne.motif).toBe("Marbre Blanc");
+    expect(ligne.reference).toBe("REF-MB-6060");
     expect(ligne.prixUnitaire).toBe(8500);
   });
 
@@ -33,6 +41,7 @@ describe("Facturation — fusion interne/externe (règle critique §7)", () => {
     const source: VenteLigneSource = {
       produitId: "p1",
       motif: "Marbre Blanc",
+      reference: "REF-MB-6060",
       taille: "60x60 cm",
       prixUnitaire: 8500,
       quantiteInterne: 20,
@@ -53,6 +62,7 @@ describe("Facturation — fusion interne/externe (règle critique §7)", () => {
     const ligne = buildLigneFacture({
       produitId: "p1",
       motif: "Grès Gris",
+      reference: "REF-GG-3030",
       taille: "30x30 cm",
       prixUnitaire: 5000,
       quantiteInterne: 15,
@@ -65,6 +75,7 @@ describe("Facturation — fusion interne/externe (règle critique §7)", () => {
     const ligne = buildLigneFacture({
       produitId: "p1",
       motif: "Grès Gris",
+      reference: "REF-GG-3030",
       taille: "30x30 cm",
       prixUnitaire: 5000,
       quantiteInterne: 0,
@@ -80,6 +91,7 @@ describe("Facturation — fusion interne/externe (règle critique §7)", () => {
       buildLigneFacture({
         produitId: "p1",
         motif: "Test",
+        reference: "REF-TEST",
         taille: "1x1",
         prixUnitaire: 1000,
         quantiteInterne: 0,
@@ -93,6 +105,7 @@ describe("Facturation — fusion interne/externe (règle critique §7)", () => {
       buildLigneFacture({
         produitId: "p1",
         motif: "Test",
+        reference: "REF-TEST",
         taille: "1x1",
         prixUnitaire: 1000,
         quantiteInterne: 5,
@@ -108,6 +121,7 @@ describe("Relevé interne d'approvisionnement", () => {
       {
         produitId: "p1",
         motif: "Marbre Blanc",
+        reference: "REF-MB-6060",
         taille: "60x60 cm",
         prixUnitaire: 8500,
         quantiteInterne: 20,
@@ -130,17 +144,18 @@ describe("Relevé interne d'approvisionnement", () => {
 
   it("ne génère aucune ligne de relevé pour une source entièrement interne", () => {
     const sources: VenteLigneSource[] = [
-      { produitId: "p1", motif: "Grès Gris", taille: "30x30 cm", prixUnitaire: 5000, quantiteInterne: 15, quantiteExterne: 0 },
+      { produitId: "p1", motif: "Grès Gris", reference: "REF-GG-3030", taille: "30x30 cm", prixUnitaire: 5000, quantiteInterne: 15, quantiteExterne: 0 },
     ];
     expect(buildLignesReleveInterne(sources)).toHaveLength(0);
   });
 
   it("traite correctement un mélange de lignes internes et mixtes dans une même vente", () => {
     const sources: VenteLigneSource[] = [
-      { produitId: "p1", motif: "Grès Gris", taille: "30x30 cm", prixUnitaire: 5000, quantiteInterne: 15, quantiteExterne: 0 },
+      { produitId: "p1", motif: "Grès Gris", reference: "REF-GG-3030", taille: "30x30 cm", prixUnitaire: 5000, quantiteInterne: 15, quantiteExterne: 0 },
       {
         produitId: "p2",
         motif: "Marbre Blanc",
+        reference: "REF-MB-6060",
         taille: "60x60 cm",
         prixUnitaire: 8500,
         quantiteInterne: 20,
@@ -181,6 +196,7 @@ describe("Calcul des totaux (§6 — recalcul automatique)", () => {
     const ligne = buildLigneFacture({
       produitId: "p1",
       motif: "Marbre Blanc",
+      reference: "REF-MB-6060",
       taille: "60x60 cm",
       prixUnitaire: prixNegocie,
       quantiteInterne: 10,
@@ -202,11 +218,84 @@ describe("Séparation facture client / informations internes (§7, §11)", () =>
     const ligne = buildLigneFacture({
       produitId: "p1",
       motif: "Test",
+      reference: "REF-TEST",
       taille: "1x1",
       prixUnitaire: 1000,
       quantiteInterne: 5,
       quantiteExterne: 0,
     });
     expect(() => assertAucuneDonneeInterneExposee(ligne)).not.toThrow();
+  });
+});
+
+describe("Remise / Négociation — correction dédiée", () => {
+  it("cas du cahier des charges : 13 × 15 000 = 195 000, remise 2 000 → total net 193 000", () => {
+    const total = 13 * 15000;
+    expect(total).toBe(195000);
+    expect(() => validerRemise(2000, total)).not.toThrow();
+    expect(calculerTotalNet(total, 2000)).toBe(193000);
+  });
+
+  it("une remise de 0 est gérée normalement (jamais rejetée, total net = total)", () => {
+    expect(() => validerRemise(0, 195000)).not.toThrow();
+    expect(calculerTotalNet(195000, 0)).toBe(195000);
+  });
+
+  it("rejette une remise strictement supérieure au total", () => {
+    expect(() => validerRemise(200000, 195000)).toThrow(InvalidRemiseError);
+  });
+
+  it("accepte une remise égale au total (total net = 0, jamais négatif)", () => {
+    expect(() => validerRemise(195000, 195000)).not.toThrow();
+    expect(calculerTotalNet(195000, 195000)).toBe(0);
+  });
+
+  it("rejette une remise négative", () => {
+    expect(() => validerRemise(-500, 195000)).toThrow(InvalidRemiseError);
+  });
+
+  it("rejette une remise non finie (NaN/Infinity)", () => {
+    expect(() => validerRemise(NaN, 195000)).toThrow(InvalidRemiseError);
+    expect(() => validerRemise(Infinity, 195000)).toThrow(InvalidRemiseError);
+  });
+
+  it("calculerTotalNet ne descend jamais sous zéro même en cas d'appel sans validation préalable", () => {
+    expect(calculerTotalNet(1000, 5000)).toBe(0);
+  });
+});
+
+describe("Statut de paiement — Réservation / Acompte", () => {
+  it("accepte une vente payée intégralement quand le montant payé égale le total net", () => {
+    expect(() => validerMontantPaye("payee", 193000, 193000)).not.toThrow();
+  });
+
+  it("rejette une vente payée intégralement dont le montant payé diffère du total net", () => {
+    expect(() => validerMontantPaye("payee", 190000, 193000)).toThrow(InvalidMontantPayeError);
+    expect(() => validerMontantPaye("payee", 200000, 193000)).toThrow(InvalidMontantPayeError);
+  });
+
+  it("accepte une réservation avec un acompte strictement inférieur au total net, et calcule le solde restant", () => {
+    expect(() => validerMontantPaye("reservation", 50000, 193000)).not.toThrow();
+    expect(calculerSoldeRestant(193000, 50000)).toBe(143000);
+  });
+
+  it("rejette une réservation dont l'acompte est égal ou supérieur au total net", () => {
+    expect(() => validerMontantPaye("reservation", 193000, 193000)).toThrow(InvalidMontantPayeError);
+    expect(() => validerMontantPaye("reservation", 200000, 193000)).toThrow(InvalidMontantPayeError);
+  });
+
+  it("rejette un acompte nul ou négatif pour une réservation, et un montant négatif ou non fini quel que soit le statut", () => {
+    expect(() => validerMontantPaye("reservation", 0, 193000)).toThrow(InvalidMontantPayeError);
+    expect(() => validerMontantPaye("reservation", -1000, 193000)).toThrow(InvalidMontantPayeError);
+    expect(() => validerMontantPaye("payee", NaN, 193000)).toThrow(InvalidMontantPayeError);
+    expect(() => validerMontantPaye("payee", -1, 193000)).toThrow(InvalidMontantPayeError);
+  });
+
+  it("accepte un montant payé nul pour une vente payée dont le total net est nul (remise égale au total)", () => {
+    expect(() => validerMontantPaye("payee", 0, 0)).not.toThrow();
+  });
+
+  it("calculerSoldeRestant ne descend jamais sous zéro même en cas d'appel sans validation préalable", () => {
+    expect(calculerSoldeRestant(100000, 150000)).toBe(0);
   });
 });

@@ -27,6 +27,13 @@ export class StockRepository {
       .all(emplacementId) as { produitId: string; quantite: number }[];
   }
 
+  /** Stock de TOUS les emplacements pour un seul produit — correction "produit supprimé avec du stock restant" (StockService.ecoulerStockPourSuppression), jamais limité à un seul dépôt. */
+  listByProduit(produitId: string): { emplacementId: string; quantite: number }[] {
+    return this.db
+      .prepare("SELECT emplacement_id as emplacementId, quantite FROM stocks WHERE produit_id = ?")
+      .all(produitId) as { emplacementId: string; quantite: number }[];
+  }
+
   /** Stock total (tous emplacements confondus) pour plusieurs produits — colonne "Stock" de la maquette (CarreauxPage). */
   getTotalsForProduits(produitIds: string[]): Map<string, number> {
     if (produitIds.length === 0) return new Map();

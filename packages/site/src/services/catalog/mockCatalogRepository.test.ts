@@ -2,11 +2,11 @@ import { describe, it, expect } from "vitest";
 import { MockCatalogRepository } from "./mockCatalogRepository";
 import { getModelDisplayPrice } from "@/lib/pricing";
 
-describe("MockCatalogRepository — filtre 'Uniquement les promotions' (Défaut 3, données réelles)", () => {
-  it("'Marbre Blanc' (Faïence) n'apparaît plus dans le filtre promotions : sa variante affichée (40x40, 9500 FCFA) n'a jamais de promotion, même si son 60x60 en a une", async () => {
+describe("MockCatalogRepository — filtre 'Uniquement les promotions' (ex-Défaut 3, corrigé, données réelles)", () => {
+  it("'Marbre Blanc' (Faïence) apparaît bien dans le filtre promotions : son 60x60 est en promotion, même si ce n'est pas sa variante la moins chère (40x40)", async () => {
     const repo = new MockCatalogRepository();
     const resultats = await repo.listModels({ onlyPromotions: true }, "relevance");
-    expect(resultats.some((m) => m.slug === "marbre-blanc")).toBe(false);
+    expect(resultats.some((m) => m.slug === "marbre-blanc")).toBe(true);
   });
 
   it("'Terracotta' (promotion sur toutes les tailles) reste bien inclus : sa variante affichée est nécessairement en promotion", async () => {

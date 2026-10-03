@@ -72,6 +72,13 @@ export class PromotionService {
         produitIds: input.produitIds,
         dateDebut: input.dateDebut,
         dateFin: input.dateFin,
+        // Correction "Intégration Site Phase 5, Partie 2" : nécessaire à
+        // la projection catalogue serveur pour garantir l'ordre/
+        // l'idempotence (upsert conditionné par updatedAt — voir
+        // packages/api/src/core/catalogStore.ts). Absent jusqu'ici car
+        // cette opération n'était encore jamais réellement consommée
+        // côté serveur.
+        updatedAt: promo.updatedAt,
       });
       return promo;
     });
@@ -118,6 +125,7 @@ export class PromotionService {
         operation: "update",
         promotionId: id,
         ...merged,
+        updatedAt: promo.updatedAt,
       });
       return promo;
     });
@@ -136,6 +144,11 @@ export class PromotionService {
       this.boiteEnvoiRepository.creer("promotion", id, {
         operation: "delete",
         promotionId: id,
+        // Pas de re-lecture possible après une suppression physique (§
+        // schema.sql : `promotions.delete` est une suppression dure,
+        // contrairement au reste du catalogue) — horodatage pris au
+        // moment de l'opération elle-même.
+        updatedAt: new Date().toISOString(),
       });
     });
 

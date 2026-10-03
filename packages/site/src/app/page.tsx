@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { catalogRepository } from "@/services/catalog";
 import { Hero } from "@/components/home/Hero";
 import { UniversStrip } from "@/components/home/UniversStrip";
@@ -7,6 +8,12 @@ import { FormatsGrid } from "@/components/home/FormatsGrid";
 import { ErrorState } from "@/components/ui/states";
 
 export const revalidate = 60;
+
+// Titre/description hérités du layout racine (déjà pertinents pour
+// l'accueil) — seule l'URL canonique est propre à cette page.
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 export default async function HomePage() {
   try {
@@ -20,7 +27,7 @@ export default async function HomePage() {
 
     return (
       <>
-        <Hero models={allModels} />
+        <Hero models={allModels} promotedModels={promotedModels} promotions={promotions} />
 
         <div className="mx-auto max-w-[1320px] border-t border-ink/[0.08] px-[18px] py-9 sm:px-7 sm:py-16">
           <div className="mb-9 flex flex-wrap items-end justify-between gap-6">

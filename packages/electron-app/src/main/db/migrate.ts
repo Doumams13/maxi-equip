@@ -4,13 +4,83 @@ import { randomUUID } from "node:crypto";
 import schemaSql from "./schema.sql?raw";
 
 /**
+ * Exécute schema.sql instruction par instruction plutôt qu'en un seul
+ * `db.exec()` (bug réel reproduit et corrigé — Phase 6C, installation
+ * indépendante) : sur une base déjà existante, "CREATE TABLE IF NOT
+ * EXISTS" est un no-op si la table existe déjà sous une forme plus
+ * ancienne — une ligne "CREATE INDEX ... ON <table> (<colonne_recente>)"
+ * placée directement dans schema.sql échoue alors avec "no such column"
+ * AVANT que la migration incrémentale correspondante (plus bas dans ce
+ * fichier, qui ajoute la colonne puis crée l'index) n'ait la moindre
+ * chance de s'exécuter — et comme `db.exec()` traite tout le fichier
+ * comme un seul lot, cette unique ligne bloquait aussi la création de
+ * TOUTES les tables suivantes dans le fichier, quelle que soit la table
+ * concernée. Ce bug a déjà été rencontré une fois pour
+ * `mouvements.utilisateur_id` (corrigé en retirant la ligne de
+ * schema.sql) puis réapparu pour `produits.modele_id` — cette fonction
+ * rend la classe entière de bug inoffensive, plutôt que de compter sur
+ * la vigilance de ne plus jamais répéter l'erreur : une instruction
+ * `CREATE INDEX`/`CREATE UNIQUE INDEX` qui échoue avec "no such column"
+ * est ignorée (la migration incrémentale dédiée s'en chargera après
+ * avoir garanti la colonne), tout le reste de schema.sql continue de
+ * s'exécuter, et toute AUTRE erreur (jamais attendue) reste fatale
+ * comme avant.
+ */
+// Exportée uniquement pour le test de régression dédié (vérifie le
+// comportement général — "peu importe la table" — avec un schéma
+// synthétique), jamais utilisée ailleurs que par `runMigrations` en
+// production (toujours appelée sans second argument, sur le vrai
+// schema.sql).
+export function executerSchemaDeFaconTolerante(db: Database.Database, sql: string = schemaSql): void {
+  const instructions = sql
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  for (const instruction of instructions) {
+    try {
+      db.exec(`${instruction};`);
+    } catch (err) {
+      const estCreationIndex = /^CREATE\s+(UNIQUE\s+)?INDEX/i.test(instruction);
+      const estColonneManquante = err instanceof Error && /no such column/i.test(err.message);
+      if (estCreationIndex && estColonneManquante) continue;
+      throw err;
+    }
+  }
+}
+
+/**
+ * Ne renvoie, parmi `colonnesCibles`, que celles RÉELLEMENT présentes
+ * dans `tableSource` au moment de l'appel (audit "check up complet") :
+ * les migrations qui recréent une table (voir `fixReferenceUniqueConstraint`,
+ * `migrateFacturesPourAnnulationEtLivraison`) copiaient jusqu'ici les
+ * données vers une liste de colonnes CODÉE EN DUR, écrite au moment de
+ * cette correction précise — toute colonne ajoutée PLUS TARD par une
+ * autre migration n'y figurait jamais, et était donc silencieusement
+ * perdue si cette recréation venait à s'exécuter après coup (même
+ * classe de bug que celle déjà corrigée pour `schema.sql`/`modele_id` :
+ * une hypothèse figée sur la forme de la table au lieu d'une vérification
+ * réelle). En calculant l'intersection à l'exécution, ces migrations
+ * conservent désormais AUTOMATIQUEMENT toute colonne déjà présente sur
+ * la table source, quelle qu'elle soit et quelle que soit la date à
+ * laquelle elle a été ajoutée — plus besoin de se souvenir de mettre à
+ * jour une liste figée à chaque nouvelle colonne.
+ */
+function colonnesEnCommun(db: Database.Database, tableSource: string, colonnesCibles: string[]): string[] {
+  const colonnesSource = new Set(
+    (db.prepare(`PRAGMA table_info(${tableSource})`).all() as { name: string }[]).map((c) => c.name)
+  );
+  return colonnesCibles.filter((c) => colonnesSource.has(c));
+}
+
+/**
  * Applique le schéma initial (idempotent — CREATE TABLE IF NOT EXISTS),
  * puis les évolutions de schéma ultérieures, elles aussi idempotentes et
  * jamais destructrices (§14 du prompt Phase 0 : "ne détruit aucune donnée
  * existante").
  */
 export function runMigrations(db: Database.Database): void {
-  db.exec(schemaSql);
+  executerSchemaDeFaconTolerante(db);
   addEstPrincipaleColumnIfMissing(db);
   fixReferenceUniqueConstraint(db);
   addLargeurHauteurColumnsIfMissing(db);
@@ -27,13 +97,40 @@ export function runMigrations(db: Database.Database): void {
   retirerContrainteProduitIdLignesDemandeSiPresente(db);
   migrerTablePromotionsSiAncienSchema(db);
   ajouterColonnesPromoLignesFactureSiAbsentes(db);
+  ajouterColonneReferenceLignesFactureSiAbsente(db);
+  ajouterColonneRemiseFacturesSiAbsente(db);
+  ajouterColonnesStatutPaiementFacturesSiAbsentes(db);
+  ajouterColonnesAnnulationMouvementsSiAbsentes(db);
   // SCHEMA v6 — multi-format produits
   creerTableModelesProductsSiAbsente(db);
   ajouterModeleIdAuxProduitsSiAbsent(db);
   creerModelesPourProduitsExistants(db);
   migrerImagesVersModeles(db);
   ajouterIndexModeleIdProduitsSiAbsent(db);
+  // Correction Phase Finale, Bloc 6 (audit pré-production)
+  ajouterIdentiteSnapshotFacturesSiAbsente(db);
   setSchemaVersion(db);
+}
+
+/**
+ * Correction Phase Finale, Bloc 6 : l'identité entreprise affichée sur
+ * une facture (nom, adresse, quartier, téléphones, responsables
+ * affichés) était jusqu'ici toujours relue EN DIRECT depuis
+ * `parametres_entreprise` au moment de la génération/régénération du
+ * PDF — jamais figée. Modifier les paramètres après une vente modifiait
+ * donc l'apparence d'une facture déjà émise si son PDF était régénéré
+ * plus tard. Colonne NULLABLE : les factures déjà émises avant cette
+ * migration n'ont jamais eu cette information capturée à l'époque —
+ * jamais une valeur inventée rétroactivement, la génération de PDF
+ * retombe sur l'identité courante UNIQUEMENT pour ces factures-là (voir
+ * ipc/metier.ts). Toute NOUVELLE vente, à partir de maintenant, capture
+ * un instantané réel (voir venteService.ts).
+ */
+function ajouterIdentiteSnapshotFacturesSiAbsente(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(factures)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "identite_snapshot_json")) {
+    db.exec("ALTER TABLE factures ADD COLUMN identite_snapshot_json TEXT");
+  }
 }
 
 /**
@@ -272,6 +369,7 @@ function fixReferenceUniqueConstraint(db: Database.Database): void {
       db.exec(`
         CREATE TABLE produits_nouveau (
           id            TEXT PRIMARY KEY,
+          modele_id     TEXT REFERENCES modeles_produit (id),
           motif         TEXT NOT NULL,
           type          TEXT NOT NULL,
           taille        TEXT NOT NULL,
@@ -287,17 +385,22 @@ function fixReferenceUniqueConstraint(db: Database.Database): void {
           updated_at    TEXT NOT NULL
         );
       `);
-      db.exec(`
-        INSERT INTO produits_nouveau
-          (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at)
-        SELECT id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, deleted_at, deleted_by, created_at, updated_at
-        FROM produits;
-      `);
+      // Copie dynamique (jamais une liste figée — voir colonnesEnCommun) :
+      // conserve modele_id/largeur/hauteur si déjà présentes, ne perd
+      // jamais une colonne ajoutée par une migration plus récente.
+      const colonnes = colonnesEnCommun(db, "produits", [
+        "id", "modele_id", "motif", "type", "taille", "taille_tri", "largeur", "hauteur",
+        "reference", "prix", "seuil_alerte", "deleted_at", "deleted_by", "created_at", "updated_at",
+      ]);
+      const liste = colonnes.join(", ");
+      db.exec(`INSERT INTO produits_nouveau (${liste}) SELECT ${liste} FROM produits;`);
       db.exec("DROP TABLE produits;");
       db.exec("ALTER TABLE produits_nouveau RENAME TO produits;");
       db.exec("CREATE INDEX IF NOT EXISTS idx_produits_taille_tri ON produits (taille_tri);");
       db.exec("CREATE INDEX IF NOT EXISTS idx_produits_updated_at ON produits (updated_at);");
       db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_produits_reference_actif ON produits (reference) WHERE deleted_at IS NULL;");
+      // idx_produits_modele_id n'est PAS créé ici — ajouterIndexModeleIdProduitsSiAbsent()
+      // (plus bas, après garantie de la colonne) s'en charge, cohérent avec le reste du fichier.
     });
     migrer();
   } finally {
@@ -467,6 +570,79 @@ function ajouterColonnesPromoLignesFactureSiAbsentes(db: Database.Database): voi
 }
 
 /**
+ * Correction "Référence manquante sur la facture" — ajoute `reference`
+ * sur `lignes_facture` pour les bases créées avant cette évolution.
+ * Nullable : les lignes existantes gardent NULL (honnête — cette
+ * référence n'a jamais été enregistrée pour ces ventes passées), affichée
+ * comme "—" sur une facture réimprimée après coup, jamais une valeur
+ * inventée. Même principe que motif/taille : un snapshot figé à la
+ * vente, jamais une jointure live vers `produits`.
+ */
+function ajouterColonneReferenceLignesFactureSiAbsente(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(lignes_facture)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "reference")) {
+    db.exec(`ALTER TABLE lignes_facture ADD COLUMN reference TEXT`);
+  }
+}
+
+/**
+ * Correction "Remise / Négociation" — ajoute `remise` sur `factures`
+ * pour les bases créées avant cette évolution. `DEFAULT 0`, pas NULL :
+ * une facture déjà existante n'a jamais eu de remise, 0 est la valeur
+ * honnête, jamais une donnée manquante à distinguer.
+ */
+function ajouterColonneRemiseFacturesSiAbsente(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(factures)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "remise")) {
+    db.exec(`ALTER TABLE factures ADD COLUMN remise INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
+/**
+ * Correction "Réservation / Acompte" : ajoute `statut_paiement` et
+ * `montant_paye` sur une base créée avant cette évolution. Toute facture
+ * déjà existante a nécessairement déjà été réglée intégralement (aucune
+ * notion de réservation n'existait avant) — backfill explicite à "payee"
+ * avec `montant_paye = total - remise` (jamais 0 par défaut pour ces
+ * lignes historiques, qui casserait `validerMontantPaye` au premier
+ * changement de statut).
+ */
+function ajouterColonnesStatutPaiementFacturesSiAbsentes(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(factures)").all() as { name: string }[];
+  const statutAbsent = !columns.some((c) => c.name === "statut_paiement");
+  const montantAbsent = !columns.some((c) => c.name === "montant_paye");
+  if (statutAbsent) {
+    db.exec(`ALTER TABLE factures ADD COLUMN statut_paiement TEXT NOT NULL DEFAULT 'payee' CHECK (statut_paiement IN ('reservation', 'payee'))`);
+  }
+  if (montantAbsent) {
+    db.exec(`ALTER TABLE factures ADD COLUMN montant_paye INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (statutAbsent || montantAbsent) {
+    db.exec(`UPDATE factures SET montant_paye = total - remise WHERE montant_paye = 0`);
+  }
+}
+
+/**
+ * Correction "corriger une erreur de saisie de stock sans fausser le
+ * tableau de bord" : ajoute les 3 colonnes d'annulation sur `mouvements`
+ * (une base déjà existante n'avait que les colonnes historiques). Toutes
+ * `NULL` par défaut — un mouvement déjà en base n'a jamais été annulé,
+ * jamais une valeur devinée pour ces lignes historiques.
+ */
+function ajouterColonnesAnnulationMouvementsSiAbsentes(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(mouvements)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "annule_le")) {
+    db.exec(`ALTER TABLE mouvements ADD COLUMN annule_le TEXT`);
+  }
+  if (!columns.some((c) => c.name === "annule_par")) {
+    db.exec(`ALTER TABLE mouvements ADD COLUMN annule_par TEXT REFERENCES utilisateurs (id)`);
+  }
+  if (!columns.some((c) => c.name === "motif_annulation")) {
+    db.exec(`ALTER TABLE mouvements ADD COLUMN motif_annulation TEXT`);
+  }
+}
+
+/**
  * Correction "Facturation" (§5/§13/§14/§21) : ajoute les colonnes de
  * statut de livraison, d'annulation (suppression douce) et de mode de
  * règlement sur une base créée avant cette évolution, ET retire l'ancien
@@ -507,18 +683,24 @@ function migrateFacturesPourAnnulationEtLivraison(db: Database.Database): void {
             annulee_par            TEXT REFERENCES utilisateurs (id),
             motif_annulation       TEXT,
             corrigee_par_facture_id TEXT REFERENCES factures (id),
+            identite_snapshot_json TEXT,
             created_at             TEXT NOT NULL,
             updated_at             TEXT NOT NULL
           );
         `);
-        db.exec(`
-          INSERT INTO factures_nouveau
-            (id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse,
-             vendeur_utilisateur_id, vendeur_nom_manuel, total, created_at, updated_at)
-          SELECT id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse,
-                 vendeur_utilisateur_id, vendeur_nom_manuel, total, created_at, updated_at
-          FROM factures;
-        `);
+        // Copie dynamique (jamais une liste figée — voir colonnesEnCommun) :
+        // sur une base encore plus ancienne que prévu, ou déjà partiellement
+        // migrée de façon incohérente, toute colonne d'amélioration
+        // (statut_livraison, identite_snapshot_json...) réellement déjà
+        // présente est conservée au lieu d'être silencieusement réinitialisée.
+        const colonnes = colonnesEnCommun(db, "factures", [
+          "id", "numero", "date", "emplacement_id", "client_nom", "client_telephone", "client_adresse",
+          "vendeur_utilisateur_id", "vendeur_nom_manuel", "mode_reglement", "total",
+          "statut_livraison", "livree_le", "annulee_le", "annulee_par", "motif_annulation",
+          "corrigee_par_facture_id", "identite_snapshot_json", "created_at", "updated_at",
+        ]);
+        const liste = colonnes.join(", ");
+        db.exec(`INSERT INTO factures_nouveau (${liste}) SELECT ${liste} FROM factures;`);
         db.exec("DROP TABLE factures;");
         db.exec("ALTER TABLE factures_nouveau RENAME TO factures;");
       });

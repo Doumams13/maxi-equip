@@ -16,7 +16,9 @@ export function FormatsGrid({ sizes, models }: { sizes: string[]; models: Produc
                 className="relative overflow-hidden rounded-[2px] shadow-[0_10px_28px_rgba(18,42,29,.16)]"
                 style={{ width: ratio.w, aspectRatio: `${ratio.ratio}` }}
               >
-                {image && <Image src={image.url} alt="" fill sizes="200px" className="object-cover" />}
+                {image && (
+                  <Image src={image.url} alt={`Exemple de carrelage au format ${size} cm`} fill sizes="200px" className="object-cover" />
+                )}
               </div>
             </div>
             <div className="border-t border-ink/[0.08] px-[22px] py-5">

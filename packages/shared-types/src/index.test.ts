@@ -37,16 +37,20 @@ describe("shared-types (Phase 0 smoke test)", () => {
       vendeurUtilisateurId: "00000000-0000-4000-8000-0000000000aa",
       vendeurNomManuel: null,
       lignes: [
-        { produitId: null, motif: "Marbre Blanc", taille: "60x60 cm", quantite: 30, prixUnitaire: 8500, prixUnitaireNormal: null, promotionId: null, promotionLibelle: null, promotionType: null, promotionValeur: null },
+        { produitId: null, motif: "Marbre Blanc", reference: "REF-MB-6060", taille: "60x60 cm", quantite: 30, prixUnitaire: 8500, prixUnitaireNormal: null, promotionId: null, promotionLibelle: null, promotionType: null, promotionValeur: null },
       ],
       total: 255000,
+      remise: 0,
       modeReglement: "Espèces",
+      statutPaiement: "payee",
+      montantPaye: 255000,
       statutLivraison: "en_attente",
       livreeLe: null,
       annuleeLe: null,
       annuleePar: null,
       motifAnnulation: null,
       corrigeeParFactureId: null,
+      identiteSnapshot: null,
     };
     // Vérifie à la compilation (et non seulement à l'exécution) qu'aucune
     // clé "fournisseur" ou "prixAchat" n'existe sur ce type.

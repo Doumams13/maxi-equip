@@ -15,6 +15,9 @@ interface MouvementRow {
   facture_id: string | null;
   utilisateur_id: string | null;
   note: string | null;
+  annule_le: string | null;
+  annule_par: string | null;
+  motif_annulation: string | null;
 }
 
 
@@ -31,6 +34,9 @@ function rowToMouvement(row: MouvementRow): Mouvement {
     factureId: row.facture_id,
     utilisateurId: row.utilisateur_id,
     note: row.note,
+    annuleLe: row.annule_le,
+    annulePar: row.annule_par,
+    motifAnnulation: row.motif_annulation,
     createdAt: "",
     updatedAt: "",
   };
@@ -38,7 +44,7 @@ function rowToMouvement(row: MouvementRow): Mouvement {
 
 export interface EvenementHistorique {
   id: string;
-  type: "vente" | "annulation" | "entree" | "transfert";
+  type: "vente" | "annulation" | "entree" | "sortie" | "transfert";
   date: string;
   quantite: number | null;
   produitMotif: string | null;
@@ -55,6 +61,8 @@ export interface EvenementHistorique {
   utilisateurId: string | null;
   utilisateurNom: string | null;
   utilisateurRole: string | null;
+  /** Renseigné UNIQUEMENT pour une entrée/sortie manuelle annulée (voir annuler() ci-dessous) — toujours NULL pour vente/annulation/transfert. */
+  annuleLe: string | null;
 }
 
 const SELECT_EVENEMENTS = `
@@ -68,7 +76,8 @@ const SELECT_EVENEMENTS = `
       NULL as emplacementNom, NULL as emplacementSourceNom, NULL as emplacementDestinationNom,
       f.id as factureId, f.numero as factureNumero, f.client_nom as clientNom, f.total as montant,
       NULL as motifAnnulation,
-      f.vendeur_utilisateur_id as utilisateurId, u1.nom as utilisateurNom, u1.role as utilisateurRole
+      f.vendeur_utilisateur_id as utilisateurId, u1.nom as utilisateurNom, u1.role as utilisateurRole,
+      NULL as annuleLe
     FROM factures f
     LEFT JOIN utilisateurs u1 ON u1.id = f.vendeur_utilisateur_id
 
@@ -82,7 +91,8 @@ const SELECT_EVENEMENTS = `
       NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       f.id, f.numero, f.client_nom, f.total,
       f.motif_annulation,
-      f.annulee_par, u2.nom, u2.role
+      f.annulee_par, u2.nom, u2.role,
+      NULL
     FROM factures f
     LEFT JOIN utilisateurs u2 ON u2.id = f.annulee_par
     WHERE f.annulee_le IS NOT NULL
@@ -90,14 +100,18 @@ const SELECT_EVENEMENTS = `
     UNION ALL
 
     -- Entrées et transferts manuels — jamais liés à une facture, donc
-    -- jamais concernés par le regroupement ci-dessus.
+    -- jamais concernés par le regroupement ci-dessus. annuleLe et
+    -- motifAnnulation réels (correction "corriger une erreur de saisie
+    -- de stock") — jamais supprimé, un mouvement annulé reste visible ici
+    -- avec son motif, exactement comme une facture annulée ci-dessus.
     SELECT
       m.id, m.type, m.date,
       m.quantite, p.motif, p.taille, p.reference,
       e.nom, es.nom, ed.nom,
       NULL, NULL, NULL, NULL,
-      NULL,
-      m.utilisateur_id, u3.nom, u3.role
+      m.motif_annulation,
+      m.utilisateur_id, u3.nom, u3.role,
+      m.annule_le
     FROM mouvements m
     JOIN produits p ON p.id = m.produit_id
     LEFT JOIN emplacements e ON e.id = m.emplacement_id
@@ -116,6 +130,11 @@ export class MouvementRepository {
     return this.db.prepare(`SELECT * FROM (${SELECT_EVENEMENTS}) WHERE type = 'entree' ORDER BY date DESC`).all() as EvenementHistorique[];
   }
 
+  /** Historique COMPLET des sorties de stock — même principe que listEntrees. */
+  listSorties(): EvenementHistorique[] {
+    return this.db.prepare(`SELECT * FROM (${SELECT_EVENEMENTS}) WHERE type = 'sortie' ORDER BY date DESC`).all() as EvenementHistorique[];
+  }
+
   /** Historique COMPLET des transferts — même principe que listEntrees. */
   listTransferts(): EvenementHistorique[] {
     return this.db.prepare(`SELECT * FROM (${SELECT_EVENEMENTS}) WHERE type = 'transfert' ORDER BY date DESC`).all() as EvenementHistorique[];
@@ -131,7 +150,8 @@ export class MouvementRepository {
     return this.list(limit);
   }
 
-  create(input: Omit<Mouvement, "id" | "createdAt" | "updatedAt">): string {
+  /** `annuleLe`/`annulePar`/`motifAnnulation` exclus volontairement — un mouvement naît toujours non annulé, voir annuler() ci-dessous pour la seule façon de les renseigner ensuite. */
+  create(input: Omit<Mouvement, "id" | "createdAt" | "updatedAt" | "annuleLe" | "annulePar" | "motifAnnulation">): string {
     domainStock.assertCoherentMouvement(input);
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -159,17 +179,47 @@ export class MouvementRepository {
     return id;
   }
 
-  /** Somme des quantités pour un type de mouvement — globale si utilisateurId omis, personnelle sinon (§9/§13 de la correction : le filtrage doit être réel, pas visuel). */
+  /**
+   * Somme des quantités pour un type de mouvement — globale si utilisateurId
+   * omis, personnelle sinon (§9/§13 de la correction : le filtrage doit
+   * être réel, pas visuel).
+   *
+   * CORRECTION "entrées/sorties gonflées par les annulations" : une
+   * annulation de vente restaure le stock via un mouvement "entree" (voir
+   * VenteService.annulerVente), SANS jamais retirer la "sortie" d'origine
+   * de la vente annulée (les mouvements ne sont jamais effacés — trace
+   * complète conservée, visible dans l'Historique). Sans exclusion, une
+   * seule vente annulée comptait donc +1 dans "Total sorties" (la vente)
+   * ET +1 dans "Total entrées" (la restauration), alors que rien n'est
+   * réellement entré ni sorti côté stock une fois tout annulé. Exclut ici
+   * les mouvements liés à une facture elle-même annulée, ET (correction
+   * "corriger une erreur de saisie de stock") les mouvements manuels
+   * eux-mêmes annulés via `annuler()` ci-dessous — un mouvement sans
+   * facture et jamais annulé (réassort réel, transfert) n'est jamais
+   * affecté, et rien n'est supprimé de l'Historique (uniquement ce calcul
+   * agrégé change).
+   */
   sommeQuantiteParType(type: Mouvement["type"], utilisateurId?: string): number {
+    const exclusionAnnulations = "(m.facture_id IS NULL OR f.annulee_le IS NULL) AND m.annule_le IS NULL";
     if (utilisateurId) {
       return (
         this.db
-          .prepare("SELECT COALESCE(SUM(quantite), 0) as total FROM mouvements WHERE type = ? AND utilisateur_id = ?")
+          .prepare(
+            `SELECT COALESCE(SUM(m.quantite), 0) as total FROM mouvements m
+             LEFT JOIN factures f ON f.id = m.facture_id
+             WHERE m.type = ? AND m.utilisateur_id = ? AND ${exclusionAnnulations}`
+          )
           .get(type, utilisateurId) as { total: number }
       ).total;
     }
     return (
-      this.db.prepare("SELECT COALESCE(SUM(quantite), 0) as total FROM mouvements WHERE type = ?").get(type) as { total: number }
+      this.db
+        .prepare(
+          `SELECT COALESCE(SUM(m.quantite), 0) as total FROM mouvements m
+           LEFT JOIN factures f ON f.id = m.facture_id
+           WHERE m.type = ? AND ${exclusionAnnulations}`
+        )
+        .get(type) as { total: number }
     ).total;
   }
 
@@ -177,13 +227,19 @@ export class MouvementRepository {
    * Série Entrées/Sorties des 7 derniers jours, un point par jour
    * (§5 de la correction — graphique du dashboard). Un jour sans
    * mouvement retourne explicitement 0, jamais une valeur inventée.
+   *
+   * Même exclusion que `sommeQuantiteParType` ci-dessus (ventes annulées
+   * ET mouvements manuels eux-mêmes annulés) — pour rester cohérent avec
+   * les 2 totaux.
    */
   serieEntreesSortiesSeptJours(): { jour: string; entrees: number; sorties: number }[] {
     const rows = this.db
       .prepare(
-        `SELECT date(date) as jour, type, SUM(quantite) as total FROM mouvements
-         WHERE date(date) >= date('now', '-6 days') AND type IN ('entree', 'sortie')
-         GROUP BY date(date), type`
+        `SELECT date(m.date) as jour, m.type as type, SUM(m.quantite) as total FROM mouvements m
+         LEFT JOIN factures f ON f.id = m.facture_id
+         WHERE date(m.date) >= date('now', '-6 days') AND m.type IN ('entree', 'sortie')
+           AND (m.facture_id IS NULL OR f.annulee_le IS NULL) AND m.annule_le IS NULL
+         GROUP BY date(m.date), m.type`
       )
       .all() as { jour: string; type: string; total: number }[];
 
@@ -234,7 +290,7 @@ export class MouvementRepository {
    */
   listEvenementsPagine(filtres: {
     recherche: string;
-    typeFiltre: "tous" | "vente" | "annulation" | "entree" | "transfert";
+    typeFiltre: "tous" | "vente" | "annulation" | "entree" | "sortie" | "transfert";
     dateDebutIso: string | null;
     dateFinIso: string | null;
     colonneTri: "date" | "type" | "montant" | null;
@@ -296,5 +352,27 @@ export class MouvementRepository {
   listParFacture(factureId: string): Mouvement[] {
     const rows = this.db.prepare("SELECT * FROM mouvements WHERE facture_id = ?").all(factureId) as MouvementRow[];
     return rows.map(rowToMouvement);
+  }
+
+  findById(id: string): Mouvement | null {
+    const row = this.db.prepare("SELECT * FROM mouvements WHERE id = ?").get(id) as MouvementRow | undefined;
+    return row ? rowToMouvement(row) : null;
+  }
+
+  /**
+   * Annule un mouvement manuel (entrée/sortie saisie par erreur) —
+   * correction "corriger une erreur de saisie de stock sans fausser le
+   * tableau de bord". Annote seulement, ne supprime jamais la ligne —
+   * reste visible dans l'Historique avec son motif, même principe que
+   * `FactureRepository.annuler()`. Le rééquilibrage réel du stock
+   * (appliquer le delta inverse) est la responsabilité de l'appelant
+   * (StockService.annulerMouvement), jamais de cette méthode, qui ne
+   * touche volontairement que la ligne `mouvements` elle-même.
+   */
+  annuler(id: string, annulePar: string, motif: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE mouvements SET annule_le = ?, annule_par = ?, motif_annulation = ?, updated_at = ? WHERE id = ?")
+      .run(now, annulePar, motif, now, id);
   }
 }

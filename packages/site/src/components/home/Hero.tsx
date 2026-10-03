@@ -1,8 +1,8 @@
 import Link from "next/link";
-import type { ProductModel } from "@/lib/types/catalog";
+import type { ProductModel, Promotion } from "@/lib/types/catalog";
 import { Mosaic } from "./Mosaic";
 
-export function Hero({ models }: { models: ProductModel[] }) {
+export function Hero({ models, promotedModels, promotions }: { models: ProductModel[]; promotedModels: ProductModel[]; promotions: Promotion[] }) {
   return (
     <div className="mx-auto max-w-[1320px] px-[18px] py-8 sm:px-7 sm:py-14">
       <div className="grid grid-cols-1 items-center gap-8 md:grid-cols-[1.05fr_1fr] md:gap-11">
@@ -26,7 +26,7 @@ export function Hero({ models }: { models: ProductModel[] }) {
             </Link>
           </div>
         </div>
-        <Mosaic models={models} />
+        <Mosaic models={models} promotedModels={promotedModels} promotions={promotions} />
       </div>
     </div>
   );

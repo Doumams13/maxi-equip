@@ -27,6 +27,8 @@ export class InvalidInvoiceLineError extends Error {
 export interface VenteLigneSource {
   produitId: string | null;
   motif: string;
+  /** Référence du produit au moment de la vente — snapshot, voir LigneFacture. */
+  reference: string;
   taille: string;
   prixUnitaire: number;
   /** Quantité prélevée du stock MAXI EQUIP pour cette ligne. */
@@ -72,6 +74,7 @@ export function buildLigneFacture(source: VenteLigneSource): LigneFacture {
   return {
     produitId: source.produitId,
     motif: source.motif,
+    reference: source.reference,
     taille: source.taille,
     quantite: source.quantiteInterne + source.quantiteExterne,
     prixUnitaire: source.prixUnitaire,
@@ -118,6 +121,89 @@ export function calculerTotalLigne(ligne: Pick<LigneFacture, "quantite" | "prixU
  */
 export function calculerTotalFacture(lignes: Pick<LigneFacture, "quantite" | "prixUnitaire">[]): number {
   return lignes.reduce((total, ligne) => total + calculerTotalLigne(ligne), 0);
+}
+
+/**
+ * Remise commerciale exceptionnelle sur une vente — correction "Remise /
+ * Négociation". Distincte d'une promotion catalogue (prix avec période,
+ * voir pricing/getEffectivePrice.ts) : la remise ne modifie JAMAIS le
+ * prix catalogue ni `Facture.total`, uniquement ce que le client paie
+ * réellement.
+ *
+ * Validation centralisée ici (règle métier, jamais réimplémentée dans
+ * VenteService ni dans l'écran) : une remise négative n'a aucun sens
+ * commercial ; une remise strictement supérieure au total donnerait un
+ * montant à payer négatif, jamais accepté.
+ */
+export class InvalidRemiseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidRemiseError";
+  }
+}
+
+export function validerRemise(remise: number, total: number): void {
+  if (!Number.isFinite(remise) || remise < 0) {
+    throw new InvalidRemiseError(`La remise doit être un nombre positif ou nul (reçu : ${remise}).`);
+  }
+  if (remise > total) {
+    throw new InvalidRemiseError(`La remise (${remise} FCFA) ne peut pas dépasser le total de la vente (${total} FCFA).`);
+  }
+}
+
+/** Total réellement dû par le client après remise — jamais négatif (déjà garanti par validerRemise, Math.max ici en filet de sécurité). */
+export function calculerTotalNet(total: number, remise: number): number {
+  return Math.max(0, total - remise);
+}
+
+/**
+ * Statut de paiement d'une vente — correction "Réservation / Acompte".
+ * Distinct du statut de LIVRAISON (`Facture.statutLivraison`) : une vente
+ * "payee" peut être livrée ou non, une "reservation" ne devrait jamais
+ * être livrée (le CGV impose un paiement intégral avant livraison), mais
+ * ce n'est pas imposé ici — c'est à l'appelant (VenteService) de ne
+ * jamais proposer "livrée" tant que le statut reste "reservation".
+ */
+export type StatutPaiement = "reservation" | "payee";
+
+export class InvalidMontantPayeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidMontantPayeError";
+  }
+}
+
+/**
+ * Valide la cohérence entre le statut de paiement et le montant réellement
+ * encaissé, par rapport au total net (après remise) de la vente :
+ *  - "payee" : le montant payé doit être EXACTEMENT le total net (sinon ce
+ *    n'est pas réellement payé intégralement) — y compris 0 dans le cas
+ *    limite d'une vente entièrement remisée (total net nul) ;
+ *  - "reservation" : le montant payé (l'acompte) doit être strictement
+ *    positif et strictement inférieur au total net (un acompte égal au
+ *    total n'est plus une réservation, c'est un paiement complet — et un
+ *    acompte nul n'est pas un acompte).
+ */
+export function validerMontantPaye(statutPaiement: StatutPaiement, montantPaye: number, totalNet: number): void {
+  if (!Number.isFinite(montantPaye) || montantPaye < 0) {
+    throw new InvalidMontantPayeError(`Le montant payé doit être un nombre positif ou nul (reçu : ${montantPaye}).`);
+  }
+  if (statutPaiement === "payee") {
+    if (montantPaye !== totalNet) {
+      throw new InvalidMontantPayeError(
+        `Une vente marquée "payée intégralement" doit avoir un montant payé (${montantPaye} FCFA) égal au total net (${totalNet} FCFA).`
+      );
+    }
+  } else if (montantPaye <= 0 || montantPaye >= totalNet) {
+    throw new InvalidMontantPayeError(
+      `L'acompte d'une réservation (${montantPaye} FCFA) doit être strictement positif et strictement inférieur au total net (${totalNet} FCFA).`
+    );
+  }
+}
+
+/** Solde restant à encaisser sur une réservation — jamais négatif (filet de sécurité, déjà garanti par validerMontantPaye). */
+export function calculerSoldeRestant(totalNet: number, montantPaye: number): number {
+  return Math.max(0, totalNet - montantPaye);
 }
 
 /**

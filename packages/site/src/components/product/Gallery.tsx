@@ -33,7 +33,7 @@ export function Gallery({ images, productName }: { images: ProductImage[]; produ
               onClick={() => setActiveId(img.id)}
               className={`relative h-[60px] w-[60px] overflow-hidden rounded-sm border-2 ${img.id === active.id ? "border-forest" : "border-transparent"}`}
             >
-              <Image src={img.url} alt="" fill sizes="60px" className="object-cover" />
+              <Image src={img.url} alt={img.alt} fill sizes="60px" className="object-cover" />
             </button>
           ))}
         </div>

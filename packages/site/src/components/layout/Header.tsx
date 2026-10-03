@@ -12,7 +12,7 @@ const links = [
   { href: "/contact", label: "Contact" },
 ];
 
-export function Header() {
+export function Header({ nom }: { nom: string }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const { itemCount } = useCart();
@@ -25,13 +25,13 @@ export function Header() {
         <Link href="/" className="flex items-center gap-2.5">
           <Image
             src="/logo/maxi-equip-symbole.png"
-            alt="MAXI EQUIP"
+            alt={nom}
             width={57}
             height={36}
             priority
             className="h-9 w-auto sm:h-[46px]"
           />
-          <span className="font-display text-base font-semibold text-forest-deep sm:text-xl">MAXI EQUIP</span>
+          <span className="font-display text-base font-semibold text-forest-deep sm:text-xl">{nom}</span>
         </Link>
 
         <nav

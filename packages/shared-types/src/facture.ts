@@ -31,14 +31,47 @@ export interface Facture extends MetierEntity {
   vendeurNomManuel: string | null;
 
   lignes: LigneFacture[];
+  /** Somme des lignes, AVANT remise — jamais modifié par la remise (reste la base du calcul du CA/dashboard, voir factureRepository.sommeTotal). */
   total: number;
+  /**
+   * Remise commerciale exceptionnelle sur CETTE vente, en FCFA — jamais
+   * un pourcentage, jamais lié au catalogue. Distincte d'une promotion
+   * (prix catalogue avec période, voir Promotion) : la remise ne modifie
+   * jamais `total` ni le prix catalogue des produits, uniquement ce que
+   * le client paie réellement (`total - remise`, voir Total Net à payer
+   * sur la facture). `0` par défaut — jamais `null`, une remise absente
+   * est une remise nulle, pas une donnée manquante.
+   */
+  remise: number;
 
   /** Mode de règlement, saisi lors de la vente — figure sur le document facture (correction "Facturation" §21). */
   modeReglement: string | null;
 
   /**
-   * Statut de livraison — JAMAIS de statut "non payée" : une facture
-   * n'existe qu'une fois le paiement confirmé (§13 de la correction).
+   * Statut de paiement (correction "Réservation / Acompte") — distinct du
+   * statut de livraison ci-dessous. "reservation" = un acompte a été versé
+   * mais `montantPaye` < total net ; "payee" = montant intégralement réglé
+   * (`montantPaye` === total net). TOUJOURS renseigné — jamais de statut
+   * "non payée" : même une réservation correspond à un paiement réel
+   * (l'acompte), §13 de la correction reste vrai. `"payee"` par défaut
+   * pour toute facture créée avant cette évolution (jamais reconstruit
+   * rétroactivement).
+   */
+  statutPaiement: "reservation" | "payee";
+  /**
+   * Montant réellement encaissé à ce jour, en FCFA — jamais `null`. Égal
+   * au total net (`total - remise`) quand `statutPaiement === "payee"` ;
+   * strictement inférieur quand `"reservation"` (c'est l'acompte versé).
+   * Voir `calculerSoldeRestant` (domain/invoicing) pour le solde restant,
+   * jamais stocké séparément (évite toute désynchronisation).
+   */
+  montantPaye: number;
+
+  /**
+   * Statut de livraison — indépendant du statut de paiement. Modifiable
+   * librement dans les deux sens depuis l'écran Factures (aucun statut
+   * "terminus" verrouillé — décision explicite, correction "Réservation /
+   * Acompte").
    */
   statutLivraison: "en_attente" | "livree";
   livreeLe: ISODateTime | null;
@@ -57,11 +90,36 @@ export interface Facture extends MetierEntity {
    * correction à partir de la même erreur déjà traitée.
    */
   corrigeeParFactureId: UUID | null;
+
+  /**
+   * Correction Phase Finale, Bloc 6 — instantané de l'identité
+   * entreprise capturé au moment de la vente. Une facture historique ne
+   * doit JAMAIS changer d'apparence si les paramètres entreprise sont
+   * modifiés après coup (nouveau nom, nouvelle adresse...) — voir
+   * venteService.ts (capture) et factureDocumentService.ts (lecture).
+   * `null` uniquement pour les factures émises AVANT cette évolution
+   * (jamais reconstruit rétroactivement) — le document retombe alors sur
+   * l'identité courante, seul comportement raisonnable pour ces
+   * factures antérieures.
+   */
+  identiteSnapshot: IdentiteEntrepriseSnapshot | null;
+}
+
+/** Sous-ensemble de l'identité entreprise réellement affiché sur un document (facture/relevé interne) — voir Facture.identiteSnapshot. */
+export interface IdentiteEntrepriseSnapshot {
+  nom: string;
+  adresse: string;
+  quartier: string;
+  telephones: string[];
+  nomAdministrateur: string | null;
+  nomGerant: string | null;
 }
 
 export interface LigneFacture {
   produitId: UUID | null;
   motif: string;
+  /** Référence du produit au moment de la vente — snapshot, même principe que motif/taille (jamais une jointure live vers produits, qui pourrait avoir changé ou été supprimé depuis). `null` uniquement pour une vente enregistrée avant l'ajout de ce champ — jamais une valeur inventée pour ces lignes historiques. */
+  reference: string | null;
   taille: string;
   quantite: number;
   /** Prix appliqué à CETTE vente — prix promo si une promotion était active, sinon prix catalogue (§6). */

@@ -3,6 +3,7 @@ import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system
 import { X, Printer, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, StretchHorizontal, RectangleVertical } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { imprimerPdf } from "../lib/imprimerPdf.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -177,8 +178,8 @@ export function PdfPreviewModal({ chemin, nomSuggere, titre, onFermer }: { chemi
   async function handleImprimer() {
     setImprimant(true);
     try {
-      const result = await window.maxiEquip.imprimerDocument(chemin);
-      if (!result.success && result.message) showError("Impression annulée", result.message);
+      const result = await imprimerPdf(chemin);
+      if (!result.success && result.message) showError("Impression impossible", result.message);
     } finally {
       setImprimant(false);
     }

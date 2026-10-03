@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Card, defaultTokens } from "@maxi-equip/design-system";
-import { ArrowUp, ArrowDown, ChevronsUpDown, Search, ChevronLeft, ChevronRight, User, X } from "lucide-react";
+import { Card, Button, defaultTokens } from "@maxi-equip/design-system";
+import { ArrowUp, ArrowDown, ChevronsUpDown, Search, ChevronLeft, ChevronRight, User, X, Undo2 } from "lucide-react";
+import { stock as domainStock } from "@maxi-equip/domain";
 import type { EvenementHistorique } from "../../../preload/index.js";
 import { useSurbrillanceOperation } from "../highlight.js";
 
@@ -76,13 +77,25 @@ export function HistoriqueOperationsTable({
   depotsDisponibles,
   cibleSurbrillance,
   onSurbrillanceAppliquee,
+  onDemanderAnnulation,
+  chargementAnnulationId,
 }: {
-  type: "entree" | "transfert";
+  type: "entree" | "sortie" | "transfert";
   evenements: EvenementHistorique[];
   session: { userId: string };
   depotsDisponibles: string[];
   cibleSurbrillance: string | null;
   onSurbrillanceAppliquee: () => void;
+  /**
+   * Correction "corriger une erreur de saisie de stock sans fausser le
+   * tableau de bord" — omis = pas de colonne Actions du tout (ex.
+   * TransfertsScreen, hors scope de cette annulation). Fourni UNIQUEMENT
+   * par StockScreen pour ses onglets Entrées/Sorties, jamais pour les
+   * ventes (factureId non null, bouton jamais affiché dans ce cas — voir
+   * plus bas) ni pour les transferts.
+   */
+  onDemanderAnnulation?: (evenement: EvenementHistorique) => void;
+  chargementAnnulationId?: string | null;
 }) {
   const [recherche, setRecherche] = useState("");
   const [depotFiltre, setDepotFiltre] = useState("tous");
@@ -256,15 +269,15 @@ export function HistoriqueOperationsTable({
                     <th style={{ padding: "10px 16px" }}>
                       <EnteteTriable label="Taille" colonne="taille" tri={tri} onTrier={handleTrier} />
                     </th>
-                    {type === "entree" ? (
-                      <th style={{ padding: "10px 16px" }}>
-                        <EnteteTriable label="Dépôt" colonne="depot" tri={tri} onTrier={handleTrier} />
-                      </th>
-                    ) : (
+                    {type === "transfert" ? (
                       <>
                         <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textFaint, fontSize: 11, textTransform: "uppercase" }}>Depuis</th>
                         <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textFaint, fontSize: 11, textTransform: "uppercase" }}>Vers</th>
                       </>
+                    ) : (
+                      <th style={{ padding: "10px 16px" }}>
+                        <EnteteTriable label="Dépôt" colonne="depot" tri={tri} onTrier={handleTrier} />
+                      </th>
                     )}
                     <th style={{ padding: "10px 16px", textAlign: "right" }}>
                       <EnteteTriable label="Quantité" colonne="quantite" align="right" tri={tri} onTrier={handleTrier} />
@@ -272,6 +285,7 @@ export function HistoriqueOperationsTable({
                     <th style={{ padding: "10px 16px" }}>
                       <EnteteTriable label="Auteur" colonne="auteur" tri={tri} onTrier={handleTrier} />
                     </th>
+                    {onDemanderAnnulation && <th style={{ padding: "10px 16px" }} />}
                   </tr>
                 </thead>
                 <tbody>
@@ -280,16 +294,28 @@ export function HistoriqueOperationsTable({
                       <td style={{ padding: "10px 16px", color: defaultTokens.colors.textSoft, whiteSpace: "nowrap" }}>{new Date(e.date).toLocaleString("fr-FR")}</td>
                       <td style={{ padding: "10px 16px", fontWeight: 600 }}>{e.produitMotif}</td>
                       <td style={{ padding: "10px 16px" }}>{e.produitTaille}</td>
-                      {type === "entree" ? (
-                        <td style={{ padding: "10px 16px" }}>{e.emplacementNom}</td>
-                      ) : (
+                      {type === "transfert" ? (
                         <>
                           <td style={{ padding: "10px 16px" }}>{e.emplacementSourceNom}</td>
                           <td style={{ padding: "10px 16px" }}>{e.emplacementDestinationNom}</td>
                         </>
+                      ) : (
+                        <td style={{ padding: "10px 16px" }}>{e.emplacementNom}</td>
                       )}
-                      <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700, color: defaultTokens.colors.success }}>
-                        {type === "entree" ? "+" : ""}
+                      <td
+                        style={{
+                          padding: "10px 16px",
+                          textAlign: "right",
+                          fontWeight: 700,
+                          color:
+                            type === "entree"
+                              ? defaultTokens.colors.success
+                              : type === "sortie"
+                                ? defaultTokens.colors.danger
+                                : defaultTokens.colors.text,
+                        }}
+                      >
+                        {type === "entree" ? "+" : type === "sortie" ? "−" : ""}
                         {e.quantite}
                       </td>
                       <td style={{ padding: "10px 16px" }}>
@@ -302,6 +328,41 @@ export function HistoriqueOperationsTable({
                           <span style={{ color: defaultTokens.colors.textFaint }}>—</span>
                         )}
                       </td>
+                      {onDemanderAnnulation && (
+                        <td style={{ padding: "10px 16px", textAlign: "right" }}>
+                          {e.annuleLe ? (
+                            <span
+                              title={e.motifAnnulation ?? undefined}
+                              style={{ fontSize: 11.5, fontWeight: 700, color: defaultTokens.colors.textFaint }}
+                            >
+                              Annulée
+                            </span>
+                          ) : e.factureId ? null : domainStock.peutEncoreAnnulerMouvement(e.date) ? (
+                            // Une sortie liée à une vente (factureId renseigné) ne
+                            // se corrige jamais ici — uniquement via l'annulation
+                            // de la facture elle-même (écran Factures), un seul
+                            // mécanisme d'annulation par type d'origine.
+                            <Button
+                              variant="ghost"
+                              loading={chargementAnnulationId === e.id}
+                              onClick={() => onDemanderAnnulation(e)}
+                              title="Annuler ce mouvement"
+                            >
+                              <Undo2 size={14} />
+                            </Button>
+                          ) : (
+                            // Correction "l'annulation des mouvements doit être
+                            // limitée dans le temps" (48h, voir
+                            // domainStock.DELAI_ANNULATION_MOUVEMENT_MS) — passé
+                            // ce délai, plus de bouton, juste une indication du
+                            // pourquoi (jamais un bouton visible qui échouerait
+                            // silencieusement au clic).
+                            <span title="Passé 48h après la saisie, cette opération ne peut plus être annulée ici — faites une entrée/sortie corrective." style={{ fontSize: 11, color: defaultTokens.colors.textFaint }}>
+                              Délai dépassé
+                            </span>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

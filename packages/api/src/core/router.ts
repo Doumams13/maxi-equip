@@ -94,6 +94,17 @@ export class Router {
 
   async dispatch(req: ApiRequest): Promise<ApiResponse> {
     try {
+      // Correction Phase Finale (audit pré-production, §3) : point de
+      // santé NON versionné et NON préfixé — convention attendue par un
+      // reverse proxy / orchestrateur de conteneurs (Docker HEALTHCHECK,
+      // load balancer) à la racine, jamais sous /v1. Volontairement
+      // avant la vérification du préfixe de version ci-dessous (qui
+      // rejetterait sinon "/health" avec un 404), et avant toute
+      // authentification — ne renvoie rien de sensible.
+      if (req.path === "/health" && req.method === "GET") {
+        return { status: 200, body: { status: "ok" } };
+      }
+
       if (!req.path.startsWith(API_VERSION_PREFIX)) {
         throw new NotFoundError(`Chemin sans préfixe de version reconnu : ${req.path}`);
       }

@@ -6,6 +6,7 @@ import { FactureRepository } from "../repositories/factureRepository.js";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 import { PromotionRepository } from "../repositories/promotionRepository.js";
+import { ParametresRepository } from "../repositories/parametresRepository.js";
 
 export class VenteValidationError extends Error {
   constructor(message: string) {
@@ -48,13 +49,41 @@ export interface VenteInput {
   vendeurNomManuel: string | null;
   modeReglement: string | null;
   lignes: VenteLigneInput[];
+  /**
+   * Remise commerciale exceptionnelle sur CETTE vente, en FCFA — correction
+   * "Remise / Négociation". Jamais optionnel : l'appelant doit toujours
+   * trancher explicitement (0 si aucune remise). Validée dans
+   * `enregistrerVente` via `domainInvoicing.validerRemise` — jamais une
+   * seconde règle de validation réinventée ici.
+   */
+  remise: number;
+  /**
+   * Statut de paiement — correction "Réservation / Acompte". OPTIONNEL,
+   * contrairement à `remise` : la quasi-totalité des ventes sont
+   * intégralement payées, donc omis = `"payee"` (voir `enregistrerVente`).
+   * Seul un appelant qui enregistre explicitement une réservation doit le
+   * renseigner — jamais besoin de toucher les très nombreux sites d'appel
+   * existants (tests, maintenance) pour le cas normal.
+   */
+  statutPaiement?: "reservation" | "payee";
+  /**
+   * Acompte versé — pertinent UNIQUEMENT si `statutPaiement === "reservation"`
+   * (sinon ignoré : `enregistrerVente` calcule lui-même le montant payé
+   * comme le total net pour une vente "payee", jamais une valeur à
+   * deviner côté appelant). Validé via `domainInvoicing.validerMontantPaye`.
+   */
+  montantPaye?: number;
 }
 
 export interface VenteResult {
   factureId: string;
   numero: string;
   total: number;
+  remise: number;
 }
+
+/** Les 3 statuts affichés à l'écran Factures — voir FacturesScreen.tsx. Traduits en statutPaiement/statutLivraison par VenteService.changerStatutFacture. */
+export type StatutFactureAffiche = "reservation" | "payee_non_livree" | "payee_livree";
 
 /**
  * Orchestre une vente. AUCUNE règle métier n'est réimplémentée ici :
@@ -86,7 +115,15 @@ export class VenteService {
     private readonly mouvementRepository: MouvementRepository,
     private readonly factureRepository: FactureRepository,
     private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
-    private readonly promotionRepository?: PromotionRepository
+    private readonly promotionRepository?: PromotionRepository,
+    /**
+     * Correction Phase Finale, Bloc 6 — optionnel pour ne jamais casser un
+     * site d'appel existant (tests) qui construirait ce service sans
+     * dépôt paramètres. Sans lui, `identiteSnapshot` reste `null` (comme
+     * pour une facture antérieure à cette évolution) — jamais une
+     * exception, jamais un comportement dégradé silencieusement différent.
+     */
+    private readonly parametresRepository?: ParametresRepository
   ) {}
 
   enregistrerVente(input: VenteInput): VenteResult {
@@ -190,6 +227,7 @@ export class VenteService {
         const ligneFacture = domainInvoicing.buildLigneFacture({
           produitId: produit.id,
           motif: produit.motif,
+          reference: produit.reference,
           taille: produit.taille,
           prixUnitaire: ligne.prixUnitaire,
           quantiteInterne: quantiteAllouee,
@@ -204,6 +242,7 @@ export class VenteService {
           {
             produitId: produit.id,
             motif: produit.motif,
+            reference: produit.reference,
             taille: produit.taille,
             prixUnitaire: ligne.prixUnitaire,
             quantiteInterne: quantiteAllouee,
@@ -216,6 +255,25 @@ export class VenteService {
       }
 
       const total = domainInvoicing.calculerTotalFacture(lignesFacture);
+      try {
+        domainInvoicing.validerRemise(input.remise, total);
+      } catch (err) {
+        if (err instanceof domainInvoicing.InvalidRemiseError) throw new VenteValidationError(err.message);
+        throw err;
+      }
+      // "payee" (le cas normal, par défaut) : le montant payé est
+      // TOUJOURS le total net lui-même — jamais une valeur fournie par
+      // l'appelant à faire correspondre, ce qui éviterait toute dérive.
+      // Seule une "reservation" explicite fournit un acompte distinct.
+      const totalNet = domainInvoicing.calculerTotalNet(total, input.remise);
+      const statutPaiement = input.statutPaiement ?? "payee";
+      const montantPaye = statutPaiement === "payee" ? totalNet : (input.montantPaye ?? 0);
+      try {
+        domainInvoicing.validerMontantPaye(statutPaiement, montantPaye, totalNet);
+      } catch (err) {
+        if (err instanceof domainInvoicing.InvalidMontantPayeError) throw new VenteValidationError(err.message);
+        throw err;
+      }
       const vendeurEffectif = domainVendeur.resolveVendeurEffectif({
         compteConnecteNom: input.vendeurCompteConnecteNom,
         vendeurNomManuel: input.vendeurNomManuel,
@@ -223,6 +281,21 @@ export class VenteService {
 
       const numero = this.factureRepository.nextNumero();
       const now = new Date().toISOString();
+      // Correction Phase Finale, Bloc 6 — capture RÉELLE de l'identité
+      // entreprise à l'instant de la vente, jamais relue en direct plus
+      // tard pour cette facture (voir factureDocumentService via
+      // ipc/metier.ts, qui utilise ce snapshot en priorité).
+      const identite = this.parametresRepository?.getIdentite() ?? null;
+      const identiteSnapshot = identite
+        ? {
+            nom: identite.nom,
+            adresse: identite.adresse,
+            quartier: identite.quartier,
+            telephones: identite.telephones,
+            nomAdministrateur: identite.nomAdministrateur,
+            nomGerant: identite.nomGerant,
+          }
+        : null;
       const factureId = this.factureRepository.create({
         numero,
         date: now,
@@ -238,6 +311,10 @@ export class VenteService {
         modeReglement: input.modeReglement,
         lignes: lignesFacture,
         total,
+        remise: input.remise,
+        statutPaiement,
+        montantPaye,
+        identiteSnapshot,
       });
 
       this.factureRepository.createReleveInterne(factureId, lignesReleveInterne);
@@ -275,14 +352,54 @@ export class VenteService {
         vendeurUtilisateurId: input.vendeurUtilisateurId,
         modeReglement: input.modeReglement,
         total,
+        remise: input.remise,
+        statutPaiement,
+        montantPaye,
         lignes: lignesFacture,
         mouvementIds,
       });
 
-      return { factureId, numero, total };
+      return { factureId, numero, total, remise: input.remise };
     });
 
     return executer();
+  }
+
+  /**
+   * Change le statut affiché d'une facture (§ correction "Réservation /
+   * Acompte") — seul point d'entrée pour cette opération, traduit vers
+   * `factureRepository.changerStatut()`. Librement réversible entre
+   * "payee_non_livree" et "payee_livree" dans les deux sens (aucun verrou
+   * "terminus" — décision explicite). Le retour vers "reservation" n'est
+   * accepté que si la facture y est DÉJÀ (no-op) : une fois le solde
+   * encaissé, impossible de "redevenir" une réservation — il n'existe
+   * aucun mécanisme pour rendre l'argent déjà reçu.
+   */
+  changerStatutFacture(factureId: string, nouveauStatut: StatutFactureAffiche): void {
+    const facture = this.factureRepository.findById(factureId);
+    if (!facture) {
+      throw new VenteValidationError("Facture introuvable.");
+    }
+    if (facture.annuleeLe) {
+      throw new VenteValidationError("Impossible de changer le statut d'une facture annulée.");
+    }
+
+    if (nouveauStatut === "reservation") {
+      if (facture.statutPaiement !== "reservation") {
+        throw new VenteValidationError("Impossible de repasser une facture déjà payée en réservation.");
+      }
+      return;
+    }
+
+    // Passer à "payee_non_livree" ou "payee_livree" encaisse automatiquement
+    // le solde restant s'il s'agissait d'une réservation — le CGV impose un
+    // paiement intégral avant livraison, jamais de livraison partiellement payée.
+    const totalNet = domainInvoicing.calculerTotalNet(facture.total, facture.remise);
+    this.factureRepository.changerStatut(factureId, {
+      statutPaiement: "payee",
+      montantPaye: totalNet,
+      statutLivraison: nouveauStatut === "payee_livree" ? "livree" : "en_attente",
+    });
   }
 
   /**

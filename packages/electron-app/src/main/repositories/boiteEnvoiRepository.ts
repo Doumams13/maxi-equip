@@ -22,7 +22,23 @@ import { randomUUID } from "node:crypto";
  * `payload_json` contient uniquement les champs métier nécessaires à une
  * future synchronisation, jamais un instantané complet de toute la base.
  */
-export type TypeOperationBoiteEnvoi = "vente" | "annulation" | "entree" | "transfert" | "parametres_entreprise" | "promotion";
+export type TypeOperationBoiteEnvoi =
+  | "vente"
+  | "annulation"
+  | "entree"
+  | "sortie"
+  | "transfert"
+  | "parametres_entreprise"
+  | "promotion"
+  // Correction "Intégration Site Phase 5, Partie 2 (pipeline catalogue)" :
+  // "modele"/"produit" suivent le même mécanisme d'envoi générique que
+  // "promotion" (voir SyncService.effectuerPush, POST /v1/sync/push).
+  // "image_produit" est traité à part par SyncService (fichier binaire
+  // trop volumineux pour le lot JSON générique) : envoyé individuellement
+  // vers POST /v1/app/images/sync, jamais dans le même lot.
+  | "modele"
+  | "produit"
+  | "image_produit";
 export type StatutBoiteEnvoi = "pending" | "sent" | "confirmed" | "error";
 
 export interface EntreeBoiteEnvoi {

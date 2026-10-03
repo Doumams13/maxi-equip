@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Logo, Button, defaultTokens } from "@maxi-equip/design-system";
 import { IndicateurSynchronisation } from "./components/IndicateurSynchronisation.js";
 import { IndicateurNotifications } from "./components/IndicateurNotifications.js";
+import { IndicateurMiseAJour } from "./components/IndicateurMiseAJour.js";
 import {
   LayoutDashboard,
   Package,
@@ -176,6 +177,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, o
             background: "#fff",
           }}
         >
+          <IndicateurMiseAJour />
           <IndicateurNotifications onOuvrirDemande={onOuvrirDemande} />
           <IndicateurSynchronisation />
         </div>

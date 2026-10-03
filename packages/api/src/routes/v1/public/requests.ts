@@ -34,7 +34,7 @@ export const publicSubmitRequestRoute: Route = {
   method: "POST",
   path: "/public/requests",
   trustLevel: "public",
-  handler: (req) => {
+  handler: async (req) => {
     const limitation = verifierLimitation(req.ip, LIMITE_REQUETES, FENETRE_LIMITE_MS);
     if (!limitation.autorise) {
       throw new ApiError(429, "rate_limited", `Trop de demandes envoyées récemment. Réessayez dans ${limitation.reessayerDansSecondes} secondes.`);
@@ -49,7 +49,7 @@ export const publicSubmitRequestRoute: Route = {
       return { status: 200, body: { requestId, submittedAt } };
     }
 
-    enregistrerOperations([{ entityType: "demande", entityId: requestId, payload: resultat }]);
+    await enregistrerOperations([{ entityType: "demande", entityId: requestId, payload: resultat }]);
 
     return { status: 200, body: { requestId, submittedAt } };
   },

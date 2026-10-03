@@ -127,7 +127,8 @@ export function PromotionsScreen() {
   const [erreurs, setErreurs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [conflits, setConflits] = useState<Promotion[]>([]);
-  const [produitsDispo, setProduitsDispo] = useState<{ id: string; label: string }[]>([]);
+  const [produitsDispo, setProduitsDispo] = useState<{ id: string; modeleKey: string; motif: string; reference: string; taille: string }[]>([]);
+  const [rechercheProduits, setRechercheProduits] = useState("");
 
   async function charger() {
     setLoading(true);
@@ -142,9 +143,38 @@ export function PromotionsScreen() {
   useEffect(() => {
     void charger();
     void window.maxiEquip.listProduits().then((produits) => {
-      setProduitsDispo(produits.map((p) => ({ id: p.id, label: `${p.reference} — ${p.motif || p.taille} ${p.taille}` })));
+      setProduitsDispo(
+        produits.map((p) => ({
+          id: p.id,
+          modeleKey: p.modeleId ?? p.motif,
+          motif: p.motif,
+          reference: p.reference,
+          taille: p.taille,
+        }))
+      );
     });
   }, []);
+
+  // Regroupe par modèle (motif) — sélectionner 30-50 références parmi une
+  // centaine devient gérable via une case "tout sélectionner ce modèle"
+  // plutôt qu'un clic par référence. Filtré par la recherche (motif OU
+  // référence), insensible à la casse.
+  const groupesProduits = (() => {
+    const q = rechercheProduits.trim().toLowerCase();
+    const filtres = q
+      ? produitsDispo.filter((p) => p.motif.toLowerCase().includes(q) || p.reference.toLowerCase().includes(q))
+      : produitsDispo;
+
+    const parGroupe = new Map<string, { motif: string; produits: typeof produitsDispo }>();
+    for (const p of filtres) {
+      const existant = parGroupe.get(p.modeleKey);
+      if (existant) existant.produits.push(p);
+      else parGroupe.set(p.modeleKey, { motif: p.motif, produits: [p] });
+    }
+    return [...parGroupe.entries()]
+      .map(([modeleKey, g]) => ({ modeleKey, ...g }))
+      .sort((a, b) => a.motif.localeCompare(b.motif, "fr"));
+  })();
 
   function ouvrirCreer() {
     setForm(FORM_VIDE);
@@ -463,40 +493,91 @@ export function PromotionsScreen() {
                   {erreurs.produitIds && (
                     <p style={{ margin: "0 0 4px", fontSize: 11.5, color: defaultTokens.colors.danger }}>{erreurs.produitIds}</p>
                   )}
+                  <input
+                    type="text"
+                    value={rechercheProduits}
+                    onChange={(e) => setRechercheProduits(e.target.value)}
+                    placeholder="Rechercher un motif ou une référence…"
+                    style={{ ...inputStyle, marginBottom: 6, fontSize: 13, padding: "7px 10px" }}
+                  />
                   <div
                     style={{
                       border: `1px solid ${erreurs.produitIds ? defaultTokens.colors.danger : defaultTokens.colors.border}`,
                       borderRadius: defaultTokens.radius.sm,
-                      maxHeight: 180,
+                      maxHeight: 280,
                       overflowY: "auto",
                       background: "#fafafa",
                     }}
                   >
-                    {produitsDispo.length === 0 ? (
-                      <p style={{ padding: "10px 12px", margin: 0, fontSize: 13, color: defaultTokens.colors.textSoft }}>Aucun produit disponible.</p>
+                    {groupesProduits.length === 0 ? (
+                      <p style={{ padding: "10px 12px", margin: 0, fontSize: 13, color: defaultTokens.colors.textSoft }}>
+                        {produitsDispo.length === 0 ? "Aucun produit disponible." : "Aucun résultat pour cette recherche."}
+                      </p>
                     ) : (
-                      produitsDispo.map((prod) => (
-                        <label
-                          key={prod.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            padding: "7px 12px",
-                            cursor: "pointer",
-                            fontSize: 13,
-                            borderBottom: `1px solid ${defaultTokens.colors.borderSoft}`,
-                            background: form.produitIds.includes(prod.id) ? defaultTokens.colors.accentSoft : "transparent",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={form.produitIds.includes(prod.id)}
-                            onChange={() => toggleProduit(prod.id)}
-                          />
-                          {prod.label}
-                        </label>
-                      ))
+                      groupesProduits.map((groupe) => {
+                        const idsGroupe = groupe.produits.map((p) => p.id);
+                        const nbSelectionnes = idsGroupe.filter((id) => form.produitIds.includes(id)).length;
+                        const touSelectionnes = nbSelectionnes === idsGroupe.length;
+
+                        function toggleGroupe() {
+                          setForm((f) => {
+                            const sansGroupe = f.produitIds.filter((id) => !idsGroupe.includes(id));
+                            return { ...f, produitIds: touSelectionnes ? sansGroupe : [...sansGroupe, ...idsGroupe] };
+                          });
+                        }
+
+                        return (
+                          <div key={groupe.modeleKey} style={{ borderBottom: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+                            <label
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "7px 12px",
+                                cursor: "pointer",
+                                fontSize: 13,
+                                fontWeight: 700,
+                                background: defaultTokens.colors.surfaceAlt,
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={touSelectionnes}
+                                ref={(el) => {
+                                  if (el) el.indeterminate = nbSelectionnes > 0 && !touSelectionnes;
+                                }}
+                                onChange={toggleGroupe}
+                              />
+                              {groupe.motif}
+                              <span style={{ fontWeight: 400, color: defaultTokens.colors.textFaint, fontSize: 11.5 }}>
+                                ({nbSelectionnes}/{idsGroupe.length})
+                              </span>
+                            </label>
+                            {groupe.produits.map((prod) => (
+                              <label
+                                key={prod.id}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  padding: "6px 12px 6px 30px",
+                                  cursor: "pointer",
+                                  fontSize: 12.5,
+                                  background: form.produitIds.includes(prod.id) ? defaultTokens.colors.accentSoft : "transparent",
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={form.produitIds.includes(prod.id)}
+                                  onChange={() => toggleProduit(prod.id)}
+                                />
+                                <span style={{ fontFamily: defaultTokens.typography.mono, color: defaultTokens.colors.textSoft }}>{prod.reference}</span>
+                                <span style={{ color: defaultTokens.colors.textFaint }}>{prod.taille}</span>
+                              </label>
+                            ))}
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                   {form.produitIds.length > 0 && (

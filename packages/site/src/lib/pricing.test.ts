@@ -83,7 +83,7 @@ describe("getModelDisplayPrice — cœur des Défauts 3/4", () => {
     expect(result.fromMultipleSizes).toBe(true);
   });
 
-  it("REPRODUCTION EXACTE DU DÉFAUT 3/4 : une promotion sur la variante la plus chère ne doit jamais être affichée si une autre variante moins chère existe sans promotion — reproduit fidèlement 'Marbre Blanc'", () => {
+  it("RÉGRESSION CORRIGÉE (ex-'Défaut 3/4') : une promotion sur une variante plus chère que la moins chère du modèle doit quand même être affichée — sinon la promotion reste invisible partout sur le site (page d'accueil, filtre 'Promotions')", () => {
     const variants = [
       { id: "v-40", priceFcfa: 9500 },
       { id: "v-60", priceFcfa: 15000 },
@@ -92,9 +92,12 @@ describe("getModelDisplayPrice — cœur des Défauts 3/4", () => {
     const promos = [promo({ productModelId: "marbre-blanc", variantId: "v-60", promoPriceFcfa: 12500 })];
     const result = getModelDisplayPrice(variants, promos, "marbre-blanc");
 
-    expect(result.effective.normalPriceFcfa).toBe(9500);
-    expect(result.effective.isPromotionActive).toBe(false);
-    expect(result.effective.promoPriceFcfa).toBeNull();
+    // Le prix affiché correspond bien à v-60 (une variante RÉELLEMENT
+    // vendue à ce prix, jamais une combinaison artificielle) — jamais
+    // 9500 (v-40, non promue) ET jamais une promotion prétendue sur v-40.
+    expect(result.effective.normalPriceFcfa).toBe(15000);
+    expect(result.effective.isPromotionActive).toBe(true);
+    expect(result.effective.promoPriceFcfa).toBe(12500);
   });
 
   it("une promotion qui rend une variante réellement la moins chère est bien affichée avec son badge", () => {

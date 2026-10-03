@@ -40,6 +40,18 @@ export class NotFoundError extends ApiError {
   }
 }
 
+export class TooManyRequestsError extends ApiError {
+  constructor(message = "Trop de tentatives — réessayez plus tard.") {
+    super(429, "too_many_requests", message);
+  }
+}
+
+export class ServiceUnavailableError extends ApiError {
+  constructor(message = "Fonctionnalité indisponible sur ce serveur.") {
+    super(503, "service_unavailable", message);
+  }
+}
+
 export function errorToResponse(err: unknown): ApiResponse {
   if (err instanceof ApiError) {
     return { status: err.status, body: { error: { code: err.code, message: err.message } } };

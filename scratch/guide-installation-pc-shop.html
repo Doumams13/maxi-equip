@@ -1,0 +1,351 @@
+<title>Installation PC Shop</title>
+<style>
+  :root {
+    --bg: #f5f4ef;
+    --surface: #ffffff;
+    --surface-2: #ebe9e1;
+    --border: #dcd9cd;
+    --text: #201f19;
+    --text-soft: #6b6858;
+    --text-faint: #918d7a;
+    --accent: #2f6b52;
+    --accent-strong: #234f3d;
+    --accent-soft: #e3ede8;
+    --danger: #9b3b26;
+    --danger-soft: #f5e8e3;
+    --mono-bg: #f0eee4;
+    --shadow: 0 1px 2px rgba(32,31,25,0.06), 0 8px 24px rgba(32,31,25,0.05);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15170f;
+      --surface: #1d2016;
+      --surface-2: #262a1c;
+      --border: #383c2c;
+      --text: #ece9dd;
+      --text-soft: #b3b09b;
+      --text-faint: #7d7a68;
+      --accent: #6fbf98;
+      --accent-strong: #8fd4b2;
+      --accent-soft: #223229;
+      --danger: #e0876f;
+      --danger-soft: #34221d;
+      --mono-bg: #262a1c;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15170f;
+    --surface: #1d2016;
+    --surface-2: #262a1c;
+    --border: #383c2c;
+    --text: #ece9dd;
+    --text-soft: #b3b09b;
+    --text-faint: #7d7a68;
+    --accent: #6fbf98;
+    --accent-strong: #8fd4b2;
+    --accent-soft: #223229;
+    --danger: #e0876f;
+    --danger-soft: #34221d;
+    --mono-bg: #262a1c;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.55;
+    padding-inline: 16px;
+    padding-block: 32px 64px;
+  }
+  h1, h2, h3 { font-family: "Sora", ui-sans-serif, system-ui, sans-serif; text-wrap: balance; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+
+  header.page { margin-bottom: 28px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent-strong); background: var(--accent-soft);
+    padding: 4px 10px; border-radius: 999px; margin-bottom: 14px;
+  }
+  h1 { font-size: clamp(24px, 4vw, 30px); font-weight: 700; margin: 0 0 8px; color: var(--text); }
+  .lede { color: var(--text-soft); font-size: 15.5px; max-width: 60ch; margin: 0; }
+
+  .callout {
+    border: 1px solid var(--border); background: var(--surface);
+    border-radius: 12px; padding: 16px 18px; margin: 20px 0;
+    box-shadow: var(--shadow);
+  }
+  .callout.warn { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); background: var(--danger-soft); }
+  .callout h3 { margin: 0 0 8px; font-size: 14px; color: var(--text); display:flex; align-items:center; gap:8px; }
+  .callout p { margin: 0; color: var(--text-soft); font-size: 14px; }
+  .callout ul { margin: 8px 0 0; padding-left: 20px; color: var(--text-soft); font-size: 14px; }
+  .callout li + li { margin-top: 4px; }
+
+  section.step {
+    display: grid; grid-template-columns: 40px 1fr; gap: 16px;
+    padding: 22px 0; border-top: 1px solid var(--border);
+  }
+  section.step:first-of-type { border-top: none; padding-top: 8px; }
+  .step-num {
+    width: 34px; height: 34px; border-radius: 999px;
+    background: var(--accent); color: var(--surface);
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Sora", sans-serif; font-weight: 700; font-size: 14px;
+    flex-shrink: 0;
+  }
+  .step h2 { font-size: 17px; margin: 4px 0 8px; }
+  .step p { margin: 0 0 10px; color: var(--text-soft); }
+  .step p:last-child { margin-bottom: 0; }
+  .step .muted { font-size: 13.5px; color: var(--text-faint); }
+
+  .path {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px;
+    background: var(--mono-bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 6px; color: var(--text);
+  }
+
+  .field {
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+    padding: 10px 10px 10px 14px; margin-top: 10px;
+  }
+  .field .label { font-size: 12px; color: var(--text-faint); letter-spacing: 0.02em; margin-bottom: 3px; }
+  .field .value {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px;
+    color: var(--text); word-break: break-all;
+  }
+  .copy-btn {
+    flex-shrink: 0; border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text); border-radius: 7px; padding: 7px 12px; font-size: 12.5px;
+    font-weight: 600; cursor: pointer; font-family: inherit;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .copy-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+  .copy-btn:active { transform: scale(0.97); }
+  .copy-btn.copied { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+
+  .script-box {
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    margin-top: 12px; background: var(--mono-bg);
+  }
+  .script-box-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border);
+    font-size: 12.5px; color: var(--text-soft); font-weight: 600;
+  }
+  pre.code-card {
+    margin: 0; padding: 14px; overflow-x: auto;
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; line-height: 1.6;
+    color: var(--text); white-space: pre;
+  }
+  details.fallback {
+    margin-top: 18px; border-top: 1px dashed var(--border); padding-top: 14px;
+  }
+  details.fallback summary {
+    cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--text-soft);
+  }
+  details.fallback summary:hover { color: var(--accent-strong); }
+
+  .fieldset-title {
+    font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-faint); margin: 18px 0 2px;
+  }
+
+  footer.done {
+    margin-top: 36px; padding: 22px; border-radius: 14px;
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  }
+  footer.done h2 { margin: 0 0 8px; font-size: 17px; color: var(--accent-strong); }
+  footer.done p { margin: 0; color: var(--text); font-size: 14.5px; }
+  footer.done p + p { margin-top: 8px; }
+
+  .sensitive-tag {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--danger); background: var(--danger-soft);
+    padding: 2px 8px; border-radius: 6px; margin-bottom: 10px;
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="page">
+    <span class="eyebrow">MAXI EQUIP · Procédure d'installation</span>
+    <h1>Installer l'application sur le PC Shop</h1>
+    <p class="lede">Guide complet, à suivre dans l'ordre. Toutes les valeurs à copier sont déjà remplies ci-dessous — aucune information supplémentaire n'est nécessaire pour terminer l'installation.</p>
+  </header>
+
+  <div class="callout">
+    <h3>📦 Avant de commencer</h3>
+    <p>Un seul fichier est nécessaire, à récupérer auprès de la personne qui vous a transmis ce guide :</p>
+    <ul>
+      <li><span class="path">MAXI EQUIP Setup 0.1.0.exe</span> — l'installeur</li>
+    </ul>
+  </div>
+
+  <div class="callout warn">
+    <span class="sensitive-tag">Confidentiel</span>
+    <h3>🔒 Cette page contient des identifiants réels</h3>
+    <p>Ne partagez ce lien qu'avec la personne qui installe l'application. Une fois l'installation terminée, cette page peut être fermée définitivement.</p>
+  </div>
+
+  <section class="step">
+    <div class="step-num">1</div>
+    <div>
+      <h2>Désactiver Smart App Control (si Windows le demande)</h2>
+      <p>Si Windows bloque l'installation à l'étape suivante : ouvrez <strong>Sécurité Windows</strong> → <strong>Contrôle des applications et du navigateur</strong> → <strong>Paramètres de contrôle des applications intelligent</strong> → réglez sur <strong>Désactivé</strong>.</p>
+      <p class="muted">Ignorez cette étape si l'installation à l'étape suivante se déroule sans blocage. L'installeur n'est pas signé numériquement — c'est normal, Windows peut afficher un avertissement "éditeur inconnu" : cliquez <strong>Informations complémentaires</strong> puis <strong>Exécuter quand même</strong>.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-num">2</div>
+    <div>
+      <h2>Installer l'application</h2>
+      <p>Lancez <span class="path">MAXI EQUIP Setup 0.1.0.exe</span> et suivez l'assistant jusqu'au bout. Ne lancez pas encore l'application à la fin de l'installation.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-num">3</div>
+    <div>
+      <h2>Configurer les variables d'environnement</h2>
+      <p>Méthode recommandée : un script qui configure les 7 variables d'un coup, sans risque d'erreur de frappe.</p>
+
+      <div class="script-box">
+        <div class="script-box-head">
+          <span>PowerShell — à exécuter en Administrateur</span>
+          <button class="copy-btn" data-target>Copier le script</button>
+        </div>
+        <pre class="code-card"><code data-copy>$vars = @{
+  "MAXI_EQUIP_API_URL"="https://api.maxi-equip.com";
+  "MAXI_EQUIP_SYNC_JWT"="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaG9wLTEiLCJyb2xlIjoiYXBwIiwiaWF0IjoxNzkwNjQ2MzY2LCJleHAiOjE4MjIxODIzNjZ9.nOyAKxljMPienCHPFvK__CK_kQzAzVvY9HKRqZd7mcE";
+  "CLOUD_BACKUP_BUCKET"="maxiequip-backups";
+  "CLOUD_BACKUP_REGION"="eu-central-003";
+  "CLOUD_BACKUP_ENDPOINT"="s3.eu-central-003.backblazeb2.com";
+  "CLOUD_BACKUP_ACCESS_KEY_ID"="0033c5495a5247f0000000006";
+  "CLOUD_BACKUP_SECRET_ACCESS_KEY"="K003KkD73Ma/v/m/Ar7Z5fp0VwlkKoQ"
+}
+$estAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $estAdmin) {
+  Write-Host "Ce script doit etre execute en Administrateur. Fermez cette fenetre, puis :" -ForegroundColor Red
+  Write-Host "clic droit sur le bouton Demarrer -> Terminal (Admin) -> recollez le script." -ForegroundColor Red
+} else {
+  foreach ($n in $vars.Keys) { [Environment]::SetEnvironmentVariable($n, $vars[$n], "Machine") }
+  Write-Host "Les 7 variables ont ete configurees." -ForegroundColor Green
+  Write-Host "Redemarrez l'ordinateur maintenant avant de lancer MAXI EQUIP." -ForegroundColor Yellow
+}</code></pre>
+      </div>
+
+      <p class="muted">Ouvrez PowerShell en Administrateur (clic droit sur le bouton Démarrer → <strong>Terminal (Admin)</strong> ou <strong>Windows PowerShell (Admin)</strong>), collez le script copié, appuyez sur Entrée, puis <strong>redémarrez l'ordinateur</strong> avant l'étape 5.</p>
+
+      <details class="fallback">
+        <summary>Méthode manuelle (si le script ne peut pas être utilisé)</summary>
+        <p class="muted" style="margin-top:10px;">Tapez <strong>variables d'environnement</strong> dans le menu Démarrer → ouvrez <strong>Modifier les variables d'environnement système</strong> → bouton <strong>Variables d'environnement…</strong> → dans la section du bas, <strong>Variables système</strong>, cliquez <strong>Nouvelle…</strong> pour chacune des 7 lignes ci-dessous.</p>
+
+      <div class="fieldset-title">Synchronisation avec le serveur</div>
+
+      <div class="field">
+        <div><div class="label">MAXI_EQUIP_API_URL</div><div class="value" data-copy>https://api.maxi-equip.com</div></div>
+        <button class="copy-btn" data-target>Copier</button>
+      </div>
+
+      <div class="field">
+        <div><div class="label">MAXI_EQUIP_SYNC_JWT</div><div class="value" data-copy>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaG9wLTEiLCJyb2xlIjoiYXBwIiwiaWF0IjoxNzkwNjQ2MzY2LCJleHAiOjE4MjIxODIzNjZ9.nOyAKxljMPienCHPFvK__CK_kQzAzVvY9HKRqZd7mcE</div></div>
+        <button class="copy-btn" data-target>Copier</button>
+      </div>
+
+      <div class="fieldset-title">Sauvegarde automatique du magasin (Backblaze B2)</div>
+
+      <div class="field">
+        <div><div class="label">CLOUD_BACKUP_BUCKET</div><div class="value" data-copy>maxiequip-backups</div></div>
+        <button class="copy-btn" data-target>Copier</button>
+      </div>
+
+      <div class="field">
+        <div><div class="label">CLOUD_BACKUP_REGION</div><div class="value" data-copy>eu-central-003</div></div>
+        <button class="copy-btn" data-target>Copier</button>
+      </div>
+
+      <div class="field">
+        <div><div class="label">CLOUD_BACKUP_ENDPOINT</div><div class="value" data-copy>s3.eu-central-003.backblazeb2.com</div></div>
+        <button class="copy-btn" data-target>Copier</button>
+      </div>
+
+      <div class="field">
+        <div><div class="label">CLOUD_BACKUP_ACCESS_KEY_ID</div><div class="value" data-copy>0033c5495a5247f0000000006</div></div>
+        <button class="copy-btn" data-target>Copier</button>
+      </div>
+
+      <div class="field">
+        <div><div class="label">CLOUD_BACKUP_SECRET_ACCESS_KEY</div><div class="value" data-copy>K003KkD73Ma/v/m/Ar7Z5fp0VwlkKoQ</div></div>
+        <button class="copy-btn" data-target>Copier</button>
+      </div>
+
+      <p class="muted" style="margin-top:14px;">Une fois les 7 variables créées, cliquez <strong>OK</strong> sur chacune des fenêtres ouvertes pour tout enregistrer, puis redémarrez l'ordinateur.</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-num">4</div>
+    <div>
+      <h2>Premier lancement — créer le compte Administrateur</h2>
+      <p>Lancez MAXI EQUIP. À l'écran de configuration initiale, choisissez <strong>Nouvelle installation</strong> et créez le compte Administrateur.</p>
+      <p><strong>Le mot de passe choisi ici protège tout</strong> : c'est lui qui permettra de tout récupérer automatiquement si ce PC est un jour remplacé. Choisissez-en un solide, et transmettez-le au propriétaire par un canal sécurisé (jamais par ce lien).</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-num">5</div>
+    <div>
+      <h2>Redémarrer l'application une fois</h2>
+      <p>Fermez complètement MAXI EQUIP puis relancez-la. Ce redémarrage déclenche la toute première sauvegarde automatique — utile pour confirmer que tout fonctionne.</p>
+    </div>
+  </section>
+
+  <footer class="done">
+    <h2>C'est terminé de votre côté</h2>
+    <p>Aucune autre configuration n'est nécessaire. La vérification finale (synchronisation, sauvegarde cloud) se fait à distance, côté serveur — vous n'avez rien de plus à faire.</p>
+    <p>En cas de blocage à une étape, notez le numéro de l'étape et le message affiché à l'écran.</p>
+  </footer>
+
+</div>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var container = btn.closest('.field') || btn.closest('.script-box');
+      var text = container.querySelector('[data-copy]').textContent;
+      function done() {
+        var original = btn.textContent;
+        btn.textContent = 'Copié';
+        btn.classList.add('copied');
+        setTimeout(function () {
+          btn.textContent = original;
+          btn.classList.remove('copied');
+        }, 1400);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {
+          selectText(container.querySelector('[data-copy]'));
+        });
+      } else {
+        selectText(container.querySelector('[data-copy]'));
+      }
+    });
+  });
+  function selectText(el) {
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+</script>

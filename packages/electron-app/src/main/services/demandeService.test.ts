@@ -271,6 +271,8 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
       vendeurCompteConnecteNom: "Testeur",
       vendeurNomManuel: null,
       modeReglement: "especes",
+
+      remise: 0,
       lignes: [{ produitId, quantite: 5, prixUnitaire: 12000, allocationsDepots: [{ emplacementId: depotId, quantite: 5 }] }],
     });
     expect(resultatVente.total).toBe(5 * 12000);
@@ -311,6 +313,8 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
       vendeurCompteConnecteNom: "Testeur",
       vendeurNomManuel: null,
       modeReglement: null,
+
+      remise: 0,
       lignes: [{ produitId, quantite: 1, prixUnitaire: 12000, allocationsDepots: [{ emplacementId: depotId, quantite: 1 }] }],
     });
     service.marquerTraitee(demande.id, resultat.factureId);
@@ -355,6 +359,8 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
       vendeurCompteConnecteNom: "Testeur",
       vendeurNomManuel: null,
       modeReglement: null,
+
+      remise: 0,
       lignes: [{ produitId, quantite: 1, prixUnitaire: 12000, allocationsDepots: [{ emplacementId: depotId, quantite: 1 }] }],
     });
     service.marquerTraitee(traiteeAncienne.id, resultat.factureId);

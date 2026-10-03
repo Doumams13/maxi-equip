@@ -162,6 +162,8 @@ export function executerGenerationDonneesTest(db: Database.Database): ResultatGe
         vendeurCompteConnecteNom: vendeur.nom,
         vendeurNomManuel: null,
         modeReglement: choisir(MODES_REGLEMENT, i),
+
+        remise: 0,
         lignes: [
           {
             produitId,

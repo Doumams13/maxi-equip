@@ -6,6 +6,17 @@ export interface IdentiteEntreprise {
   adresse: string;
   quartier: string;
   telephones: string[];
+  /**
+   * Correction "L'appli gère les infos du site" — colonnes `email`/
+   * `whatsapp` de `parametres_entreprise` déjà présentes dans schema.sql
+   * depuis l'origine mais jamais lues ni écrites par aucun dépôt ni
+   * écran : le site public (packages/site) les affichait donc codées en
+   * dur (`siteConfig`), sans aucun moyen réel de les modifier depuis
+   * l'application. Chaîne vide = non configuré (même convention que le
+   * reste de cette interface), jamais une valeur inventée.
+   */
+  whatsapp: string;
+  email: string;
   /** Correction "Paramètres — Administrateur/Gérant configurables" : `null` = non configuré, jamais une valeur inventée sur les documents. */
   nomAdministrateur: string | null;
   nomGerant: string | null;
@@ -56,14 +67,18 @@ export class ParametresRepository {
 
   /** Identité complète — utilisée par l'écran Paramètres ET par la génération des documents (facture). */
   getIdentite(): IdentiteEntreprise {
-    const row = this.db.prepare("SELECT nom, adresse, ville, nom_administrateur, nom_gerant, updated_at FROM parametres_entreprise WHERE id = 'singleton'").get() as
-      | { nom: string; adresse: string; ville: string; nom_administrateur: string | null; nom_gerant: string | null; updated_at: string }
+    const row = this.db
+      .prepare("SELECT nom, adresse, ville, whatsapp, email, nom_administrateur, nom_gerant, updated_at FROM parametres_entreprise WHERE id = 'singleton'")
+      .get() as
+      | { nom: string; adresse: string; ville: string; whatsapp: string; email: string; nom_administrateur: string | null; nom_gerant: string | null; updated_at: string }
       | undefined;
     return {
       nom: row?.nom ?? "MAXI-EQUIP",
       adresse: row?.adresse ?? "",
       quartier: row?.ville ?? "",
       telephones: this.getTelephones(),
+      whatsapp: row?.whatsapp ?? "",
+      email: row?.email ?? "",
       nomAdministrateur: row?.nom_administrateur ?? null,
       nomGerant: row?.nom_gerant ?? null,
       updatedAt: row?.updated_at ?? new Date(0).toISOString(),
@@ -89,12 +104,16 @@ export class ParametresRepository {
     const telephonesValides = identite.telephones.map((t) => t.trim()).filter((t) => t.length > 0);
     const nomAdministrateur = identite.nomAdministrateur?.trim() || null;
     const nomGerant = identite.nomGerant?.trim() || null;
+    const whatsapp = identite.whatsapp.trim();
+    const email = identite.email.trim();
 
     const executer = this.db.transaction(() => {
       const now = new Date().toISOString();
       this.db
-        .prepare("UPDATE parametres_entreprise SET nom = ?, adresse = ?, ville = ?, nom_administrateur = ?, nom_gerant = ?, updated_at = ? WHERE id = 'singleton'")
-        .run(nom, identite.adresse.trim(), identite.quartier.trim(), nomAdministrateur, nomGerant, now);
+        .prepare(
+          "UPDATE parametres_entreprise SET nom = ?, adresse = ?, ville = ?, whatsapp = ?, email = ?, nom_administrateur = ?, nom_gerant = ?, updated_at = ? WHERE id = 'singleton'"
+        )
+        .run(nom, identite.adresse.trim(), identite.quartier.trim(), whatsapp, email, nomAdministrateur, nomGerant, now);
 
       this.db.prepare("DELETE FROM telephones_entreprise").run();
       const insererTelephone = this.db.prepare("INSERT INTO telephones_entreprise (id, numero, ordre, created_at, updated_at) VALUES (?, ?, ?, ?, ?)");

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import Database from "better-sqlite3-multiple-ciphers";
+import { resolveNativeBindingPath } from "./nativeSqliteBinding.js";
 
 /**
  * Base de données locale chiffrée (SQLCipher via better-sqlite3-multiple-ciphers).
@@ -55,7 +56,7 @@ export function openDatabase(): Database.Database {
   const dbPath = join(getUserDataDir(), "maxi-equip.sqlite");
   const key = getOrCreateEncryptionKey();
 
-  const instance = new Database(dbPath);
+  const instance = new Database(dbPath, { nativeBinding: resolveNativeBindingPath() });
   instance.pragma(`key='${key}'`);
   // Vérifie que la clé est bien acceptée (lève une erreur sinon) avant de continuer.
   instance.pragma("cipher_version");

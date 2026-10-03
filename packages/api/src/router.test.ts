@@ -52,6 +52,20 @@ describe("Router (Phase 0 — socle API)", () => {
     expect(res.status).toBe(401);
   });
 
+  it("Phase Finale — GET /health (non versionné, non préfixé) : 200, réponse minimale, jamais authentifié", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req({ path: "/health" }));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "ok" });
+  });
+
+  it("Phase Finale — GET /health n'expose aucune information sensible", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req({ path: "/health" }));
+    const serialise = JSON.stringify(res.body);
+    expect(serialise.toLowerCase()).not.toMatch(/database|secret|jwt|stack|error/);
+  });
+
   it("TEST 5 — jeton falsifié (payload modifié après signature) : signature rejetée, 401", async () => {
     const router = createRouter();
     const token = signerJwt({ sub: "installation-1", role: "app" }, SECRET_TEST, 3600);

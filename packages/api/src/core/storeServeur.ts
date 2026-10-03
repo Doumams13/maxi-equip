@@ -1,134 +1,97 @@
 import Database from "better-sqlite3-multiple-ciphers";
+import { SqliteServerStorage } from "./sqliteServerStorage.js";
+import { PostgresServerStorage } from "./postgresServerStorage.js";
+import type { ServerStorage, OperationRecue, ResultatEnregistrement, ResultatPull } from "./serverStorage.js";
+
+export type {
+  TypeOperationSync,
+  OperationRecue,
+  OperationStockee,
+  ResultatEnregistrement,
+  ResultatPull,
+} from "./serverStorage.js";
 
 /**
- * Stockage serveur — Phase 3.6, Partie 1 (audit préalable) : aucune base
- * serveur n'existait avant cette étape. `DATABASE_URL` (PostgreSQL)
- * n'était que documentée dans `.env.example` depuis la Phase 0, jamais
- * connectée à quoi que ce soit. Plutôt que d'introduire une nouvelle
- * technologie non éprouvée dans ce projet pour cette première version,
- * ce module réutilise `better-sqlite3-multiple-ciphers` — déjà utilisé
- * et validé pour `electron-app`, et déjà installé dans ce monorepo.
+ * Point d'accès unique à la persistance serveur — Bloc 1 (remédiation
+ * pré-production, PostgreSQL).
  *
- * REMPLAÇABLE PLUS TARD par PostgreSQL sans changer le contrat des
- * routes : ce module n'expose que des fonctions (`enregistrerOperations`,
- * `listerOperationsDepuis`), jamais une dépendance directe à SQLite dans
- * les routes elles-mêmes — la même discipline provider-agnostique déjà
- * appliquée à `local-dev-server.ts`.
+ * AVANT cette étape, ce module dépendait directement de
+ * `better-sqlite3` : `DATABASE_URL` (PostgreSQL) était documentée depuis
+ * la Phase 0 mais jamais connectée à quoi que ce soit (constat de
+ * l'audit pré-production). Désormais, deux implémentations du même
+ * contrat (`ServerStorage`, voir serverStorage.ts) coexistent :
+ *  - `SqliteServerStorage` : développement, tests (`:memory:`), et
+ *    secours si `DATABASE_URL` n'est pas configurée — comportement
+ *    inchangé par rapport à avant cette étape.
+ *  - `PostgresServerStorage` : production, utilisée dès que
+ *    `DATABASE_URL` est fournie.
+ *
+ * Les routes (et tout le reste du code) continuent d'appeler EXACTEMENT
+ * les mêmes fonctions qu'avant (`enregistrerOperations`,
+ * `listerOperationsDepuis`) — jamais une dépendance directe à l'une ou
+ * l'autre implémentation. Seule différence visible : ces fonctions sont
+ * désormais asynchrones (nécessaire pour parler à un vrai serveur
+ * PostgreSQL sur le réseau) — inchangé pour `catalogStore.ts`, qui
+ * l'était déjà par construction de son contrat partagé.
  */
 
-export type TypeOperationSync = "vente" | "annulation" | "entree" | "transfert" | "demande" | "parametres_entreprise" | "promotion";
+let stockage: ServerStorage | null = null;
 
-export interface OperationRecue {
-  entityType: TypeOperationSync;
-  entityId: string;
-  payload: unknown;
+/**
+ * SQLite — développement et tests. `cheminFichier` : `:memory:` dans les
+ * tests, un vrai chemin de fichier pour `local-dev-server.ts`.
+ * Synchrone (ouverture SQLite immédiate) — préserve tous les sites
+ * d'appel existants (`beforeEach(() => initialiserStockageServeur(...))`
+ * sans `await`).
+ */
+export function initialiserStockageServeur(cheminFichier: string): void {
+  stockage = new SqliteServerStorage(new Database(cheminFichier));
 }
 
-export interface OperationStockee {
-  curseur: number;
-  entityType: string;
-  entityId: string;
-  payload: unknown;
-  recuLe: string;
+/** PostgreSQL — production. Asynchrone : établit la connexion et applique les migrations avant de rendre la main. */
+export async function initialiserStockageServeurPostgres(connectionString: string): Promise<void> {
+  const postgres = new PostgresServerStorage(connectionString);
+  await postgres.migrer();
+  stockage = postgres;
 }
 
-export interface ResultatEnregistrement {
-  entityId: string;
-  statut: "cree" | "deja_traite";
+/**
+ * Sélectionne automatiquement l'implémentation selon l'environnement —
+ * utilisée par `production-server.ts` : PostgreSQL si `DATABASE_URL` est
+ * définie, sinon SQLite (repli développement, `SYNC_DB_PATH`) — jamais
+ * un mélange silencieux des deux dans le même processus.
+ */
+export async function initialiserPersistanceDepuisEnvironnement(): Promise<{ backend: "postgres" | "sqlite" }> {
+  const databaseUrl = process.env["DATABASE_URL"];
+  if (databaseUrl && databaseUrl.trim()) {
+    await initialiserStockageServeurPostgres(databaseUrl);
+    return { backend: "postgres" };
+  }
+  initialiserStockageServeur(process.env["SYNC_DB_PATH"] ?? "./sync-dev.sqlite");
+  return { backend: "sqlite" };
 }
 
-let db: Database.Database | null = null;
-
-/** Ouvre (ou crée) la base serveur. `:memory:` dans les tests, un vrai chemin de fichier pour local-dev-server.ts. */
-export function initialiserStockageServeur(cheminFichier: string): Database.Database {
-  db = new Database(cheminFichier);
-  db.pragma("journal_mode = WAL");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS operations_synchronisees (
-      curseur     INTEGER PRIMARY KEY AUTOINCREMENT,
-      entity_type TEXT NOT NULL,
-      entity_id   TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      recu_le     TEXT NOT NULL,
-      UNIQUE (entity_type, entity_id)
-    );
-  `);
-  return db;
-}
-
-export function fermerStockageServeur(): void {
-  if (db) {
-    db.close();
-    db = null;
+export async function fermerStockageServeur(): Promise<void> {
+  if (stockage) {
+    await stockage.fermer();
+    stockage = null;
   }
 }
 
-function getDb(): Database.Database {
-  if (!db) throw new Error("Stockage serveur non initialisé — appeler initialiserStockageServeur() au démarrage.");
-  return db;
+function getStockage(): ServerStorage {
+  if (!stockage) throw new Error("Stockage serveur non initialisé — appeler initialiserStockageServeur() ou initialiserStockageServeurPostgres() au démarrage.");
+  return stockage;
 }
 
-/**
- * IDEMPOTENCE (Phase 3.6, Partie 6) — solution retenue : une contrainte
- * `UNIQUE (entity_type, entity_id)`, unique et suffisante, jamais un
- * mécanisme concurrent supplémentaire. `entity_id` est l'UUID technique
- * DÉJÀ existant de l'entité locale réelle (la facture, le mouvement —
- * le même que celui déjà utilisé dans `boite_envoi`, Phase 3.3) —
- * jamais un nouvel identifiant inventé. Une deuxième tentative avec le
- * même couple (type, id) est reconnue par la contrainte elle-même :
- * `INSERT OR IGNORE` ne produit aucune erreur, ne crée aucune ligne
- * supplémentaire, et le résultat le confirme explicitement.
- *
- * TRANSACTION (Partie 7) : le lot entier est traité de façon atomique.
- */
-export function enregistrerOperations(operations: OperationRecue[]): ResultatEnregistrement[] {
-  const base = getDb();
-  const maintenant = new Date().toISOString();
-  const inserer = base.prepare(
-    "INSERT OR IGNORE INTO operations_synchronisees (entity_type, entity_id, payload_json, recu_le) VALUES (?, ?, ?, ?)"
-  );
-
-  const executerLot = base.transaction((lot: OperationRecue[]) => {
-    const resultats: ResultatEnregistrement[] = [];
-    for (const operation of lot) {
-      const resultat = inserer.run(operation.entityType, operation.entityId, JSON.stringify(operation.payload), maintenant);
-      resultats.push({ entityId: operation.entityId, statut: resultat.changes > 0 ? "cree" : "deja_traite" });
-    }
-    return resultats;
-  });
-
-  return executerLot(operations);
+/** Réservé aux autres modules `core/*` (ex. `catalogStore.ts`) qui doivent réutiliser la même implémentation active — jamais une seconde instance. */
+export function getStorage(): ServerStorage {
+  return getStockage();
 }
 
-export interface ResultatPull {
-  operations: OperationStockee[];
-  /** true si le serveur a tronqué la réponse — le client DOIT paginer jusqu'à ce que hasMore soit false. */
-  hasMore: boolean;
+export async function enregistrerOperations(operations: OperationRecue[]): Promise<ResultatEnregistrement[]> {
+  return getStockage().enregistrerOperations(operations);
 }
 
-/**
- * PULL — curseur = le dernier `curseur` déjà reçu par l'appelant.
- * Renvoie au plus `limite` opérations après ce curseur, plus un flag
- * `hasMore` indiquant explicitement si d'autres opérations restent à
- * récupérer — le client doit paginer tant que ce flag est true.
- */
-export function listerOperationsDepuis(curseur: number, limite = 200): ResultatPull {
-  const base = getDb();
-  const lignes = base
-    .prepare("SELECT curseur, entity_type, entity_id, payload_json, recu_le FROM operations_synchronisees WHERE curseur > ? ORDER BY curseur ASC LIMIT ?")
-    .all(curseur, limite + 1) as { curseur: number; entity_type: string; entity_id: string; payload_json: string; recu_le: string }[];
-
-  const hasMore = lignes.length > limite;
-  const page = hasMore ? lignes.slice(0, limite) : lignes;
-
-  return {
-    operations: page.map((l) => ({
-      curseur: l.curseur,
-      entityType: l.entity_type,
-      entityId: l.entity_id,
-      payload: JSON.parse(l.payload_json),
-      recuLe: l.recu_le,
-    })),
-    hasMore,
-  };
+export async function listerOperationsDepuis(curseur: number, limite = 200): Promise<ResultatPull> {
+  return getStockage().listerOperationsDepuis(curseur, limite);
 }

@@ -41,6 +41,8 @@ export function ParametresScreen() {
   const [adresse, setAdresse] = useState("");
   const [quartier, setQuartier] = useState("");
   const [telephones, setTelephones] = useState<string[]>([""]);
+  const [whatsapp, setWhatsapp] = useState("");
+  const [email, setEmail] = useState("");
   const [nomAdministrateur, setNomAdministrateur] = useState("");
   const [nomGerant, setNomGerant] = useState("");
 
@@ -62,6 +64,8 @@ export function ParametresScreen() {
     setAdresse(identite.adresse);
     setQuartier(identite.quartier);
     setTelephones(identite.telephones.length > 0 ? identite.telephones : [""]);
+    setWhatsapp(identite.whatsapp);
+    setEmail(identite.email);
     setNomAdministrateur(identite.nomAdministrateur ?? "");
     setNomGerant(identite.nomGerant ?? "");
     const seulsDepots = emplacements.filter((e) => !e.estPointDeVente);
@@ -99,6 +103,8 @@ export function ParametresScreen() {
         adresse,
         quartier,
         telephones: telephones.map((t) => t.trim()).filter((t) => t.length > 0),
+        whatsapp: whatsapp.trim(),
+        email: email.trim(),
         nomAdministrateur: nomAdministrateur.trim() || null,
         nomGerant: nomGerant.trim() || null,
       });
@@ -325,10 +331,40 @@ export function ParametresScreen() {
           <input style={inputStyle} value={adresse} onChange={(e) => setAdresse(e.target.value)} disabled={chargement} placeholder="Ex. Quartier Beaulieu (face à BATI-PLUS)" />
         </div>
 
-        <div>
+        <div style={{ marginBottom: 16 }}>
           <label style={labelStyle}>Quartier / Localisation</label>
           <input style={inputStyle} value={quartier} onChange={(e) => setQuartier(e.target.value)} disabled={chargement} placeholder="Ex. Akanda - Gabon" />
         </div>
+
+        {/* Correction "L'appli gère les infos du site" — WhatsApp/email
+            étaient jusqu'ici codés en dur sur le site public, sans aucun
+            moyen de les modifier depuis l'application. */}
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Numéro WhatsApp</label>
+            <input
+              style={inputStyle}
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              disabled={chargement}
+              placeholder="Ex. +241 66 33 87 30"
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Email</label>
+            <input
+              style={inputStyle}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={chargement}
+              placeholder="Ex. contact@maxi-equip.com"
+            />
+          </div>
+        </div>
+        <p style={{ margin: "8px 0 0", fontSize: 11.5, color: defaultTokens.colors.textFaint }}>
+          WhatsApp et email sont affichés sur le site public MAXI EQUIP — laissez vide pour ne rien afficher.
+        </p>
 
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>

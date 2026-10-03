@@ -6,7 +6,8 @@ import { buildWhatsAppUrl } from "@/config/site";
 const inputCls =
   "w-full rounded border border-ink/[0.14] bg-surface px-[14px] py-3 text-[14.5px] text-ink placeholder:text-ink-mute/60 focus:border-sage focus:outline-none";
 
-export function ContactForm() {
+/** `whatsappNumero` : correction "L'appli gère les infos du site" — numéro réellement synchronisé, transmis par contact/page.tsx (Server Component). Optionnel — sans lui, comportement inchangé (repli sur config/site.ts). */
+export function ContactForm({ whatsappNumero }: { whatsappNumero?: string }) {
   const [nom, setNom] = useState("");
   const [tel, setTel] = useState("");
   const [email, setEmail] = useState("");
@@ -22,7 +23,7 @@ export function ContactForm() {
     const lignes = ["Bonjour MAXI EQUIP,", `Je m'appelle ${nom.trim()} (${tel.trim()}).`];
     if (email.trim()) lignes.push(`Email : ${email.trim()}`);
     if (message.trim()) lignes.push(`Message : ${message.trim()}`);
-    window.open(buildWhatsAppUrl(lignes.join("\n")), "_blank", "noopener,noreferrer");
+    window.open(buildWhatsAppUrl(lignes.join("\n"), whatsappNumero), "_blank", "noopener,noreferrer");
   }
 
   return (

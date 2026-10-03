@@ -8,29 +8,30 @@ export class MockLocationRepository implements LocationRepository {
   }
 }
 
-/**
- * Non utilisée en Phase 5 — squelette pour l'intégration future avec
- * GET /v1/public/locations. Voir services/catalog/apiCatalogRepository.ts
- * pour le raisonnement complet.
- */
+/** Correction "Intégration Site Phase 5, Partie 3" : consomme GET /v1/public/locations (voir routes/v1/public/locations.ts côté API). */
 export class ApiLocationRepository implements LocationRepository {
   constructor(private readonly baseUrl: string) {}
 
-  listLocations(): Promise<CompanyLocation[]> {
-    throw new Error(
-      `ApiLocationRepository.listLocations n'est pas implémenté (API non disponible pour cette phase). baseUrl: ${this.baseUrl || "(aucune)"}`
-    );
+  async listLocations(): Promise<CompanyLocation[]> {
+    const res = await fetch(`${this.baseUrl}/v1/public/locations`, { next: { revalidate: 300 } });
+    if (!res.ok) {
+      throw new Error(`Réponse inattendue de l'API MAXI EQUIP (${res.status}) pour /v1/public/locations.`);
+    }
+    const corps = (await res.json()) as { locations: CompanyLocation[] };
+    return corps.locations;
   }
 }
 
 /**
- * Correction "Intégration Site Phase 5" : même raisonnement que
- * services/catalog/index.ts — aucun mécanisme réel de synchronisation
- * des localisations n'existe encore, contrairement à la soumission de
- * demandes. Reste volontairement mocké, indépendamment de
- * NEXT_PUBLIC_API_BASE_URL.
+ * Correction "Intégration Site Phase 5, Partie 3" : même interrupteur que
+ * le catalogue (services/catalog/index.ts) — une seule variable
+ * d'environnement active toute l'intégration réelle du site.
  */
 function createLocationRepository(): LocationRepository {
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (apiBaseUrl) {
+    return new ApiLocationRepository(apiBaseUrl);
+  }
   return new MockLocationRepository();
 }
 

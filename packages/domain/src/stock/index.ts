@@ -154,6 +154,23 @@ export function assertCoherentMouvement(mouvement: {
   }
 }
 
+/**
+ * Délai au-delà duquel une entrée/sortie manuelle ne peut plus être
+ * annulée — correction "l'annulation des mouvements doit être limitée
+ * dans le temps" (décision explicite de l'utilisateur : 48h ; passé ce
+ * délai, une correction se fait via une nouvelle entrée/sortie, jamais en
+ * annulant l'ancienne). Exporté pour être utilisé IDENTIQUEMENT côté
+ * validation (StockService.annulerMouvement, Electron) et côté affichage
+ * (bouton "Annuler" masqué une fois ce délai dépassé,
+ * HistoriqueOperationsTable.tsx) — jamais deux valeurs qui pourraient
+ * diverger entre le serveur et l'écran.
+ */
+export const DELAI_ANNULATION_MOUVEMENT_MS = 48 * 60 * 60 * 1000;
+
+export function peutEncoreAnnulerMouvement(dateMouvement: string, maintenant: Date = new Date()): boolean {
+  return maintenant.getTime() - new Date(dateMouvement).getTime() <= DELAI_ANNULATION_MOUVEMENT_MS;
+}
+
 export interface RepartitionVente {
   quantiteInterne: number;
   quantiteExterne: number;

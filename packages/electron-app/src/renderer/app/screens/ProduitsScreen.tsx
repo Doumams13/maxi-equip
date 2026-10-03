@@ -622,6 +622,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                   <th style={{ width: 32, padding: "10px 8px 10px 16px" }} />
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Photo</th>
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Motif</th>
+                  <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Référence</th>
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Type</th>
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12, textAlign: "right" }}>Formats</th>
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Images</th>
@@ -645,6 +646,16 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                           <Miniature dataUrl={m.imagePrincipaleDataUrl} />
                         </td>
                         <td style={{ padding: "8px 16px", fontWeight: 700 }}>{m.motif}</td>
+                        <td
+                          style={{
+                            padding: "8px 16px",
+                            color: defaultTokens.colors.textSoft,
+                            fontFamily: defaultTokens.typography.mono,
+                            fontSize: 12,
+                          }}
+                        >
+                          {m.variantes.map((v) => v.reference).join(", ")}
+                        </td>
                         <td style={{ padding: "8px 16px", color: defaultTokens.colors.textSoft }}>{m.type}</td>
                         <td style={{ padding: "8px 16px", textAlign: "right" }}>
                           <span style={{ fontWeight: 700 }}>{m.variantes.length}</span>
@@ -691,7 +702,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                         <>
                           <tr style={{ background: defaultTokens.colors.surfaceAlt + "88" }}>
                             <td />
-                            <td colSpan={6} style={{ padding: "0 16px" }}>
+                            <td colSpan={7} style={{ padding: "0 16px" }}>
                               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                                 <thead>
                                   <tr>
@@ -738,7 +749,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                           </tr>
                           <tr style={{ background: defaultTokens.colors.surfaceAlt + "88" }}>
                             <td />
-                            <td colSpan={6} style={{ padding: "6px 16px 12px" }}>
+                            <td colSpan={7} style={{ padding: "6px 16px 12px" }}>
                               {ajoutVarianteModeleId !== m.id && editingVariante?.modeleId !== m.id && (
                                 <Button
                                   variant="ghost"
@@ -799,6 +810,15 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
             { label: "Motif", value: confirmDeleteModele.motif },
             { label: "Type", value: confirmDeleteModele.type },
             { label: "Formats concernés", value: String(confirmDeleteModele.variantes.length) },
+            // Correction "produit supprimé avec du stock restant" : le
+            // stock n'est jamais laissé fantôme en base (voir
+            // StockService.ecoulerStockPourSuppression) — une vraie sortie
+            // traçable est enregistrée automatiquement pour chaque dépôt
+            // concerné, montrée ici pour que l'utilisateur le sache AVANT
+            // de confirmer, jamais une surprise découverte après coup.
+            ...(confirmDeleteModele.variantes.reduce((s, v) => s + v.stockTotal, 0) > 0
+              ? [{ label: "Stock restant", value: `${confirmDeleteModele.variantes.reduce((s, v) => s + v.stockTotal, 0)} carton(s) — seront sortis automatiquement du stock` }]
+              : []),
           ]}
           onAnnuler={() => setConfirmDeleteModele(null)}
           onConfirmer={() => void handleSupprimerModele()}
@@ -815,6 +835,9 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
             { label: "Modèle", value: confirmDeleteVariante.modele.motif },
             { label: "Taille", value: confirmDeleteVariante.variante.taille },
             { label: "Référence", value: confirmDeleteVariante.variante.reference },
+            ...(confirmDeleteVariante.variante.stockTotal > 0
+              ? [{ label: "Stock restant", value: `${confirmDeleteVariante.variante.stockTotal} carton(s) — seront sortis automatiquement du stock` }]
+              : []),
           ]}
           onAnnuler={() => setConfirmDeleteVariante(null)}
           onConfirmer={() => void handleSupprimerVariante()}

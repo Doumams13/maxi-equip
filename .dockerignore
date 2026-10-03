@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+.git
+**/dist
+**/dist-main
+**/.next
+**/build
+**/out
+packages/electron-app/release
+**/*.sqlite
+**/*.sqlite-journal
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/*.key
+.env
+**/.env
+**/.env.local

@@ -8,6 +8,15 @@
  */
 export const siteConfig = {
   companyName: "MAXI EQUIP",
+
+  /**
+   * Phase SEO — domaine de production déjà référencé ailleurs dans le
+   * monorepo (voir packages/api/src/core/cors.ts, §14 : "maxi-equip.com /
+   * api.maxi-equip.com"). Source unique pour metadataBase, canonical,
+   * sitemap.xml et robots.txt — jamais un domaine ".example" en dur
+   * dupliqué à plusieurs endroits.
+   */
+  url: "https://maxi-equip.com",
   /**
    * Correction — la refonte précise explicitement : "MAXI EQUIP vend
    * UNIQUEMENT des CARREAUX. Il ne s'agit pas d'une entreprise générale
@@ -54,8 +63,21 @@ export const siteConfig = {
   currency: "FCFA",
 } as const;
 
-export function buildWhatsAppUrl(message?: string): string {
-  const base = `https://wa.me/${siteConfig.contact.whatsappNumberIntl.replace("+", "")}`;
+/**
+ * `numero` : correction "L'appli gère les infos du site" — permet de
+ * passer le numéro réellement synchronisé depuis l'application
+ * (services/settings/index.ts, `getEffectiveContactInfo()`) au lieu de
+ * toujours utiliser la valeur statique. Optionnel — sans lui, comportement
+ * strictement inchangé (repli sur `siteConfig.contact.whatsappNumberIntl`).
+ * Toujours nettoyé de tout caractère non numérique (espaces, tirets...)
+ * avant de construire l'URL wa.me, qui n'accepte que des chiffres — une
+ * saisie humaine côté app ("+241 66 33 87 30") ne doit jamais produire un
+ * lien cassé.
+ */
+export function buildWhatsAppUrl(message?: string, numero?: string): string {
+  const numeroBrut = numero || siteConfig.contact.whatsappNumberIntl;
+  const numeroNettoye = numeroBrut.replace(/\D/g, "");
+  const base = `https://wa.me/${numeroNettoye}`;
   if (!message) return base;
   return `${base}?text=${encodeURIComponent(message)}`;
 }

@@ -109,7 +109,20 @@ export function getModelDisplayPrice(
     ),
   }));
 
-  const cheapest = priced.reduce((min, current) => {
+  // BUG RÉEL CORRIGÉ : un modèle promu uniquement sur une variante plus
+  // chère que sa variante la moins chère (hors promo) restait
+  // invisible partout (page d'accueil, filtre "Promotions" du
+  // catalogue) — `onlyPromotions` se basait sur ce même calcul, voir
+  // filterModels.ts. Dès qu'AU MOINS UNE variante est réellement en
+  // promotion active, on ne considère plus QUE les variantes promues
+  // pour choisir le prix affiché (jamais un prix normal parmi elles) —
+  // préserve intégralement la règle ci-dessus ("jamais prétendre qu'une
+  // taille est en promo si elle ne l'est pas") tout en rendant visible
+  // une promotion réelle sur une taille qui n'est pas la moins chère.
+  const promues = priced.filter((p) => p.effective.isPromotionActive);
+  const pool = promues.length > 0 ? promues : priced;
+
+  const cheapest = pool.reduce((min, current) => {
     const currentValue = current.effective.promoPriceFcfa ?? current.effective.normalPriceFcfa;
     const minValue = min.effective.promoPriceFcfa ?? min.effective.normalPriceFcfa;
     return currentValue < minValue ? current : min;

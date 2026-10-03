@@ -1,14 +1,16 @@
 {
   "name": "@maxi-equip/electron-app",
-  "version": "0.1.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Application Windows MAXI EQUIP (SHOP). Electron + React + TypeScript, local-first avec SQLite chiffré (SQLCipher).",
+  "author": "MAXI EQUIP",
   "type": "module",
   "main": "dist-main/main/index.cjs",
   "scripts": {
     "postinstall": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "dist:win": "electron-vite build && node scripts/build-signed.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:sqlcipher": "electron scripts/test-sqlcipher.cjs --no-sandbox",
@@ -16,10 +18,12 @@
     "test:reference-migration": "electron scripts/test-reference-migration.cjs --no-sandbox"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1134.0",
     "@maxi-equip/design-system": "*",
     "@maxi-equip/domain": "*",
     "@maxi-equip/shared-types": "*",
     "better-sqlite3-multiple-ciphers": "^12.11.0",
+    "electron-updater": "^6.3.9",
     "hash-wasm": "^4.11.0",
     "lucide-react": "^0.383.0",
     "pdfjs-dist": "^4.10.38",
@@ -34,10 +38,55 @@
     "@types/pdfkit": "^0.13.9",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/s3rver": "^3.7.4",
     "@vitejs/plugin-react": "^4.3.1",
     "electron": "^28.3.3",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
+    "s3rver": "^3.7.1",
     "typescript": "^5.5.3",
     "vite": "^5.3.3"
+  },
+  "build": {
+    "appId": "com.maxiequip.shop",
+    "productName": "MAXI EQUIP",
+    "electronVersion": "28.3.3",
+    "directories": {
+      "output": "release",
+      "buildResources": "installer-resources"
+    },
+    "files": [
+      "dist-main/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "installer-resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MAXI EQUIP",
+      "include": "installer-resources/installer.nsh"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://api.maxi-equip.com/updates/"
+      }
+    ]
   }
 }

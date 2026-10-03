@@ -64,7 +64,14 @@ CREATE TABLE IF NOT EXISTS produits (
 );
 CREATE INDEX IF NOT EXISTS idx_produits_taille_tri ON produits (taille_tri);
 CREATE INDEX IF NOT EXISTS idx_produits_updated_at ON produits (updated_at);
-CREATE INDEX IF NOT EXISTS idx_produits_modele_id ON produits (modele_id);
+-- L'index sur modele_id n'est JAMAIS créé ici (même bug déjà corrigé une
+-- fois pour mouvements.utilisateur_id, voir migrate.ts) : sur une base
+-- existante créée avant la colonne modele_id, "CREATE TABLE IF NOT
+-- EXISTS produits" ci-dessus est un no-op (la colonne n'est pas
+-- ajoutée), et cette ligne échouerait avec "no such column: modele_id"
+-- avant même que la migration dédiée (ajouterIndexModeleIdProduitsSiAbsent)
+-- n'ait la moindre chance de s'exécuter. Créé uniquement dans migrate.ts,
+-- après avoir garanti que la colonne existe.
 -- Unicité de la référence UNIQUEMENT parmi les produits actifs (correction
 -- Phase 2 §5) : un produit réellement supprimé (soft delete) ne doit
 -- jamais bloquer la réutilisation de sa référence par un nouveau produit.
@@ -110,6 +117,12 @@ CREATE TABLE IF NOT EXISTS mouvements (
   facture_id                  TEXT REFERENCES factures (id),
   utilisateur_id              TEXT REFERENCES utilisateurs (id),
   note                        TEXT,
+  -- Annulation d'un mouvement manuel (entrée/sortie saisie par erreur,
+  -- jamais une sortie de vente — voir shared-types/stock.ts) — jamais
+  -- supprimé, seulement annoté, même principe que factures.annulee_le.
+  annule_le                   TEXT,
+  annule_par                  TEXT REFERENCES utilisateurs (id),
+  motif_annulation            TEXT,
   created_at                  TEXT NOT NULL,
   updated_at                  TEXT NOT NULL
 );
@@ -131,6 +144,15 @@ CREATE TABLE IF NOT EXISTS factures (
   vendeur_nom_manuel     TEXT,
   mode_reglement         TEXT,
   total                  INTEGER NOT NULL,
+  -- Remise commerciale en FCFA, correction "Remise / Négociation" —
+  -- jamais NULL, une remise absente vaut 0 (voir shared-types/facture.ts).
+  remise                 INTEGER NOT NULL DEFAULT 0,
+  -- Statut de paiement, correction "Réservation / Acompte" — jamais NULL.
+  -- "reservation" = acompte versé (montant_paye < total net), "payee" =
+  -- réglé intégralement (montant_paye === total net). Indépendant du
+  -- statut de livraison ci-dessous (voir shared-types/facture.ts).
+  statut_paiement        TEXT NOT NULL DEFAULT 'payee' CHECK (statut_paiement IN ('reservation', 'payee')),
+  montant_paye           INTEGER NOT NULL DEFAULT 0,
   -- "Facturation" : statut de livraison (jamais de statut "non payée" —
   -- une facture n'existe qu'une fois le paiement confirmé, §13).
   statut_livraison       TEXT NOT NULL DEFAULT 'en_attente' CHECK (statut_livraison IN ('en_attente', 'livree')),
@@ -144,6 +166,12 @@ CREATE TABLE IF NOT EXISTS factures (
   -- servi de base à une correction via "Modifier" — empêche de proposer
   -- une seconde correction à partir de la même erreur déjà traitée.
   corrigee_par_facture_id TEXT REFERENCES factures (id),
+  -- Correction Phase Finale, Bloc 6 : instantané JSON de l'identité
+  -- entreprise (nom/adresse/quartier/téléphones/responsables) au moment
+  -- de la vente — jamais relu en direct depuis parametres_entreprise
+  -- pour une facture déjà émise. NULL pour les factures antérieures à
+  -- cette évolution (voir migrate.ts).
+  identite_snapshot_json TEXT,
   created_at             TEXT NOT NULL,
   updated_at             TEXT NOT NULL
 );
@@ -153,6 +181,7 @@ CREATE TABLE IF NOT EXISTS lignes_facture (
   facture_id           TEXT NOT NULL REFERENCES factures (id),
   produit_id           TEXT REFERENCES produits (id),
   motif                TEXT NOT NULL,
+  reference            TEXT,
   taille               TEXT NOT NULL,
   quantite             INTEGER NOT NULL CHECK (quantite > 0),
   prix_unitaire        INTEGER NOT NULL,

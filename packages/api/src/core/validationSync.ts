@@ -16,7 +16,25 @@ import type { OperationRecue, TypeOperationSync } from "./storeServeur.js";
  * parallèle).
  */
 
-const TYPES_SUPPORTES: readonly TypeOperationSync[] = ["vente", "annulation", "entree", "transfert", "demande", "parametres_entreprise"];
+const TYPES_SUPPORTES: readonly TypeOperationSync[] = [
+  "vente",
+  "annulation",
+  "entree",
+  "sortie",
+  "transfert",
+  "demande",
+  "parametres_entreprise",
+  // Correction "Intégration Site Phase 5, Partie 2 (pipeline catalogue)" :
+  // types poussés par l'application pour alimenter la projection
+  // catalogue publique (voir core/catalogStore.ts). Validation structurelle
+  // supplémentaire, spécifique à chaque type, appliquée dans
+  // routes/v1/app/sync/push.ts via core/validationCatalogueSync.ts — la
+  // validation générique ci-dessous (payload = objet/tableau JSON,
+  // taille max) reste la première ligne de défense pour ces types aussi.
+  "modele",
+  "produit",
+  "promotion",
+];
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -55,7 +73,18 @@ export function validerRequetePush(body: unknown): OperationRecue[] {
     if (typeof entityType !== "string" || !TYPES_SUPPORTES.includes(entityType as TypeOperationSync)) {
       throw new ValidationError(`Opération à l'index ${index} : entityType invalide ou non supporté ("${String(entityType)}").`);
     }
-    if (!estUuidValide(entityId)) {
+    // Correction "L'appli gère les infos du site" — bug réel identifié :
+    // 'parametres_entreprise' est un SINGLETON, toujours poussé avec
+    // entityId = "singleton" (jamais un UUID, voir ipc/metier.ts côté
+    // app) — cette validation générique rejetait donc SYSTÉMATIQUEMENT
+    // la toute première opération déjà, avant même d'atteindre la
+    // logique de projection. Aucun autre type n'est concerné : leur
+    // exigence d'UUID reste strictement inchangée.
+    if (entityType === "parametres_entreprise") {
+      if (entityId !== "singleton") {
+        throw new ValidationError(`Opération à l'index ${index} : entityId doit être "singleton" pour 'parametres_entreprise'.`);
+      }
+    } else if (!estUuidValide(entityId)) {
       throw new ValidationError(`Opération à l'index ${index} : entityId doit être un UUID valide.`);
     }
     if (payload === undefined || payload === null) {

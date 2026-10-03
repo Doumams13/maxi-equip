@@ -1,6 +1,5 @@
 import { ipcMain, BrowserWindow, dialog } from "electron";
 import { copyFile, readFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { ModeleRepository } from "../repositories/modeleRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
@@ -10,7 +9,7 @@ import { FactureRepository } from "../repositories/factureRepository.js";
 import { ParametresRepository, type IdentiteEntreprise } from "../repositories/parametresRepository.js";
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 import { PromotionRepository } from "../repositories/promotionRepository.js";
-import { StockService } from "../services/stockService.js";
+import { StockService, StockValidationError } from "../services/stockService.js";
 import { VenteService, VenteValidationError, type VenteInput } from "../services/venteService.js";
 import { ImageService } from "../services/imageService.js";
 import { SessionManager } from "../auth/sessionManager.js";
@@ -18,6 +17,7 @@ import { anonymiserActivite, anonymiserFactures } from "../services/visibiliteSe
 import { genererFacturePdf } from "../services/factureDocumentService.js";
 import { genererDocumentInternePdf } from "../services/documentInterneDocumentService.js";
 import { stock as domainStock } from "@maxi-equip/domain";
+import type { ModeleProduit, Produit } from "@maxi-equip/shared-types";
 
 /**
  * Canaux IPC métier (Phase 2). Chaque canal est nommé explicitement,
@@ -121,9 +121,11 @@ export function registerMetierIpcHandlers(
       if (!session) return { success: false, message: "Session expirée." };
 
       const modeleId = modeleRepository.create({ motif: input.motif, type: input.type });
+      const modeleCree = modeleRepository.findById(modeleId)!;
+      enqueueModeleSync(boiteEnvoiRepository, modeleCree, "create");
       for (const v of input.variantes) {
         const tailleTri = v.tailleTri ?? v.largeur ?? (parseFloat(v.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
-        produitRepository.create({
+        const varianteId = produitRepository.create({
           modeleId,
           motif: input.motif,
           type: input.type,
@@ -135,6 +137,7 @@ export function registerMetierIpcHandlers(
           prix: v.prix,
           seuilAlerte: v.seuilAlerte ?? 0,
         });
+        enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(varianteId)!, "create");
       }
       if (input.stagedImages && input.stagedImages.length > 0) {
         imageService.commitStaged(modeleId, input.stagedImages, input.principaleStagingId ?? null);
@@ -146,6 +149,7 @@ export function registerMetierIpcHandlers(
   ipcMain.handle("catalogue:modifierModele", (_e, modeleId: string, input: { motif?: string; type?: string }) => {
     if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
     modeleRepository.update(modeleId, input);
+    enqueueModeleSync(boiteEnvoiRepository, modeleRepository.findById(modeleId)!, "update");
     if (input.motif !== undefined || input.type !== undefined) {
       const variantes = produitRepository.listByModele(modeleId);
       for (const v of variantes) {
@@ -160,6 +164,7 @@ export function registerMetierIpcHandlers(
           prix: v.prix,
           seuilAlerte: v.seuilAlerte,
         });
+        enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(v.id)!, "update");
       }
     }
     return { success: true };
@@ -171,9 +176,16 @@ export function registerMetierIpcHandlers(
     if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
     const variantes = produitRepository.listByModele(modeleId);
     for (const v of variantes) {
+      // Correction "produit interdit à la vente supprimé avec du stock
+      // restant" — écoule le stock restant AVANT de masquer la variante,
+      // jamais l'inverse (sinon plus aucun écran ne permettrait de le
+      // faire, voir StockService.ecoulerStockPourSuppression).
+      stockService.ecoulerStockPourSuppression(v.id, session.userId);
       produitRepository.softDelete(v.id, session.userId);
+      enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(v.id)!, "delete");
     }
     modeleRepository.softDelete(modeleId, session.userId);
+    enqueueModeleSync(boiteEnvoiRepository, modeleRepository.findById(modeleId)!, "delete");
     return { success: true };
   });
 
@@ -194,6 +206,7 @@ export function registerMetierIpcHandlers(
       prix: input.prix,
       seuilAlerte: input.seuilAlerte ?? 0,
     });
+    enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(id)!, "create");
     return { success: true, id };
   });
 
@@ -216,6 +229,7 @@ export function registerMetierIpcHandlers(
         prix: input.prix ?? existante.prix,
         seuilAlerte: input.seuilAlerte ?? existante.seuilAlerte,
       });
+      enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(varianteId)!, "update");
       return { success: true };
     }
   );
@@ -223,7 +237,11 @@ export function registerMetierIpcHandlers(
   ipcMain.handle("catalogue:supprimerVariante", (_e, varianteId: string) => {
     const session = sessionManager.get();
     if (!session) return { success: false, message: "Session expirée." };
+    // Correction "produit interdit à la vente supprimé avec du stock
+    // restant" — même principe que supprimerModele ci-dessus.
+    stockService.ecoulerStockPourSuppression(varianteId, session.userId);
     produitRepository.softDelete(varianteId, session.userId);
+    enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(varianteId)!, "delete");
     return { success: true };
   });
 
@@ -247,7 +265,9 @@ export function registerMetierIpcHandlers(
       const motif = input.motif?.trim() || input.reference.trim();
       // Crée aussi un modèle pour maintenir l'intégrité
       const modeleId = modeleRepository ? modeleRepository.create({ motif, type: input.type }) : null;
+      if (modeleId && modeleRepository) enqueueModeleSync(boiteEnvoiRepository, modeleRepository.findById(modeleId)!, "create");
       const id = produitRepository.create({ modeleId, motif, ...input, tailleTri, largeur: input.largeur ?? null, hauteur: input.hauteur ?? null });
+      enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(id)!, "create");
       return { id };
     }
   );
@@ -261,12 +281,14 @@ export function registerMetierIpcHandlers(
     ) => {
       const tailleTri = input.largeur ?? (parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
       produitRepository.update(id, { ...input, tailleTri, largeur: input.largeur ?? null, hauteur: input.hauteur ?? null });
+      enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(id)!, "update");
       return { success: true };
     }
   );
 
   ipcMain.handle("catalogue:delete", (_e, id: string, deletedBy: string) => {
     produitRepository.softDelete(id, deletedBy);
+    enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(id)!, "delete");
     return { success: true };
   });
 
@@ -287,11 +309,40 @@ export function registerMetierIpcHandlers(
     }
   });
 
+  ipcMain.handle("stock:sortie", (_e, produitId: string, emplacementId: string, quantite: number) => {
+    const session = sessionManager.get();
+    if (!session) return { success: false, reason: { code: "UNKNOWN" as const, message: "Session expirée. Veuillez vous reconnecter." } };
+    try {
+      stockService.enregistrerSortie(produitId, emplacementId, quantite, session.userId);
+      return { success: true };
+    } catch (err) {
+      return { success: false, reason: mapStockError(err) };
+    }
+  });
+
   ipcMain.handle("stock:transfert", (_e, produitId: string, sourceId: string, destinationId: string, quantite: number) => {
     const session = sessionManager.get();
     if (!session) return { success: false, reason: { code: "UNKNOWN" as const, message: "Session expirée. Veuillez vous reconnecter." } };
     try {
       stockService.enregistrerTransfert(produitId, sourceId, destinationId, quantite, session.userId);
+      return { success: true };
+    } catch (err) {
+      return { success: false, reason: mapStockError(err) };
+    }
+  });
+
+  /**
+   * Annulation d'une entrée/sortie manuelle saisie par erreur — correction
+   * "corriger une erreur de saisie de stock sans fausser le tableau de
+   * bord". Toute la logique (restauration du stock, exclusion des
+   * totaux) vit dans StockService.annulerMouvement — jamais réimplémentée
+   * ici.
+   */
+  ipcMain.handle("stock:annulerMouvement", (_e, mouvementId: string, motif: string) => {
+    const session = sessionManager.get();
+    if (!session) return { success: false, reason: { code: "UNKNOWN" as const, message: "Session expirée. Veuillez vous reconnecter." } };
+    try {
+      stockService.annulerMouvement(mouvementId, session.userId, motif);
       return { success: true };
     } catch (err) {
       return { success: false, reason: mapStockError(err) };
@@ -417,7 +468,7 @@ export function registerMetierIpcHandlers(
    */
   function resoudreVendeurAffiche(
     facture: { vendeurNomManuel: string | null; vendeurNom: string | null; vendeurRole: string | null },
-    identite: IdentiteEntreprise
+    identite: Pick<IdentiteEntreprise, "nomAdministrateur" | "nomGerant">
   ): string {
     if (facture.vendeurNomManuel) return facture.vendeurNomManuel;
     if (facture.vendeurRole === "administrateur" && identite.nomAdministrateur) return identite.nomAdministrateur;
@@ -428,17 +479,17 @@ export function registerMetierIpcHandlers(
   ipcMain.handle("factures:genererPdf", async (_e, factureId: string) => {
     const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
-    const identite = parametresRepository.getIdentite();
+    // Correction Phase Finale, Bloc 6 — l'identité HISTORIQUE (capturée à
+    // la vente) prévaut toujours sur l'identité courante, pour que
+    // régénérer le PDF d'une ancienne facture n'affiche jamais les
+    // paramètres entreprise actuels. Repli sur l'identité courante
+    // UNIQUEMENT pour une facture antérieure à cette évolution (jamais de
+    // snapshot capturé à l'époque — voir migrate.ts).
+    const identite = facture.identiteSnapshot ?? parametresRepository.getIdentite();
     const vendeurNomAffiche = resoudreVendeurAffiche(facture, identite);
     try {
       const chemin = await genererFacturePdf({
         facture,
-        // Correction "SHOP sur la facture" : le nom affiché vient
-        // TOUJOURS de la configuration centralisée, jamais du nom
-        // interne de l'emplacement point-de-vente. Correction
-        // "Paramètres" : idem pour les numéros de téléphone, l'adresse
-        // et le quartier — plus aucune de ces informations n'est codée
-        // en dur dans le générateur de document.
         identite,
         vendeurNomAffiche,
       });
@@ -456,7 +507,7 @@ export function registerMetierIpcHandlers(
     if (!facture) return { success: false, message: "Facture introuvable." };
     try {
       const lignes = factureRepository.getDocumentInterne(factureId);
-      const identite = parametresRepository.getIdentite();
+      const identite = facture.identiteSnapshot ?? parametresRepository.getIdentite();
       const vendeurNomAffiche = resoudreVendeurAffiche(facture, identite);
       const chemin = await genererDocumentInternePdf({ facture, identite, vendeurNomAffiche, lignes });
       return { success: true, chemin, nomSuggere: `${facture.numero}-document-interne.pdf` };
@@ -500,26 +551,17 @@ export function registerMetierIpcHandlers(
     }
   });
 
-  /** IMPRIMER — boîte de dialogue native d'impression Windows, jamais une simple ouverture de fichier (§2). Même correction d'URL que "Voir" (pathToFileURL) — la boîte de dialogue apparaissait déjà avant ce correctif, mais rien ne garantit que la page imprimée contenait réellement le document tant que l'URL restait malformée. */
-  ipcMain.handle("documents:imprimer", async (_e, chemin: string) => {
-    const url = pathToFileURL(chemin).href;
-    return new Promise((resolve) => {
-      const fenetreImpression = new BrowserWindow({ show: false, webPreferences: { plugins: true } });
-      fenetreImpression
-        .loadURL(url)
-        .then(() => {
-          fenetreImpression.webContents.print({ silent: false }, (success, failureReason) => {
-            fenetreImpression.close();
-            resolve(success ? { success: true } : { success: false, message: failureReason });
-          });
-        })
-        .catch((err: unknown) => {
-          fenetreImpression.close();
-          const message = err instanceof Error ? err.message : "Impossible de préparer l'impression.";
-          resolve({ success: false, message });
-        });
-    });
-  });
+  /**
+   * IMPRIMER — ABANDONNÉ ici (était basé sur le lecteur PDF intégré de
+   * Chromium dans une fenêtre cachée, exactement la même famille de
+   * problèmes que "Voir" ci-dessus : la boîte de dialogue d'impression
+   * Windows affichait "cette application ne prend pas en charge l'aperçu
+   * avant impression"). Remplacé par un rendu pdf.js côté Renderer suivi
+   * d'un vrai `window.print()` sur le contenu rendu (voir
+   * renderer/app/lib/imprimerPdf.ts) — jamais de fenêtre cachée ni de
+   * lecteur PDF Chromium, même principe que la correction déjà appliquée
+   * à "Voir".
+   */
 
   /** TÉLÉCHARGER — "Enregistrer sous" natif, aucune ouverture automatique ensuite (§3 : "Ne PAS ouvrir automatiquement le PDF"). */
   ipcMain.handle("documents:telecharger", async (_e, chemin: string, nomSuggere: string) => {
@@ -581,6 +623,8 @@ export function registerMetierIpcHandlers(
         adresse: updatedIdentite.adresse,
         quartier: updatedIdentite.quartier,
         telephones: updatedIdentite.telephones,
+        whatsapp: updatedIdentite.whatsapp,
+        email: updatedIdentite.email,
         nomAdministrateur: updatedIdentite.nomAdministrateur,
         nomGerant: updatedIdentite.nomGerant,
         updatedAt: updatedIdentite.updatedAt,
@@ -707,9 +751,20 @@ export function registerMetierIpcHandlers(
     }
   });
 
-  ipcMain.handle("factures:marquerLivree", (_e, factureId: string) => {
-    factureRepository.marquerLivree(factureId);
-    return { success: true };
+  /**
+   * Changement de statut (paiement + livraison) — correction "Réservation
+   * / Acompte", remplace l'ancien "factures:marquerLivree" (trop étroit,
+   * ne couvrait qu'un seul sens de transition). Toute la logique
+   * (transitions permises, encaissement automatique du solde) vit dans
+   * VenteService.changerStatutFacture — jamais réimplémentée ici.
+   */
+  ipcMain.handle("factures:changerStatut", (_e, factureId: string, nouveauStatut: "reservation" | "payee_non_livree" | "payee_livree") => {
+    try {
+      venteService.changerStatutFacture(factureId, nouveauStatut);
+      return { success: true };
+    } catch (err) {
+      return { success: false, message: err instanceof VenteValidationError ? err.message : "Une erreur inattendue s'est produite." };
+    }
   });
 
   ipcMain.handle("factures:annuler", (_e, factureId: string, motif: string) => {
@@ -837,6 +892,12 @@ export function registerMetierIpcHandlers(
     return session ? anonymiserActivite(entrees, session) : entrees;
   });
 
+  ipcMain.handle("stock:listSorties", () => {
+    const session = sessionManager.get();
+    const sorties = mouvementRepository.listSorties();
+    return session ? anonymiserActivite(sorties, session) : sorties;
+  });
+
   ipcMain.handle("stock:listTransferts", () => {
     const session = sessionManager.get();
     const transferts = mouvementRepository.listTransferts();
@@ -913,6 +974,48 @@ export function registerMetierIpcHandlers(
   });
 }
 
+/**
+ * Correction "Intégration Site Phase 5, Partie 2 (pipeline catalogue)" —
+ * met en attente la synchronisation d'un modèle/variante vers la
+ * projection catalogue serveur, exactement selon le même mécanisme déjà
+ * utilisé pour "promotion" (voir PromotionService). Toujours appelé
+ * APRÈS l'écriture locale réussie, avec la ligne RELUE depuis le dépôt
+ * (jamais les valeurs brutes transmises par le Renderer) — garantit que
+ * `updatedAt` et les champs dénormalisés correspondent exactement à ce
+ * qui est réellement en base localement.
+ */
+export function enqueueModeleSync(boiteEnvoiRepository: BoiteEnvoiRepository, modele: ModeleProduit, operation: "create" | "update" | "delete"): void {
+  boiteEnvoiRepository.creer("modele", modele.id, {
+    operation,
+    modeleId: modele.id,
+    motif: modele.motif,
+    type: modele.type,
+    updatedAt: modele.updatedAt,
+  });
+}
+
+export function enqueueProduitSync(boiteEnvoiRepository: BoiteEnvoiRepository, produit: Produit, operation: "create" | "update" | "delete"): void {
+  // Correction "catalogue legacy" : `catalogue:create` peut créer une
+  // variante sans modèle parent (modeleId null, chemin antérieur à la
+  // Phase multi-format) — jamais synchronisée vers le catalogue public
+  // dans ce cas (un modèle est requis pour regrouper la fiche publique,
+  // et la projection serveur exige un modeleId valide) ; l'écriture
+  // locale reste inchangée, seul l'envoi vers le serveur est ignoré.
+  if (!produit.modeleId) return;
+  boiteEnvoiRepository.creer("produit", produit.id, {
+    operation,
+    produitId: produit.id,
+    modeleId: produit.modeleId,
+    taille: produit.taille,
+    tailleTri: produit.tailleTri,
+    largeur: produit.largeur,
+    hauteur: produit.hauteur,
+    reference: produit.reference,
+    prix: produit.prix,
+    updatedAt: produit.updatedAt,
+  });
+}
+
 type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "UNKNOWN";
 
 function mapStockError(err: unknown): { code: StockErrorReason; message: string; available?: number; requested?: number } {
@@ -922,7 +1025,7 @@ function mapStockError(err: unknown): { code: StockErrorReason; message: string;
   if (err instanceof domainStock.InvalidQuantityError) {
     return { code: "INVALID_QUANTITY", message: err.message };
   }
-  if (err instanceof VenteValidationError) {
+  if (err instanceof VenteValidationError || err instanceof StockValidationError) {
     return { code: "VALIDATION_ERROR", message: err.message };
   }
   // eslint-disable-next-line no-console

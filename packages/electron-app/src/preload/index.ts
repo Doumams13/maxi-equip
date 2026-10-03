@@ -60,6 +60,11 @@ export interface VenteInput {
   vendeurNomManuel: string | null;
   modeReglement: string | null;
   lignes: VenteLigneInput[];
+  remise: number;
+  /** Omis = vente classique intégralement payée. Voir VenteService.VenteInput. */
+  statutPaiement?: "reservation" | "payee";
+  /** Pertinent uniquement si statutPaiement === "reservation" (l'acompte). */
+  montantPaye?: number;
 }
 
 export interface ProduitAvecMiniature extends Produit {
@@ -116,7 +121,7 @@ export interface StagedImage {
 
 export interface EvenementHistorique {
   id: string;
-  type: "vente" | "annulation" | "entree" | "transfert";
+  type: "vente" | "annulation" | "entree" | "sortie" | "transfert";
   date: string;
   quantite: number | null;
   produitMotif: string | null;
@@ -133,6 +138,8 @@ export interface EvenementHistorique {
   utilisateurId: string | null;
   utilisateurNom: string | null;
   utilisateurRole: string | null;
+  /** Renseigné UNIQUEMENT pour une entrée/sortie manuelle annulée — toujours null pour vente/annulation/transfert. */
+  annuleLe: string | null;
 }
 
 const maxiEquipApi = {
@@ -140,6 +147,26 @@ const maxiEquipApi = {
   dbHealthCheck: (): Promise<{ tableCount: number; tables: string[] }> =>
     ipcRenderer.invoke("app:dbHealthCheck"),
   quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
+
+  // --- Configuration initiale (Phase 6C) — remplace le mot de passe
+  // Administrateur généré aléatoirement. Le mot de passe choisi transite
+  // en clair uniquement le temps de cet appel IPC, jamais stocké ni
+  // journalisé côté Renderer — même principe que login(). ---
+  setupEstRequis: (): Promise<boolean> => ipcRenderer.invoke("setup:estRequis"),
+  setupCreerAdmin: (input: {
+    nom: string;
+    identifiant: string;
+    motDePasse: string;
+    confirmation: string;
+  }): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("setup:creerAdmin", input),
+
+  // --- Récupération d'installation (PC Shop volé/remplacé) — le mot de
+  // passe transite en clair uniquement le temps de cet appel IPC, jamais
+  // stocké ni journalisé côté Renderer, même principe que login(). ---
+  installationVerifierEtRestaurer: (
+    motDePasse: string
+  ): Promise<{ success: boolean; etape?: string; message?: string }> =>
+    ipcRenderer.invoke("installation:verifierEtRestaurer", motDePasse),
 
   login: (identifiant: string, motDePasse: string): Promise<LoginOutcome> =>
     ipcRenderer.invoke("auth:login", identifiant, motDePasse),
@@ -175,12 +202,16 @@ const maxiEquipApi = {
     ipcRenderer.invoke("stock:byEmplacement", emplacementId),
   enregistrerEntree: (produitId: string, emplacementId: string, quantite: number): Promise<StockOperationResult> =>
     ipcRenderer.invoke("stock:entree", produitId, emplacementId, quantite),
+  enregistrerSortie: (produitId: string, emplacementId: string, quantite: number): Promise<StockOperationResult> =>
+    ipcRenderer.invoke("stock:sortie", produitId, emplacementId, quantite),
   enregistrerTransfert: (
     produitId: string,
     sourceId: string,
     destinationId: string,
     quantite: number
   ): Promise<StockOperationResult> => ipcRenderer.invoke("stock:transfert", produitId, sourceId, destinationId, quantite),
+  annulerMouvementStock: (mouvementId: string, motif: string): Promise<StockOperationResult> =>
+    ipcRenderer.invoke("stock:annulerMouvement", mouvementId, motif),
 
   enregistrerVente: (input: VenteInput): Promise<StockOperationResult & { factureId?: string; numero?: string; total?: number }> =>
     ipcRenderer.invoke("ventes:create", input),
@@ -213,6 +244,21 @@ const maxiEquipApi = {
   }> => ipcRenderer.invoke("sync:run"),
   syncEstEnCours: (): Promise<boolean> => ipcRenderer.invoke("sync:estEnCours"),
   syncEstConfiguree: (): Promise<boolean> => ipcRenderer.invoke("sync:configuree"),
+
+  // --- Mise à jour automatique — interrogée par polling (même principe
+  // que les notifications, jamais un canal d'événements poussés). ---
+  miseAJourEtat: (): Promise<{
+    disponible: boolean;
+    telechargee: boolean;
+    version: string | null;
+    verificationEnCours: boolean;
+    aJour: boolean;
+    versionActuelle: string;
+    progression: number | null;
+  }> => ipcRenderer.invoke("update:etat"),
+  miseAJourVerifierManuellement: (): Promise<void> => ipcRenderer.invoke("update:verifierManuellement"),
+  miseAJourTelecharger: (): Promise<void> => ipcRenderer.invoke("update:telecharger"),
+  miseAJourInstallerMaintenant: (): Promise<void> => ipcRenderer.invoke("update:installerMaintenant"),
 
   // --- Sauvegarde (Phase 3.8) — le Renderer ne choisit jamais un chemin
   // directement ni n'accède au système de fichiers : la boîte de
@@ -281,10 +327,12 @@ const maxiEquipApi = {
     ipcRenderer.invoke("factures:genererDocumentInternePdf", factureId),
   lireDocumentBase64: (chemin: string): Promise<{ success: boolean; base64?: string; message?: string }> =>
     ipcRenderer.invoke("documents:lireBase64", chemin),
-  imprimerDocument: (chemin: string): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("documents:imprimer", chemin),
   telechargerDocument: (chemin: string, nomSuggere: string): Promise<{ success: boolean; canceled?: boolean; chemin?: string; message?: string }> =>
     ipcRenderer.invoke("documents:telecharger", chemin, nomSuggere),
-  marquerFactureLivree: (factureId: string): Promise<{ success: boolean }> => ipcRenderer.invoke("factures:marquerLivree", factureId),
+  changerStatutFacture: (
+    factureId: string,
+    nouveauStatut: "reservation" | "payee_non_livree" | "payee_livree"
+  ): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("factures:changerStatut", factureId, nouveauStatut),
   annulerFacture: (factureId: string, motif: string): Promise<{ success: boolean; message?: string }> =>
     ipcRenderer.invoke("factures:annuler", factureId, motif),
   marquerFactureCorrigee: (factureOrigineId: string, nouvelleFactureId: string): Promise<{ success: boolean }> =>
@@ -300,6 +348,8 @@ const maxiEquipApi = {
     adresse: string;
     quartier: string;
     telephones: string[];
+    whatsapp: string;
+    email: string;
     nomAdministrateur: string | null;
     nomGerant: string | null;
   }> => ipcRenderer.invoke("parametres:getIdentite"),
@@ -308,6 +358,8 @@ const maxiEquipApi = {
     adresse: string;
     quartier: string;
     telephones: string[];
+    whatsapp: string;
+    email: string;
     nomAdministrateur: string | null;
     nomGerant: string | null;
   }): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("parametres:setIdentite", identite),
@@ -330,6 +382,9 @@ const maxiEquipApi = {
     clientTelephone: string | null;
     clientAdresse: string | null;
     modeReglement: string | null;
+    remise: number;
+    statutPaiement: "reservation" | "payee";
+    montantPaye: number;
     lignes: {
       produitId: string | null;
       motif: string;
@@ -344,7 +399,7 @@ const maxiEquipApi = {
   listHistorique: (): Promise<Mouvement[]> => ipcRenderer.invoke("historique:list"),
   listHistoriqueEnrichiPagine: (filtres: {
     recherche: string;
-    typeFiltre: "tous" | "vente" | "annulation" | "entree" | "transfert";
+    typeFiltre: "tous" | "vente" | "annulation" | "entree" | "sortie" | "transfert";
     periode: "tout" | "jour" | "semaine" | "mois" | "personnalise";
     dateDebut: string;
     dateFin: string;
@@ -361,6 +416,7 @@ const maxiEquipApi = {
     compteurs: Record<string, number>;
   }> => ipcRenderer.invoke("historique:listEnrichiPagine", filtres),
   listEntreesCompletes: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("stock:listEntrees"),
+  listSortiesCompletes: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("stock:listSorties"),
   listTransfertsComplets: (): Promise<EvenementHistorique[]> => ipcRenderer.invoke("stock:listTransferts"),
 
   getDashboardSummary: (): Promise<{

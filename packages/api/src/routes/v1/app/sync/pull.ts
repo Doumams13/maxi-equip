@@ -19,9 +19,9 @@ export const pullRoute: Route = {
   method: "GET",
   path: "/sync/pull",
   trustLevel: "app",
-  handler: (req) => {
+  handler: async (req) => {
     const curseurDepart = validerCurseurPull(req.query["since"]);
-    const { operations, hasMore } = listerOperationsDepuis(curseurDepart);
+    const { operations, hasMore } = await listerOperationsDepuis(curseurDepart);
     const nouveauCurseur = operations.length > 0 ? operations[operations.length - 1]!.curseur : curseurDepart;
     return { status: 200, body: { operations, cursor: nouveauCurseur, hasMore } };
   },

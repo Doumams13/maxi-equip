@@ -24,6 +24,7 @@ const MODELE_A: ProductModel = {
   images: [],
   updatedAt: "2026-01-01T00:00:00.000Z",
   variants: [{ id: "v1", size: "60x60", reference: "MB-6060", priceFcfa: 15000 }],
+  ordreVitrine: null,
 };
 
 const MODELE_B: ProductModel = {
@@ -35,6 +36,7 @@ const MODELE_B: ProductModel = {
   images: [],
   updatedAt: "2026-01-02T00:00:00.000Z",
   variants: [{ id: "v2", size: "30x30", reference: "GA-3030", priceFcfa: 8000 }],
+  ordreVitrine: null,
 };
 
 function stubFetchOk(models: ProductModel[], promotions: Promotion[]) {

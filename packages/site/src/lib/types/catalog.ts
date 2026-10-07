@@ -48,6 +48,14 @@ export interface ProductModel {
   updatedAt: string;
   /** Mise en avant sur l'accueil. Ne reflète jamais un niveau de stock. */
   featured?: boolean;
+  /**
+   * Position d'affichage dans la vitrine de la page d'accueil, choisie
+   * manuellement depuis l'app (0 = premier) — `null` = non sélectionné.
+   * Distinct de `featured` ci-dessus (qui reflète en réalité une
+   * promotion active, jamais une vraie curation manuelle) — correction
+   * "choisir quels carreaux s'affichent en première page" (2026-10-07).
+   */
+  ordreVitrine: number | null;
 }
 
 export interface Promotion {

@@ -96,6 +96,13 @@ export class ApiCatalogRepository implements CatalogRepository {
     return modeles.filter((m) => m.featured);
   }
 
+  async listVitrineModels(): Promise<ProductModel[]> {
+    const modeles = await this.chargerModeles();
+    return modeles
+      .filter((m) => m.ordreVitrine !== null)
+      .sort((a, b) => a.ordreVitrine! - b.ordreVitrine!);
+  }
+
   async listPromotions(): Promise<Promotion[]> {
     return this.chargerPromotions();
   }

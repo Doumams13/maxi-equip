@@ -81,6 +81,7 @@ export function validerOperationModele(payload: unknown): ModeleCataloguePayload
     modeleId: uuid(payload["modeleId"], "modeleId"),
     motif: texte(payload["motif"], "motif"),
     type: texte(payload["type"], "type"),
+    ordreVitrine: nombreOuNull(payload["ordreVitrine"], "ordreVitrine"),
     updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
   };
 }

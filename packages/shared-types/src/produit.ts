@@ -9,6 +9,15 @@ import type { MetierEntity, SoftDeletable, SyncStatus, UUID } from "./common.js"
 export interface ModeleProduit extends MetierEntity, SoftDeletable {
   motif: string;
   type: string;
+  /**
+   * Position d'affichage dans la vitrine de la page d'accueil du site
+   * public (0 = premier affiché). `null` = ce modèle n'est pas
+   * sélectionné pour la vitrine — correction "choisir quels carreaux
+   * s'affichent en première page" (sans ce champ, TOUS les modèles
+   * ayant une image étaient candidats, sans distinction possible une
+   * fois le catalogue volumineux).
+   */
+  ordreVitrine: number | null;
 }
 
 /**

@@ -109,6 +109,7 @@ export function runMigrations(db: Database.Database): void {
   ajouterIndexModeleIdProduitsSiAbsent(db);
   // Correction Phase Finale, Bloc 6 (audit pré-production)
   ajouterIdentiteSnapshotFacturesSiAbsente(db);
+  ajouterOrdreVitrineModelesSiAbsent(db);
   setSchemaVersion(db);
 }
 
@@ -126,6 +127,21 @@ export function runMigrations(db: Database.Database): void {
  * ipc/metier.ts). Toute NOUVELLE vente, à partir de maintenant, capture
  * un instantané réel (voir venteService.ts).
  */
+/**
+ * Correction "choisir quels carreaux s'affichent en première page du
+ * site" (2026-10-07) : avant cette colonne, la mosaïque d'accueil
+ * n'avait aucun moyen de distinguer les modèles entre eux — avec un
+ * catalogue volumineux, impossible de choisir manuellement lesquels
+ * mettre en avant. `ordre_vitrine` NULL = non sélectionné, un nombre =
+ * position d'affichage (0 = premier) — voir shared-types/produit.ts.
+ */
+function ajouterOrdreVitrineModelesSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(modeles_produit)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "ordre_vitrine")) {
+    db.exec("ALTER TABLE modeles_produit ADD COLUMN ordre_vitrine INTEGER");
+  }
+}
+
 function ajouterIdentiteSnapshotFacturesSiAbsente(db: Database.Database): void {
   const columns = db.prepare("PRAGMA table_info(factures)").all() as { name: string }[];
   if (!columns.some((c) => c.name === "identite_snapshot_json")) {

@@ -52,6 +52,8 @@ export interface ModeleCataloguePayload {
   modeleId: string;
   motif: string;
   type: string;
+  /** Position d'affichage dans la vitrine de l'accueil du site (null = non sélectionné) — voir shared-types/produit.ts côté app. */
+  ordreVitrine: number | null;
   updatedAt: string;
 }
 
@@ -127,6 +129,7 @@ export interface ModeleRow {
   motif: string;
   type: string;
   slug: string;
+  ordreVitrine: number | null;
   updatedAt: string;
 }
 

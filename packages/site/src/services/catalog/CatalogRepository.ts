@@ -40,6 +40,16 @@ export interface CatalogRepository {
   listModels(filters: CatalogFilters, sort: CatalogSort): Promise<ProductModel[]>;
   getModelBySlug(slug: string): Promise<ProductModel | null>;
   listFeaturedModels(): Promise<ProductModel[]>;
+  /**
+   * Modèles sélectionnés manuellement pour la vitrine de l'accueil,
+   * triés par `ordreVitrine` croissant (position 0 = premier) —
+   * correction "choisir quels carreaux s'affichent en première page"
+   * (2026-10-07). Distinct de `listFeaturedModels` ci-dessus (qui
+   * reflète en réalité une promotion active, jamais une sélection
+   * manuelle) — peut retourner une liste vide si rien n'a encore été
+   * sélectionné depuis l'app.
+   */
+  listVitrineModels(): Promise<ProductModel[]>;
   listPromotions(): Promise<Promotion[]>;
   listAvailableTypes(): Promise<string[]>;
   listAvailableSizes(): Promise<string[]>;

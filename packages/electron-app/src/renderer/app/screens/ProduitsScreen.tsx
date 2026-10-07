@@ -3,6 +3,7 @@ import { Card, Button, Combobox, ConfirmDialog, useToast, defaultTokens } from "
 import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import type { ModeleProduitAvecVariantes, VarianteProduit, StagedImage } from "../../../preload/index.js";
 import { ImagesModal } from "./ImagesModal.js";
+import { VitrineModal } from "./VitrineModal.js";
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -109,6 +110,9 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
 
   // Images modal
   const [imagesModal, setImagesModal] = useState<{ modeleId: string; modeleMotif: string } | null>(null);
+
+  // Vitrine du site (2026-10-07)
+  const [showVitrineModal, setShowVitrineModal] = useState(false);
 
   async function refresh() {
     const [liste, sugg] = await Promise.all([window.maxiEquip.listModelesProduits(), window.maxiEquip.getCatalogueSuggestions()]);
@@ -430,19 +434,25 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
     <div style={{ padding: 28 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
         <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, margin: 0 }}>Carreaux</h1>
-        <Button
-          onClick={() => {
-            if (showModeleForm) {
-              void handleCloseModeleForm();
-            } else {
-              resetModeleForm();
-              setShowModeleForm(true);
-            }
-          }}
-        >
-          {showModeleForm ? <X size={16} /> : <Plus size={16} />}
-          {showModeleForm ? "Annuler" : "Nouveau modèle"}
-        </Button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button variant="secondary" onClick={() => setShowVitrineModal(true)}>
+            <Star size={16} />
+            Vitrine du site
+          </Button>
+          <Button
+            onClick={() => {
+              if (showModeleForm) {
+                void handleCloseModeleForm();
+              } else {
+                resetModeleForm();
+                setShowModeleForm(true);
+              }
+            }}
+          >
+            {showModeleForm ? <X size={16} /> : <Plus size={16} />}
+            {showModeleForm ? "Annuler" : "Nouveau modèle"}
+          </Button>
+        </div>
       </div>
 
       {showModeleForm && (
@@ -781,6 +791,8 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
           onImagesChanged={() => void refresh()}
         />
       )}
+
+      {showVitrineModal && <VitrineModal onClose={() => setShowVitrineModal(false)} onSaved={() => void refresh()} />}
 
       {showConfirmSaveModele && (
         <ConfirmDialog

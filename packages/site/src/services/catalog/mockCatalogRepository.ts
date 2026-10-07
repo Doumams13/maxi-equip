@@ -27,6 +27,14 @@ export class MockCatalogRepository implements CatalogRepository {
     return delay(mockProducts.filter((m) => m.featured));
   }
 
+  async listVitrineModels(): Promise<ProductModel[]> {
+    return delay(
+      mockProducts
+        .filter((m) => m.ordreVitrine !== null)
+        .sort((a, b) => a.ordreVitrine! - b.ordreVitrine!)
+    );
+  }
+
   async listPromotions(): Promise<Promotion[]> {
     return delay(mockPromotions);
   }

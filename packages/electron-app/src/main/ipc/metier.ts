@@ -100,6 +100,20 @@ export function registerMetierIpcHandlers(
     });
   });
 
+  /**
+   * Définit la sélection ET l'ordre des modèles affichés dans la
+   * vitrine du site public (2026-10-07). `modeleIds` est la liste
+   * complète et ordonnée des modèles sélectionnés — voir
+   * ModeleRepository.definirVitrine pour la sémantique exacte
+   * (retrait implicite de tout modèle absent de la liste).
+   */
+  ipcMain.handle("catalogue:definirVitrine", (_e, modeleIds: string[]) => {
+    if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
+    const modifies = modeleRepository.definirVitrine(modeleIds);
+    for (const modele of modifies) enqueueModeleSync(boiteEnvoiRepository, modele, "update");
+    return { success: true };
+  });
+
   type VarianteInput = {
     taille: string;
     tailleTri?: number;
@@ -990,6 +1004,7 @@ export function enqueueModeleSync(boiteEnvoiRepository: BoiteEnvoiRepository, mo
     modeleId: modele.id,
     motif: modele.motif,
     type: modele.type,
+    ordreVitrine: modele.ordreVitrine,
     updatedAt: modele.updatedAt,
   });
 }

@@ -119,13 +119,28 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         modeleId: MODELE_ID,
         motif: "Marbre Postgres Test",
         type: "Faïence",
+        ordreVitrine: null,
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
       expect(applique).toBe(true);
 
       const modeles = await storage.listerModelesActifs();
       const trouve = modeles.find((m) => m.id === MODELE_ID);
-      expect(trouve).toMatchObject({ motif: "Marbre Postgres Test", slug: "marbre-postgres-test" });
+      expect(trouve).toMatchObject({ motif: "Marbre Postgres Test", slug: "marbre-postgres-test", ordreVitrine: null });
+    });
+
+    it("ordreVitrine : persisté puis retrouvé via listerModelesActifs (vitrine du site, 2026-10-07)", async () => {
+      const modeleVitrine = uuidDeterministe("209");
+      await storage.appliquerOperationModele({
+        operation: "create",
+        modeleId: modeleVitrine,
+        motif: "Modele Vitrine PG",
+        type: "Faïence",
+        ordreVitrine: 3,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      const modeles = await storage.listerModelesActifs();
+      expect(modeles.find((m) => m.id === modeleVitrine)).toMatchObject({ ordreVitrine: 3 });
     });
 
     it("modification : la projection reflète les nouvelles valeurs", async () => {
@@ -134,6 +149,7 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         modeleId: MODELE_ID,
         motif: "Marbre Postgres Test Modifié",
         type: "Grès cérame",
+        ordreVitrine: null,
         updatedAt: "2026-01-02T00:00:00.000Z",
       });
       const modeles = await storage.listerModelesActifs();
@@ -146,6 +162,7 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         modeleId: MODELE_ID,
         motif: "PÉRIMÉ — ne doit jamais apparaître",
         type: "Faïence",
+        ordreVitrine: null,
         updatedAt: "2026-01-01T12:00:00.000Z", // antérieur à la mise à jour précédente (2026-01-02)
       });
       const modeles = await storage.listerModelesActifs();
@@ -209,6 +226,7 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         modeleId: MODELE_ID,
         motif: "Marbre Postgres Test Modifié",
         type: "Grès cérame",
+        ordreVitrine: null,
         updatedAt: "2026-01-03T00:00:00.000Z",
       });
       const modeles = await storage.listerModelesActifs();
@@ -218,7 +236,7 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
     it("image : upsert de métadonnées + URL, puis suppression réelle", async () => {
       const IMAGE_ID = uuidDeterministe("203");
       const MODELE_IMG = uuidDeterministe("204");
-      await storage.appliquerOperationModele({ operation: "create", modeleId: MODELE_IMG, motif: "Modele Image PG", type: "Faïence", updatedAt: "2026-01-01T00:00:00.000Z" });
+      await storage.appliquerOperationModele({ operation: "create", modeleId: MODELE_IMG, motif: "Modele Image PG", type: "Faïence", ordreVitrine: null, updatedAt: "2026-01-01T00:00:00.000Z" });
 
       const { applique } = await storage.upsertImageMeta(
         { operation: "create", imageId: IMAGE_ID, modeleId: MODELE_IMG, kind: "produit", ordre: 0, estPrincipale: true, updatedAt: "2026-01-01T00:00:00.000Z" },

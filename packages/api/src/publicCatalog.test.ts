@@ -59,6 +59,35 @@ describe("Catalogue public — GET /v1/public/catalog/models, /v1/public/promoti
     expect(JSON.stringify(modele)).not.toMatch(/stock|seuilAlerte|fournisseur|prixAchat/i);
   });
 
+  it("ordreVitrine : poussé via sync, retrouvé tel quel dans le catalogue public (vitrine du site, 2026-10-07)", async () => {
+    const router = createRouter();
+    await router.dispatch(
+      push([{ entityType: "modele", entityId: MODELE_1, payload: { operation: "create", modeleId: MODELE_1, motif: "Marbre Blanc", type: "Faïence", ordreVitrine: 0, updatedAt: "2026-01-01T00:00:00.000Z" } }])
+    );
+    await router.dispatch(
+      push([{ entityType: "produit", entityId: PRODUIT_1, payload: { operation: "create", produitId: PRODUIT_1, modeleId: MODELE_1, taille: "60x60", tailleTri: 3600, largeur: 60, hauteur: 60, reference: "MB-6060", prix: 15000, updatedAt: "2026-01-01T00:00:00.000Z" } }])
+    );
+
+    const res = await router.dispatch(req({ path: "/v1/public/catalog/models" }));
+    const corps = res.body as { models: Record<string, unknown>[] };
+    expect(corps.models[0]).toMatchObject({ ordreVitrine: 0 });
+  });
+
+  it("ordreVitrine : absent du payload (ancienne version de l'app) → null, jamais une erreur de validation", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(
+      push([{ entityType: "modele", entityId: MODELE_1, payload: { operation: "create", modeleId: MODELE_1, motif: "Marbre Blanc", type: "Faïence", updatedAt: "2026-01-01T00:00:00.000Z" } }])
+    );
+    expect(res.status).toBe(200);
+    await router.dispatch(
+      push([{ entityType: "produit", entityId: PRODUIT_1, payload: { operation: "create", produitId: PRODUIT_1, modeleId: MODELE_1, taille: "60x60", tailleTri: 3600, largeur: 60, hauteur: 60, reference: "MB-6060", prix: 15000, updatedAt: "2026-01-01T00:00:00.000Z" } }])
+    );
+
+    const resCatalogue = await router.dispatch(req({ path: "/v1/public/catalog/models" }));
+    const corps = resCatalogue.body as { models: Record<string, unknown>[] };
+    expect(corps.models[0]).toMatchObject({ ordreVitrine: null });
+  });
+
   it("B — un modèle sans variante active n'apparaît jamais dans le catalogue public", async () => {
     const router = createRouter();
     await router.dispatch(push([{ entityType: "modele", entityId: MODELE_2, payload: { operation: "create", modeleId: MODELE_2, motif: "Sans variante", type: "Faïence", updatedAt: "2026-01-01T00:00:00.000Z" } }]));

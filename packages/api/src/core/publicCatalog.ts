@@ -48,6 +48,8 @@ export interface PublicProductModel {
   variants: PublicProductVariant[];
   updatedAt: string;
   featured?: boolean;
+  /** Position d'affichage dans la vitrine de l'accueil (null = non sélectionné) — voir ModeleRepository.definirVitrine côté app. */
+  ordreVitrine: number | null;
 }
 
 export interface PublicPromotion {
@@ -114,6 +116,7 @@ export async function construireModelesPublics(): Promise<PublicProductModel[]> 
         variants: variantes.map((v) => ({ id: v.id, size: v.taille, reference: v.reference, priceFcfa: v.prix })),
         updatedAt: m.updatedAt,
         featured: variantes.some((v) => produitIdsEnPromoActive.has(v.id)),
+        ordreVitrine: m.ordreVitrine,
       };
     })
     .filter((m) => m.variants.length > 0);

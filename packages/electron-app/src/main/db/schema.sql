@@ -31,13 +31,16 @@ CREATE TABLE IF NOT EXISTS emplacements (
 -- Modèles de carreaux (motif/patron) — regroupe plusieurs variantes (formats).
 -- Les images appartiennent au modèle, pas à une variante spécifique.
 CREATE TABLE IF NOT EXISTS modeles_produit (
-  id          TEXT PRIMARY KEY,
-  motif       TEXT NOT NULL,
-  type        TEXT NOT NULL,
-  deleted_at  TEXT,
-  deleted_by  TEXT,
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
+  id            TEXT PRIMARY KEY,
+  motif         TEXT NOT NULL,
+  type          TEXT NOT NULL,
+  -- Position d'affichage dans la vitrine du site public (0 = premier),
+  -- NULL = non sélectionné — voir shared-types/produit.ts.
+  ordre_vitrine INTEGER,
+  deleted_at    TEXT,
+  deleted_by    TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_modeles_produit_type ON modeles_produit (type);
 CREATE INDEX IF NOT EXISTS idx_modeles_produit_updated_at ON modeles_produit (updated_at);

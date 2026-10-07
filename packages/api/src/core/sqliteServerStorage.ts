@@ -37,12 +37,13 @@ export class SqliteServerStorage implements ServerStorage {
       );
 
       CREATE TABLE IF NOT EXISTS catalogue_modeles (
-        id         TEXT PRIMARY KEY,
-        motif      TEXT NOT NULL,
-        type       TEXT NOT NULL,
-        slug       TEXT NOT NULL,
-        deleted_at TEXT,
-        updated_at TEXT NOT NULL
+        id            TEXT PRIMARY KEY,
+        motif         TEXT NOT NULL,
+        type          TEXT NOT NULL,
+        slug          TEXT NOT NULL,
+        ordre_vitrine INTEGER,
+        deleted_at    TEXT,
+        updated_at    TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogue_modeles_slug ON catalogue_modeles (slug);
 
@@ -110,6 +111,14 @@ export class SqliteServerStorage implements ServerStorage {
         updated_at                TEXT NOT NULL
       );
     `);
+
+    // Secours pour un fichier SQLite de dev déjà créé avant cette
+    // colonne (le cas `:memory:` n'est jamais concerné, toujours créé
+    // neuf) — même raisonnement que postgresServerStorage.ts.
+    const colonnesModeles = db.prepare("PRAGMA table_info(catalogue_modeles)").all() as { name: string }[];
+    if (!colonnesModeles.some((c) => c.name === "ordre_vitrine")) {
+      db.exec("ALTER TABLE catalogue_modeles ADD COLUMN ordre_vitrine INTEGER");
+    }
   }
 
   async fermer(): Promise<void> {
@@ -175,17 +184,18 @@ export class SqliteServerStorage implements ServerStorage {
 
     const resultat = this.db
       .prepare(
-        `INSERT INTO catalogue_modeles (id, motif, type, slug, deleted_at, updated_at)
-         VALUES (@id, @motif, @type, @slug, @deletedAt, @updatedAt)
+        `INSERT INTO catalogue_modeles (id, motif, type, slug, ordre_vitrine, deleted_at, updated_at)
+         VALUES (@id, @motif, @type, @slug, @ordreVitrine, @deletedAt, @updatedAt)
          ON CONFLICT(id) DO UPDATE SET
            motif = excluded.motif,
            type = excluded.type,
            slug = excluded.slug,
+           ordre_vitrine = excluded.ordre_vitrine,
            deleted_at = excluded.deleted_at,
            updated_at = excluded.updated_at
          WHERE excluded.updated_at >= catalogue_modeles.updated_at`
       )
-      .run({ id: payload.modeleId, motif: payload.motif, type: payload.type, slug, deletedAt, updatedAt: payload.updatedAt });
+      .run({ id: payload.modeleId, motif: payload.motif, type: payload.type, slug, ordreVitrine: payload.ordreVitrine, deletedAt, updatedAt: payload.updatedAt });
 
     return { applique: resultat.changes > 0 };
   }
@@ -324,7 +334,7 @@ export class SqliteServerStorage implements ServerStorage {
 
   async listerModelesActifs(): Promise<ModeleRow[]> {
     return this.db
-      .prepare("SELECT id, motif, type, slug, updated_at as updatedAt FROM catalogue_modeles WHERE deleted_at IS NULL ORDER BY type, motif")
+      .prepare("SELECT id, motif, type, slug, ordre_vitrine as ordreVitrine, updated_at as updatedAt FROM catalogue_modeles WHERE deleted_at IS NULL ORDER BY type, motif")
       .all() as ModeleRow[];
   }
 

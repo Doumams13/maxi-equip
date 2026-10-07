@@ -35,6 +35,7 @@ export const mockProducts: ProductModel[] = [
       "Un motif marbré blanc veiné, lumineux et intemporel. S'adapte aussi bien aux séjours qu'aux salles de bain pour un rendu épuré.",
     updatedAt: "2026-08-20T09:00:00.000Z",
     featured: true,
+    ordreVitrine: 0,
     images: [
       img("marbre-blanc", 1, "Carreau Marbre Blanc, vue à plat", 0),
       img("marbre-blanc", 2, "Carreau Marbre Blanc, gros plan sur le veinage", 1),
@@ -55,6 +56,7 @@ export const mockProducts: ProductModel[] = [
       "Motif marbré noir aux veines argentées, pour une ambiance élégante et contemporaine. Très demandé pour les salles de bain haut de gamme.",
     updatedAt: "2026-08-18T09:00:00.000Z",
     featured: true,
+    ordreVitrine: 1,
     images: [
       img("marbre-noir", 1, "Carreau Marbre Noir, vue à plat", 0),
       img("marbre-noir", 2, "Carreau Marbre Noir, gros plan sur le veinage", 1),
@@ -74,6 +76,7 @@ export const mockProducts: ProductModel[] = [
       "Grès cérame gris anthracite uni, résistant et facile d'entretien. Idéal pour les cuisines et les zones de forte circulation.",
     updatedAt: "2026-08-25T09:00:00.000Z",
     featured: false,
+    ordreVitrine: null,
     images: [
       img("gres-gris-anthracite", 1, "Carreau Grès Gris Anthracite, vue à plat", 0),
       img("gres-gris-anthracite", 2, "Carreau Grès Gris Anthracite, gros plan sur le joint", 1),
@@ -93,6 +96,7 @@ export const mockProducts: ProductModel[] = [
       "Carreau antidérapant teinte terracotta, conçu pour les extérieurs, terrasses et abords de piscine, tout en gardant un rendu chaleureux.",
     updatedAt: "2026-08-10T09:00:00.000Z",
     featured: true,
+    ordreVitrine: null,
     images: [
       img("terracotta-antiderapant", 1, "Carreau Terracotta Antidérapant, vue à plat", 0),
       img("terracotta-antiderapant", 2, "Carreau Terracotta Antidérapant, gros plan sur la texture", 1),
@@ -112,6 +116,7 @@ export const mockProducts: ProductModel[] = [
       "Mosaïque bleu et blanc en petits carreaux, parfaite pour une crédence de cuisine ou une touche décorative en salle de bain.",
     updatedAt: "2026-08-28T09:00:00.000Z",
     featured: false,
+    ordreVitrine: null,
     images: [
       img("mosaique-bleu-blanc", 1, "Plaque Mosaïque Bleu & Blanc, vue à plat", 0),
       img("mosaique-bleu-blanc", 2, "Plaque Mosaïque Bleu & Blanc, gros plan", 1),
@@ -130,6 +135,7 @@ export const mockProducts: ProductModel[] = [
       "Faïence beige sable au rendu chaleureux et polyvalent, s'associe facilement avec des meubles clairs ou foncés.",
     updatedAt: "2026-08-15T09:00:00.000Z",
     featured: false,
+    ordreVitrine: null,
     images: [
       img("beige-sable-faience", 1, "Carreau Beige Sable, vue à plat", 0),
       img("beige-sable-faience", 2, "Carreau Beige Sable, gros plan sur le veinage", 1),

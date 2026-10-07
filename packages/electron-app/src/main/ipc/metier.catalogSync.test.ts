@@ -19,6 +19,7 @@ const MODELE: ModeleProduit = {
   id: "modele-1",
   motif: "Marbre Blanc",
   type: "Faïence",
+  ordreVitrine: null,
   deletedAt: null,
   deletedBy: null,
   createdAt: "2026-01-01T00:00:00.000Z",
@@ -52,8 +53,15 @@ describe("enqueueModeleSync", () => {
       modeleId: "modele-1",
       motif: "Marbre Blanc",
       type: "Faïence",
+      ordreVitrine: null,
       updatedAt: "2026-01-02T00:00:00.000Z",
     });
+  });
+
+  it("transmet ordreVitrine quand le modèle est sélectionné pour la vitrine", () => {
+    const boiteEnvoi = makeBoiteEnvoi();
+    enqueueModeleSync(boiteEnvoi as never, { ...MODELE, ordreVitrine: 2 }, "update");
+    expect(boiteEnvoi.creer).toHaveBeenCalledWith("modele", "modele-1", expect.objectContaining({ ordreVitrine: 2 }));
   });
 
   it("transmet l'opération demandée (update/delete)", () => {

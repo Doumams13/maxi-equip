@@ -91,6 +91,7 @@ export interface ModeleProduitAvecVariantes {
   id: string;
   motif: string;
   type: string;
+  ordreVitrine: number | null;
   deletedAt: string | null;
   imagePrincipaleDataUrl: string | null;
   nombreImages: number;
@@ -464,6 +465,9 @@ const maxiEquipApi = {
   // --- Catalogue multi-format (modèles + variantes) ---
   listModelesProduits: (): Promise<ModeleProduitAvecVariantes[]> =>
     ipcRenderer.invoke("catalogue:listModeles"),
+  /** Vitrine du site (2026-10-07) : enregistre la sélection ET l'ordre complets (voir ModeleRepository.definirVitrine). */
+  definirVitrineModeles: (modeleIds: string[]): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("catalogue:definirVitrine", modeleIds),
   creerModeleProduit: (input: {
     motif: string;
     type: string;

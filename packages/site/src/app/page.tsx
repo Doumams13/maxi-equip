@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { catalogRepository } from "@/services/catalog";
+import { buildHeroSelection } from "@/services/catalog/buildHeroSelection";
 import { Hero } from "@/components/home/Hero";
 import { UniversStrip } from "@/components/home/UniversStrip";
 import { PromoSplit } from "@/components/home/PromoSplit";
@@ -17,17 +18,23 @@ export const metadata: Metadata = {
 
 export default async function HomePage() {
   try {
-    const [allModels, promotedModels, promotions, types, sizes] = await Promise.all([
+    const [allModels, vitrineModels, promotedModels, promotions, types, sizes] = await Promise.all([
       catalogRepository.listModels({}, "recent"),
+      catalogRepository.listVitrineModels(),
       catalogRepository.listModels({ onlyPromotions: true }, "recent"),
       catalogRepository.listPromotions(),
       catalogRepository.listAvailableTypes(),
       catalogRepository.listAvailableSizes(),
     ]);
+    // Correction "choisir quels carreaux s'affichent en première page"
+    // (2026-10-07) : la mosaïque reçoit la sélection manuelle en premier,
+    // complétée par les plus récents jusqu'à 10 — jamais vide ni tronquée,
+    // identique au tri "récent" seul tant qu'aucune vitrine n'est choisie.
+    const heroModels = buildHeroSelection(vitrineModels, allModels);
 
     return (
       <>
-        <Hero models={allModels} promotedModels={promotedModels} promotions={promotions} />
+        <Hero models={heroModels} promotedModels={promotedModels} promotions={promotions} />
 
         <div className="mx-auto max-w-[1320px] border-t border-ink/[0.08] px-[18px] py-9 sm:px-7 sm:py-16">
           <div className="mb-9 flex flex-wrap items-end justify-between gap-6">

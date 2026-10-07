@@ -60,12 +60,13 @@ export class PostgresServerStorage implements ServerStorage {
       );
 
       CREATE TABLE IF NOT EXISTS catalogue_modeles (
-        id         TEXT PRIMARY KEY,
-        motif      TEXT NOT NULL,
-        type       TEXT NOT NULL,
-        slug       TEXT NOT NULL UNIQUE,
-        deleted_at TEXT,
-        updated_at TEXT NOT NULL
+        id            TEXT PRIMARY KEY,
+        motif         TEXT NOT NULL,
+        type          TEXT NOT NULL,
+        slug          TEXT NOT NULL UNIQUE,
+        ordre_vitrine INTEGER,
+        deleted_at    TEXT,
+        updated_at    TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS catalogue_produits (
@@ -144,6 +145,14 @@ export class PostgresServerStorage implements ServerStorage {
     await this.pool.query(`
       ALTER TABLE installation_recuperation ADD COLUMN IF NOT EXISTS cle_chiffree_cloud_backup TEXT;
     `);
+
+    // BUG RÉEL CORRIGÉ (2026-10-07) : même raisonnement que ci-dessus —
+    // `CREATE TABLE IF NOT EXISTS` ne touche jamais une table déjà
+    // déployée en production, donc cette colonne resterait absente sans
+    // cet ALTER explicite (voir validationCatalogueSync.ts/ModeleCataloguePayload).
+    await this.pool.query(`
+      ALTER TABLE catalogue_modeles ADD COLUMN IF NOT EXISTS ordre_vitrine INTEGER;
+    `);
   }
 
   async fermer(): Promise<void> {
@@ -211,16 +220,17 @@ export class PostgresServerStorage implements ServerStorage {
     const slug = await this.slugUnique(payload.motif, payload.modeleId);
 
     const res = await this.pool.query(
-      `INSERT INTO catalogue_modeles (id, motif, type, slug, deleted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO catalogue_modeles (id, motif, type, slug, ordre_vitrine, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (id) DO UPDATE SET
          motif = excluded.motif,
          type = excluded.type,
          slug = excluded.slug,
+         ordre_vitrine = excluded.ordre_vitrine,
          deleted_at = excluded.deleted_at,
          updated_at = excluded.updated_at
        WHERE excluded.updated_at >= catalogue_modeles.updated_at`,
-      [payload.modeleId, payload.motif, payload.type, slug, deletedAt, payload.updatedAt]
+      [payload.modeleId, payload.motif, payload.type, slug, payload.ordreVitrine, deletedAt, payload.updatedAt]
     );
 
     return { applique: (res.rowCount ?? 0) > 0 };
@@ -338,7 +348,7 @@ export class PostgresServerStorage implements ServerStorage {
 
   async listerModelesActifs(): Promise<ModeleRow[]> {
     const res = await this.pool.query(
-      "SELECT id, motif, type, slug, updated_at as \"updatedAt\" FROM catalogue_modeles WHERE deleted_at IS NULL ORDER BY type, motif"
+      "SELECT id, motif, type, slug, ordre_vitrine as \"ordreVitrine\", updated_at as \"updatedAt\" FROM catalogue_modeles WHERE deleted_at IS NULL ORDER BY type, motif"
     );
     return res.rows as ModeleRow[];
   }

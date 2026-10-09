@@ -182,7 +182,7 @@ export class FactureRepository {
         `SELECT produit_id as produitId, motif, reference, taille, quantite, prix_unitaire as prixUnitaire,
                 prix_unitaire_normal as prixUnitaireNormal, promotion_id as promotionId,
                 promotion_libelle as promotionLibelle, promotion_type as promotionType,
-                promotion_valeur as promotionValeur
+                promotion_valeur as promotionValeur, surface_carton_m2 as surfaceCartonM2
          FROM lignes_facture WHERE facture_id = ?`
       )
       .all(factureId) as LigneFacture[];
@@ -246,14 +246,14 @@ export class FactureRepository {
     const insertLigne = this.db.prepare(
       `INSERT INTO lignes_facture
          (id, facture_id, produit_id, motif, reference, taille, quantite, prix_unitaire,
-          prix_unitaire_normal, promotion_id, promotion_libelle, promotion_type, promotion_valeur)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          prix_unitaire_normal, promotion_id, promotion_libelle, promotion_type, promotion_valeur, surface_carton_m2)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const ligne of input.lignes) {
       insertLigne.run(
         randomUUID(), id, ligne.produitId, ligne.motif, ligne.reference, ligne.taille, ligne.quantite, ligne.prixUnitaire,
         ligne.prixUnitaireNormal ?? null, ligne.promotionId ?? null, ligne.promotionLibelle ?? null,
-        ligne.promotionType ?? null, ligne.promotionValeur ?? null
+        ligne.promotionType ?? null, ligne.promotionValeur ?? null, ligne.surfaceCartonM2 ?? null
       );
     }
 

@@ -110,6 +110,8 @@ export function runMigrations(db: Database.Database): void {
   // Correction Phase Finale, Bloc 6 (audit pré-production)
   ajouterIdentiteSnapshotFacturesSiAbsente(db);
   ajouterOrdreVitrineModelesSiAbsent(db);
+  ajouterCarreauxParCartonProduitsSiAbsent(db);
+  ajouterSurfaceCartonLignesFactureSiAbsente(db);
   setSchemaVersion(db);
 }
 
@@ -139,6 +141,31 @@ function ajouterOrdreVitrineModelesSiAbsent(db: Database.Database): void {
   const columns = db.prepare("PRAGMA table_info(modeles_produit)").all() as { name: string }[];
   if (!columns.some((c) => c.name === "ordre_vitrine")) {
     db.exec("ALTER TABLE modeles_produit ADD COLUMN ordre_vitrine INTEGER");
+  }
+}
+
+/**
+ * Correction "le prix de référence est au m², pas au carton" (2026-10-08)
+ * — nombre de carreaux par carton, saisi manuellement par taille (varie
+ * selon la taille, aucune formule universelle) — voir shared-types/produit.ts.
+ */
+function ajouterCarreauxParCartonProduitsSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(produits)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "carreaux_par_carton")) {
+    db.exec("ALTER TABLE produits ADD COLUMN carreaux_par_carton INTEGER");
+  }
+}
+
+/**
+ * Même correction — snapshot de la surface du carton (m²) sur chaque
+ * ligne de facture, pour que le prix au m² affiché reste cohérent avec
+ * le prix de carton réellement facturé (même négocié), sans jamais
+ * recalculer depuis le produit actuel — voir shared-types/facture.ts.
+ */
+function ajouterSurfaceCartonLignesFactureSiAbsente(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(lignes_facture)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "surface_carton_m2")) {
+    db.exec("ALTER TABLE lignes_facture ADD COLUMN surface_carton_m2 REAL");
   }
 }
 

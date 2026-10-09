@@ -38,8 +38,8 @@ function PromoTile({ model, promotions, big }: { model: ProductModel; promotions
       >
         <h3 className={`font-display text-bg ${big ? "text-2xl" : "text-lg"}`}>{model.name}</h3>
         <div className="mt-2.5 flex items-baseline gap-2.5">
-          <span className="font-display text-[22px] font-semibold text-bg">{formatFcfa(effective.promoPriceFcfa ?? effective.normalPriceFcfa)}</span>
-          {effective.isPromotionActive && <span className="text-sm text-[#c7d3c9] line-through">{formatFcfa(effective.normalPriceFcfa)}</span>}
+          <span className="font-display text-[22px] font-semibold text-bg">{formatFcfa(effective.promoPriceFcfa ?? effective.normalPriceFcfa)}/m²</span>
+          {effective.isPromotionActive && <span className="text-sm text-[#c7d3c9] line-through">{formatFcfa(effective.normalPriceFcfa)}/m²</span>}
         </div>
         <span className="text-[12.5px] text-[#cfdccf]">À partir de</span>
       </div>

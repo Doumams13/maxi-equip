@@ -60,9 +60,10 @@ export function PurchasePanel({ model, promotions }: { model: ProductModel; prom
       <h1 className="font-display text-[clamp(26px,3vw,36px)]">{model.name}</h1>
       <p className="mt-2 text-[13px] text-ink-mute">Réf. {variant.reference}</p>
 
+      {/* Correction "préciser que les prix sont au m²" (2026-10-08) — voir components/ui/primitives.tsx. */}
       <div className="my-5 flex items-baseline gap-3">
-        <span className={`font-display text-[28px] font-semibold ${effectivePrice.isPromotionActive ? "text-clay" : "text-ink"}`}>{formatFcfa(now)}</span>
-        {effectivePrice.isPromotionActive && <span className="text-[15px] text-ink-mute line-through">{formatFcfa(effectivePrice.normalPriceFcfa)}</span>}
+        <span className={`font-display text-[28px] font-semibold ${effectivePrice.isPromotionActive ? "text-clay" : "text-ink"}`}>{formatFcfa(now)}/m²</span>
+        {effectivePrice.isPromotionActive && <span className="text-[15px] text-ink-mute line-through">{formatFcfa(effectivePrice.normalPriceFcfa)}/m²</span>}
       </div>
 
       <p className="max-w-[46ch] text-[14.5px] leading-relaxed text-ink-mute">{model.description}</p>

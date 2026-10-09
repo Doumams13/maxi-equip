@@ -58,7 +58,12 @@ CREATE TABLE IF NOT EXISTS produits (
   largeur       REAL,
   hauteur       REAL,
   reference     TEXT NOT NULL,
+  -- Prix AU M², jamais un prix de carton (voir shared-types/produit.ts) —
+  -- le prix du carton se calcule via carreaux_par_carton ci-dessous.
   prix          INTEGER NOT NULL,
+  -- Nombre de carreaux par carton pour cette taille — varie selon la
+  -- taille, NULL tant que non renseigné (voir shared-types/produit.ts).
+  carreaux_par_carton INTEGER,
   seuil_alerte  INTEGER NOT NULL DEFAULT 0,
   deleted_at    TEXT,
   deleted_by    TEXT,
@@ -194,7 +199,11 @@ CREATE TABLE IF NOT EXISTS lignes_facture (
   promotion_id         TEXT,
   promotion_libelle    TEXT,
   promotion_type       TEXT,
-  promotion_valeur     REAL
+  promotion_valeur     REAL,
+  -- Surface d'un carton de ce produit en m², au moment de la vente
+  -- (snapshot, jamais recalculé depuis le produit actuel) — voir
+  -- shared-types/facture.ts.
+  surface_carton_m2    REAL
   -- Volontairement AUCUN champ fournisseur / prix d'achat ici (Corrections §7/§9 point 12).
 );
 

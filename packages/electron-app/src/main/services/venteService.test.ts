@@ -200,7 +200,7 @@ describe("VenteService — annulation d'une facture (restauration du stock)", ()
 function creerService(opts: {
   stock?: Record<string, Record<string, number>>;
   promotions?: { id: string; libelle: string; typeReduction: "pourcentage" | "montant_fixe"; valeur: number; perimetre: "global" | "cible"; produitIds: string[]; dateDebut: string; dateFin: string }[];
-  produits?: { id: string; prix: number; motif: string; taille: string }[];
+  produits?: { id: string; prix: number; motif: string; taille: string; largeur?: number | null; hauteur?: number | null; carreauxParCarton?: number | null }[];
 } = {}) {
   const stockData = opts.stock ?? {};
   const promotionsData = opts.promotions ?? [];
@@ -281,6 +281,50 @@ describe("§18-A — Vente simple", () => {
         vendeurNomManuel: null, modeReglement: null, remise: 0, lignes: [],
       })
     ).toThrow(VenteValidationError);
+  });
+
+  it("snapshote la surface du carton (m²) sur la ligne de facture quand le produit a carreauxParCarton/dimensions renseignés (2026-10-08)", () => {
+    const { service, factureCreeAvec } = creerService({
+      stock: { p1: { akebe: 50 } },
+      produits: [{ id: "p1", prix: 8000, motif: "Marbre Blanc", taille: "60×60", largeur: 60, hauteur: 60, carreauxParCarton: 4 }],
+    });
+
+    service.enregistrerVente({
+      pointDeVenteId: "shop",
+      clientNom: "Dupont",
+      clientTelephone: "077001122",
+      clientAdresse: null,
+      vendeurUtilisateurId: "u1",
+      vendeurCompteConnecteNom: "Admin",
+      vendeurNomManuel: null,
+      modeReglement: "Espèces",
+      remise: 0,
+      lignes: [{ produitId: "p1", quantite: 3, prixUnitaire: 11520, allocationsDepots: [{ emplacementId: "akebe", quantite: 3 }] }],
+    });
+
+    const facture = factureCreeAvec[0] as { lignes: { surfaceCartonM2: number | null }[] };
+    // 60x60 cm, 4 carreaux/carton → 1.44 m² (exemple réel donné par l'utilisateur).
+    expect(facture.lignes[0]!.surfaceCartonM2).toBeCloseTo(1.44, 6);
+  });
+
+  it("surfaceCartonM2 reste null quand carreauxParCarton n'est pas renseigné pour le produit (catalogue pas encore migré)", () => {
+    const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 50 } } });
+
+    service.enregistrerVente({
+      pointDeVenteId: "shop",
+      clientNom: "Dupont",
+      clientTelephone: "077001122",
+      clientAdresse: null,
+      vendeurUtilisateurId: "u1",
+      vendeurCompteConnecteNom: "Admin",
+      vendeurNomManuel: null,
+      modeReglement: "Espèces",
+      remise: 0,
+      lignes: [{ produitId: "p1", quantite: 3, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 3 }] }],
+    });
+
+    const facture = factureCreeAvec[0] as { lignes: { surfaceCartonM2: number | null }[] };
+    expect(facture.lignes[0]!.surfaceCartonM2).toBeNull();
   });
 
   it("refuse une vente sans numéro de téléphone client", () => {

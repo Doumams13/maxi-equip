@@ -134,6 +134,17 @@ export interface LigneFacture {
   promotionType: string | null;
   /** Valeur de la réduction au moment de la vente. */
   promotionValeur: number | null;
+  /**
+   * Surface d'un carton de ce produit, en m², au moment de la vente —
+   * snapshot (même principe que reference/taille : jamais recalculé
+   * depuis le produit actuel, qui a pu changer depuis). Permet d'afficher
+   * un prix au m² sur la facture cohérent avec le prix de carton
+   * réellement facturé, même négocié (voir domain/pricing/surfaceCarton.ts).
+   * `null` si l'information n'était pas disponible au moment de la vente
+   * (carreauxParCarton ou dimensions non renseignés) — jamais une valeur
+   * inventée.
+   */
+  surfaceCartonM2: number | null;
 }
 
 /**

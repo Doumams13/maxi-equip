@@ -15,6 +15,41 @@ const inputStyleModal: React.CSSProperties = {
 };
 
 /**
+ * Sélecteur de dépôt par onglets — DOIT rester une fonction top-level
+ * (jamais imbriquée dans StockScreen) : un composant défini à l'intérieur
+ * d'un autre composant est recréé (nouvelle identité de fonction) à
+ * chaque rendu du parent, forçant React à démonter/remonter ces boutons
+ * à chaque frappe dans les champs voisins (quantité, motif...) — même
+ * classe de bug que celle corrigée dans ProduitsScreen.tsx/VarianteFormRow
+ * et ParametresScreen.tsx/LignePointDeVente (2026-10-09).
+ */
+function DepotTabs({ depots, value, onChange }: { depots: Emplacement[]; value: string; onChange: (id: string) => void }) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {depots.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          onClick={() => onChange(d.id)}
+          style={{
+            padding: "7px 14px",
+            borderRadius: defaultTokens.radius.pill,
+            border: `1px solid ${d.id === value ? defaultTokens.colors.accent : defaultTokens.colors.border}`,
+            background: d.id === value ? defaultTokens.colors.accentSoft : "#fff",
+            color: d.id === value ? defaultTokens.colors.accent : defaultTokens.colors.text,
+            fontWeight: 700,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          {d.nom}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
  * Correction "corriger une erreur de saisie de stock sans fausser le
  * tableau de bord" — même principe que AnnulerFactureModal
  * (FacturesScreen.tsx) : motif obligatoire, jamais un simple
@@ -251,38 +286,6 @@ export function StockScreen({
     fontSize: 13.5,
   };
 
-  function DepotTabs({
-    value,
-    onChange,
-  }: {
-    value: string;
-    onChange: (id: string) => void;
-  }) {
-    return (
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {depots.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            onClick={() => onChange(d.id)}
-            style={{
-              padding: "7px 14px",
-              borderRadius: defaultTokens.radius.pill,
-              border: `1px solid ${d.id === value ? defaultTokens.colors.accent : defaultTokens.colors.border}`,
-              background: d.id === value ? defaultTokens.colors.accentSoft : "#fff",
-              color: d.id === value ? defaultTokens.colors.accent : defaultTokens.colors.text,
-              fontWeight: 700,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            {d.nom}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
   const entreeProduit = produits.find((p) => p.id === entreeProduitId) ?? null;
   const entreeDepot = depots.find((d) => d.id === entreeDepotId) ?? null;
   const sortieProduit = produits.find((p) => p.id === sortieProduitId) ?? null;
@@ -355,7 +358,7 @@ export function StockScreen({
         <form onSubmit={handleOuvrirConfirmEntree}>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Dépôt</label>
-            <DepotTabs value={entreeDepotId} onChange={setEntreeDepotId} />
+            <DepotTabs depots={depots} value={entreeDepotId} onChange={setEntreeDepotId} />
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ minWidth: 280 }}>
@@ -401,7 +404,7 @@ export function StockScreen({
         <form onSubmit={handleOuvrirConfirmSortie}>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Dépôt</label>
-            <DepotTabs value={sortieDepotId} onChange={setSortieDepotId} />
+            <DepotTabs depots={depots} value={sortieDepotId} onChange={setSortieDepotId} />
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ minWidth: 280 }}>

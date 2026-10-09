@@ -38,8 +38,23 @@ export interface Produit extends MetierEntity, SoftDeletable {
   largeur: number | null;
   hauteur: number | null;
   reference: string;
-  /** Prix catalogue, en FCFA. Jamais modifié par une promotion ou une vente. */
+  /**
+   * Prix catalogue, en FCFA **au m²** — jamais modifié par une promotion
+   * ou une vente. Correction "le prix de référence est au m²" (2026-10-08) :
+   * ce champ représentait auparavant un prix de carton sans qu'aucun
+   * endroit ne le documente — c'est désormais un prix au m², le prix du
+   * carton se calculant via `carreauxParCarton` ci-dessous (voir
+   * @maxi-equip/domain, pricing/surfaceCarton.ts).
+   */
   prix: number;
+  /**
+   * Nombre de carreaux contenus dans un carton de cette taille — varie
+   * selon la taille (ex. 4 pour un 60×60, 12 pour un 40×40), aucune
+   * formule universelle, donnée saisie manuellement. `null` tant que non
+   * renseigné (produits créés avant cette correction, ou en attente de
+   * saisie) — dans ce cas, aucun prix de carton ne peut être calculé.
+   */
+  carreauxParCarton: number | null;
   seuilAlerte: number;
 }
 

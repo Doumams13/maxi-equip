@@ -4,6 +4,7 @@ import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Cir
 import type { ModeleProduitAvecVariantes, VarianteProduit, StagedImage } from "../../../preload/index.js";
 import { ImagesModal } from "./ImagesModal.js";
 import { VitrineModal } from "./VitrineModal.js";
+import { pricing as domainPricing } from "@maxi-equip/domain";
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -74,9 +75,160 @@ function extraireDimensions(taille: string): { largeur: string; hauteur: string 
   return { largeur: match[1]!.replace(",", "."), hauteur: match[2]!.replace(",", ".") };
 }
 
-type VarianteForm = { largeur: string; hauteur: string; reference: string; prix: string; seuilAlerte: string };
+type VarianteForm = { id?: string; largeur: string; hauteur: string; reference: string; prix: string; carreauxParCarton: string; seuilAlerte: string };
 function varianteFormVide(): VarianteForm {
-  return { largeur: "", hauteur: "", reference: "", prix: "", seuilAlerte: "10" };
+  return { largeur: "", hauteur: "", reference: "", prix: "", carreauxParCarton: "", seuilAlerte: "10" };
+}
+
+/**
+ * Surface d'un carton (m²) à partir d'un formulaire en cours de saisie —
+ * `null` tant que largeur/hauteur/carreauxParCarton ne sont pas tous
+ * renseignés (le prix de carton ne peut alors pas être calculé) —
+ * correction "le prix de référence est au m²" (2026-10-08).
+ */
+function surfaceCartonForm(f: Pick<VarianteForm, "largeur" | "hauteur" | "carreauxParCarton">): number | null {
+  const largeur = Number(f.largeur);
+  const hauteur = Number(f.hauteur);
+  const carreaux = Number(f.carreauxParCarton);
+  if (!largeur || !hauteur || !carreaux) return null;
+  return domainPricing.calculerSurfaceCartonM2(carreaux, largeur, hauteur);
+}
+
+/**
+ * Formulaire inline d'édition/ajout d'UN format (ligne du tableau déplié
+ * d'un modèle) — DOIT rester une fonction top-level (jamais imbriquée
+ * dans ProduitsScreen) : un composant défini à l'intérieur d'un autre
+ * composant est recréé (nouvelle identité de fonction) à chaque rendu du
+ * parent, ce qui force React à démonter/remonter ce <tr> — et donc les
+ * <input> qu'il contient — à chaque frappe, faisant perdre le focus dès
+ * le premier caractère saisi (bug réel rapporté par l'utilisateur, 2026-10-09).
+ */
+function VarianteFormRow({
+  modele,
+  editingVariante,
+  ajoutVarianteModeleId,
+  varianteForm,
+  setVarianteForm,
+  savingVariante,
+  onSave,
+  onCancel,
+}: {
+  modele: ModeleProduitAvecVariantes;
+  editingVariante: { modeleId: string; varianteId: string } | null;
+  ajoutVarianteModeleId: string | null;
+  varianteForm: VarianteForm;
+  setVarianteForm: React.Dispatch<React.SetStateAction<VarianteForm>>;
+  savingVariante: boolean;
+  onSave: (modele: ModeleProduitAvecVariantes) => void;
+  onCancel: () => void;
+}) {
+  const isEdit = editingVariante?.modeleId === modele.id;
+  const isAdd = ajoutVarianteModeleId === modele.id;
+  if (!isEdit && !isAdd) return null;
+  return (
+    <tr style={{ background: defaultTokens.colors.accentSoft + "44", borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+      <td colSpan={6} style={{ padding: "10px 16px" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div>
+            <label style={{ ...labelStyle, fontSize: 11 }}>Largeur (cm)</label>
+            <input
+              style={{ ...inputStyle, width: 80 }}
+              type="number"
+              min={1}
+              value={varianteForm.largeur}
+              onChange={(e) => setVarianteForm((f) => ({ ...f, largeur: e.target.value }))}
+              placeholder="60"
+            />
+          </div>
+          <span style={{ paddingBottom: 8, color: defaultTokens.colors.textFaint, fontWeight: 700 }}>×</span>
+          <div>
+            <label style={{ ...labelStyle, fontSize: 11 }}>Hauteur (cm)</label>
+            <input
+              style={{ ...inputStyle, width: 80 }}
+              type="number"
+              min={1}
+              value={varianteForm.hauteur}
+              onChange={(e) => setVarianteForm((f) => ({ ...f, hauteur: e.target.value }))}
+              placeholder="60"
+            />
+          </div>
+          <div>
+            <label style={{ ...labelStyle, fontSize: 11 }}>Référence</label>
+            <input
+              style={{ ...inputStyle, width: 120 }}
+              value={varianteForm.reference}
+              onChange={(e) => setVarianteForm((f) => ({ ...f, reference: e.target.value }))}
+              placeholder="MB-6060"
+            />
+          </div>
+          <div>
+            <label style={{ ...labelStyle, fontSize: 11 }}>Carreaux/carton</label>
+            <input
+              style={{ ...inputStyle, width: 90 }}
+              type="number"
+              min={1}
+              value={varianteForm.carreauxParCarton}
+              onChange={(e) => setVarianteForm((f) => ({ ...f, carreauxParCarton: e.target.value }))}
+              placeholder="4"
+            />
+          </div>
+          <div>
+            <label style={{ ...labelStyle, fontSize: 11 }}>Prix / m² (FCFA)</label>
+            <input
+              style={{ ...inputStyle, width: 110 }}
+              type="number"
+              min={0}
+              value={varianteForm.prix}
+              onChange={(e) => setVarianteForm((f) => ({ ...f, prix: e.target.value }))}
+            />
+          </div>
+          <div>
+            {(() => {
+              const surface = surfaceCartonForm(varianteForm);
+              const prixM2 = Number(varianteForm.prix) || 0;
+              const prixCarton = surface !== null && prixM2 ? domainPricing.calculerPrixCartonDepuisPrixM2(prixM2, surface) : null;
+              return (
+                <>
+                  <label style={{ ...labelStyle, fontSize: 11 }}>Prix / carton (FCFA)</label>
+                  <input
+                    style={{ ...inputStyle, width: 110, opacity: surface === null ? 0.5 : 1 }}
+                    type="number"
+                    min={0}
+                    disabled={surface === null}
+                    title={surface === null ? "Renseignez largeur, hauteur et carreaux/carton pour activer ce champ" : undefined}
+                    value={prixCarton !== null ? String(prixCarton) : ""}
+                    onChange={(e) => {
+                      if (surface === null) return;
+                      const valeur = Number(e.target.value) || 0;
+                      setVarianteForm((f) => ({ ...f, prix: valeur ? String(domainPricing.calculerPrixM2DepuisPrixCarton(valeur, surface)) : "" }));
+                    }}
+                  />
+                </>
+              );
+            })()}
+          </div>
+          <div>
+            <label style={{ ...labelStyle, fontSize: 11 }}>Seuil alerte</label>
+            <input
+              style={{ ...inputStyle, width: 80 }}
+              type="number"
+              min={0}
+              value={varianteForm.seuilAlerte}
+              onChange={(e) => setVarianteForm((f) => ({ ...f, seuilAlerte: e.target.value }))}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Button loading={savingVariante} onClick={() => onSave(modele)}>
+              Enregistrer
+            </Button>
+            <Button variant="ghost" onClick={onCancel}>
+              <X size={14} />
+            </Button>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
 }
 
 export function ProduitsScreen({ session: _session }: { session: { userId: string } }) {
@@ -163,7 +315,28 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
   function handleStartEditModele(m: ModeleProduitAvecVariantes) {
     setModeleForm({ motif: m.motif, type: m.type });
     setEditingModeleId(m.id);
-    setVariantesForm([varianteFormVide()]);
+    // Correction "Modifier doit rouvrir l'écran d'ajout avec les cases
+    // préremplies" (2026-10-08) — jusqu'ici ce formulaire masquait
+    // entièrement la section "Formats disponibles" en mode édition
+    // (voir plus bas, {!editingModeleId && ...}) et la réinitialisait à
+    // une ligne vide, perdant toute visibilité sur les tailles/prix déjà
+    // enregistrés. Préremplie ici avec les formats réels du modèle.
+    setVariantesForm(
+      m.variantes.length > 0
+        ? m.variantes.map((v) => {
+            const dims = extraireDimensions(v.taille) ?? { largeur: "", hauteur: "" };
+            return {
+              id: v.id,
+              largeur: dims.largeur,
+              hauteur: dims.hauteur,
+              reference: v.reference,
+              prix: String(v.prix),
+              carreauxParCarton: v.carreauxParCarton !== null ? String(v.carreauxParCarton) : "",
+              seuilAlerte: String(v.seuilAlerte),
+            };
+          })
+        : [varianteFormVide()]
+    );
     setStagedImages([]);
     setPrincipaleStagingId(null);
     setShowModeleForm(true);
@@ -206,12 +379,10 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
       showWarning("Champs requis", "Le type de carreau est obligatoire.");
       return;
     }
-    if (!editingModeleId) {
-      const varInvalide = variantesForm.find((v) => !v.largeur || !v.hauteur || !v.reference.trim() || !v.prix);
-      if (varInvalide) {
-        showWarning("Champs requis", "Chaque format doit avoir une taille (L×H), une référence et un prix.");
-        return;
-      }
+    const varInvalide = variantesForm.find((v) => !v.largeur || !v.hauteur || !v.reference.trim() || !v.prix);
+    if (varInvalide) {
+      showWarning("Champs requis", "Chaque format doit avoir une taille (L×H), une référence et un prix.");
+      return;
     }
     setShowConfirmSaveModele(true);
   }
@@ -222,6 +393,30 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
       if (editingModeleId) {
         const result = await window.maxiEquip.modifierModeleProduit(editingModeleId, { motif: modeleForm.motif, type: modeleForm.type });
         if (!result.success) throw new Error(result.message);
+        // Correction "Modifier doit rouvrir l'écran d'ajout avec les
+        // cases préremplies" (2026-10-08) — les formats affichés dans ce
+        // même formulaire sont désormais réellement enregistrés : mise à
+        // jour pour les lignes déjà existantes (v.id présent), création
+        // pour les nouvelles lignes ajoutées pendant l'édition (v.id
+        // absent). Jamais de suppression implicite ici — retirer un
+        // format existant reste réservé au flux de suppression dédié
+        // (bouton X masqué pour ces lignes-là, voir plus bas).
+        for (const v of variantesForm) {
+          const input = {
+            taille: `${v.largeur} × ${v.hauteur} cm`,
+            tailleTri: Number(v.largeur),
+            largeur: Number(v.largeur),
+            hauteur: Number(v.hauteur),
+            reference: v.reference.trim(),
+            prix: Number(v.prix),
+            carreauxParCarton: v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
+            seuilAlerte: Number(v.seuilAlerte) || 0,
+          };
+          const resultVariante = v.id
+            ? await window.maxiEquip.modifierVariante(v.id, input)
+            : await window.maxiEquip.ajouterVariante(editingModeleId, input);
+          if (!resultVariante.success) throw new Error(resultVariante.message);
+        }
         showSuccess("Modèle modifié", `"${modeleForm.motif}" mis à jour.`);
       } else {
         const variantes = variantesForm.map((v) => ({
@@ -231,6 +426,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
           hauteur: Number(v.hauteur),
           reference: v.reference.trim(),
           prix: Number(v.prix),
+          carreauxParCarton: v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
           seuilAlerte: Number(v.seuilAlerte) || 0,
         }));
         const result = await window.maxiEquip.creerModeleProduit({
@@ -286,6 +482,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
       hauteur: dims.hauteur,
       reference: variante.reference,
       prix: String(variante.prix),
+      carreauxParCarton: variante.carreauxParCarton !== null ? String(variante.carreauxParCarton) : "",
       seuilAlerte: String(variante.seuilAlerte),
     });
     setEditingVariante({ modeleId: modele.id, varianteId: variante.id });
@@ -308,6 +505,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
         hauteur: Number(v.hauteur),
         reference: v.reference.trim(),
         prix: Number(v.prix),
+        carreauxParCarton: v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
         seuilAlerte: Number(v.seuilAlerte) || 0,
       };
       if (editingVariante) {
@@ -347,87 +545,6 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
     } finally {
       setDeleting(false);
     }
-  }
-
-  function VarianteFormRow({ modele }: { modele: ModeleProduitAvecVariantes }) {
-    const isEdit = editingVariante?.modeleId === modele.id;
-    const isAdd = ajoutVarianteModeleId === modele.id;
-    if (!isEdit && !isAdd) return null;
-    return (
-      <tr style={{ background: defaultTokens.colors.accentSoft + "44", borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
-        <td colSpan={6} style={{ padding: "10px 16px" }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div>
-              <label style={{ ...labelStyle, fontSize: 11 }}>Largeur (cm)</label>
-              <input
-                style={{ ...inputStyle, width: 80 }}
-                type="number"
-                min={1}
-                value={varianteForm.largeur}
-                onChange={(e) => setVarianteForm((f) => ({ ...f, largeur: e.target.value }))}
-                placeholder="60"
-              />
-            </div>
-            <span style={{ paddingBottom: 8, color: defaultTokens.colors.textFaint, fontWeight: 700 }}>×</span>
-            <div>
-              <label style={{ ...labelStyle, fontSize: 11 }}>Hauteur (cm)</label>
-              <input
-                style={{ ...inputStyle, width: 80 }}
-                type="number"
-                min={1}
-                value={varianteForm.hauteur}
-                onChange={(e) => setVarianteForm((f) => ({ ...f, hauteur: e.target.value }))}
-                placeholder="60"
-              />
-            </div>
-            <div>
-              <label style={{ ...labelStyle, fontSize: 11 }}>Référence</label>
-              <input
-                style={{ ...inputStyle, width: 120 }}
-                value={varianteForm.reference}
-                onChange={(e) => setVarianteForm((f) => ({ ...f, reference: e.target.value }))}
-                placeholder="MB-6060"
-              />
-            </div>
-            <div>
-              <label style={{ ...labelStyle, fontSize: 11 }}>Prix (FCFA)</label>
-              <input
-                style={{ ...inputStyle, width: 110 }}
-                type="number"
-                min={0}
-                value={varianteForm.prix}
-                onChange={(e) => setVarianteForm((f) => ({ ...f, prix: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label style={{ ...labelStyle, fontSize: 11 }}>Seuil alerte</label>
-              <input
-                style={{ ...inputStyle, width: 80 }}
-                type="number"
-                min={0}
-                value={varianteForm.seuilAlerte}
-                onChange={(e) => setVarianteForm((f) => ({ ...f, seuilAlerte: e.target.value }))}
-              />
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <Button loading={savingVariante} onClick={() => void handleSauvegarderVariante(modele)}>
-                Enregistrer
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setAjoutVarianteModeleId(null);
-                  setEditingVariante(null);
-                  setVarianteForm(varianteFormVide());
-                }}
-              >
-                <X size={14} />
-              </Button>
-            </div>
-          </div>
-        </td>
-      </tr>
-    );
   }
 
   return (
@@ -472,8 +589,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
               </div>
             </div>
 
-            {!editingModeleId && (
-              <>
+            <>
                 <h3 style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: defaultTokens.colors.text }}>
                   Formats disponibles
                 </h3>
@@ -510,12 +626,22 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                       />
                     </div>
                     <div>
-                      <label style={labelStyle}>Prix (FCFA)</label>
+                      <label style={labelStyle}>Prix / m² (FCFA)</label>
                       <input
                         style={{ ...inputStyle, width: 110 }}
                         type="number" min={0}
                         value={v.prix}
                         onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, prix: e.target.value } : x))}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Carreaux/carton</label>
+                      <input
+                        style={{ ...inputStyle, width: 90 }}
+                        type="number" min={1}
+                        value={v.carreauxParCarton}
+                        onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, carreauxParCarton: e.target.value } : x))}
+                        placeholder="4"
                       />
                     </div>
                     <div>
@@ -528,7 +654,8 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                       />
                     </div>
                     <div style={{ display: "flex", alignItems: "flex-end" }}>
-                      {variantesForm.length > 1 && (
+                      {/* Un format déjà existant (v.id présent) ne peut jamais être retiré d'ici — seul le flux de suppression dédié (confirmation, écoulement du stock) le permet. */}
+                      {!v.id && (variantesForm.length > 1 || variantesForm.some((x) => x.id)) && (
                         <Button type="button" variant="ghost" onClick={() => setVariantesForm((prev) => prev.filter((_, j) => j !== i))}>
                           <X size={14} color={defaultTokens.colors.danger} />
                         </Button>
@@ -546,6 +673,8 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                   Ajouter un format
                 </Button>
 
+                {/* Gestion des photos réservée à la création — en édition, passe par le bouton "Images" dédié par modèle (ImagesModal), jamais dupliquée ici (le flux d'enregistrement en édition ne traite pas stagedImages). */}
+                {!editingModeleId && (
                 <div style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, paddingTop: 14, marginBottom: 16 }}>
                   <label style={labelStyle}>Photos du carreau (motif)</label>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
@@ -591,8 +720,8 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                     {stagedImages.length > 0 ? "Ajouter d'autres photos" : "Choisir des photos"}
                   </Button>
                 </div>
+                )}
               </>
-            )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Button type="submit" loading={savingModele}>
@@ -718,7 +847,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                                   <tr>
                                     <th style={{ padding: "8px 0", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>Taille</th>
                                     <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>Référence</th>
-                                    <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "right" }}>Prix / carton</th>
+                                    <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "right" }}>Prix / m²</th>
                                     <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "right" }}>Stock</th>
                                     <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11 }}>État</th>
                                     <th style={{ padding: "8px 0" }} />
@@ -729,7 +858,17 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                                     <tr key={v.id} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
                                       <td style={{ padding: "7px 0", fontWeight: 700 }}>{v.taille}</td>
                                       <td style={{ padding: "7px 8px", color: defaultTokens.colors.textSoft, fontFamily: defaultTokens.typography.mono, fontSize: 12 }}>{v.reference}</td>
-                                      <td style={{ padding: "7px 8px", textAlign: "right" }}>{v.prix.toLocaleString("fr-FR")} FCFA</td>
+                                      <td style={{ padding: "7px 8px", textAlign: "right" }}>
+                                        {v.prix.toLocaleString("fr-FR")} FCFA
+                                        {v.carreauxParCarton && v.largeur && v.hauteur && (
+                                          <div style={{ fontSize: 10.5, color: defaultTokens.colors.textFaint, fontWeight: 400 }}>
+                                            ≈ {domainPricing
+                                              .calculerPrixCartonDepuisPrixM2(v.prix, domainPricing.calculerSurfaceCartonM2(v.carreauxParCarton, v.largeur, v.hauteur))
+                                              .toLocaleString("fr-FR")}{" "}
+                                            FCFA/carton
+                                          </div>
+                                        )}
+                                      </td>
                                       <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700 }}>{v.stockTotal} ct.</td>
                                       <td style={{ padding: "7px 8px" }}>
                                         <StatutStock quantite={v.stockTotal} seuil={v.seuilAlerte} />
@@ -752,7 +891,20 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                                       </td>
                                     </tr>
                                   ))}
-                                  <VarianteFormRow modele={m} />
+                                  <VarianteFormRow
+                                    modele={m}
+                                    editingVariante={editingVariante}
+                                    ajoutVarianteModeleId={ajoutVarianteModeleId}
+                                    varianteForm={varianteForm}
+                                    setVarianteForm={setVarianteForm}
+                                    savingVariante={savingVariante}
+                                    onSave={(mod) => void handleSauvegarderVariante(mod)}
+                                    onCancel={() => {
+                                      setAjoutVarianteModeleId(null);
+                                      setEditingVariante(null);
+                                      setVarianteForm(varianteFormVide());
+                                    }}
+                                  />
                                 </tbody>
                               </table>
                             </td>

@@ -45,6 +45,8 @@ export interface VenteLigneSource {
   promotionLibelle?: string | null;
   promotionType?: string | null;
   promotionValeur?: number | null;
+  /** Surface d'un carton de ce produit en m², au moment de la vente — voir shared-types/facture.ts. */
+  surfaceCartonM2?: number | null;
 }
 
 function assertCoherentSource(source: VenteLigneSource): void {
@@ -83,6 +85,7 @@ export function buildLigneFacture(source: VenteLigneSource): LigneFacture {
     promotionLibelle: source.promotionLibelle ?? null,
     promotionType: source.promotionType ?? null,
     promotionValeur: source.promotionValeur ?? null,
+    surfaceCartonM2: source.surfaceCartonM2 ?? null,
   };
 }
 

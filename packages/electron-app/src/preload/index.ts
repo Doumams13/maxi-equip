@@ -82,6 +82,7 @@ export interface VarianteProduit {
   hauteur: number | null;
   reference: string;
   prix: number;
+  carreauxParCarton: number | null;
   seuilAlerte: number;
   deletedAt: string | null;
   stockTotal: number;
@@ -105,6 +106,7 @@ export interface VarianteInput {
   hauteur?: number | null;
   reference: string;
   prix: number;
+  carreauxParCarton?: number | null;
   seuilAlerte?: number;
 }
 

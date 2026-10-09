@@ -17,6 +17,118 @@ const inputStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 };
 
 /**
+ * Ligne d'un point de vente (actif ou archivé) — DOIT rester une
+ * fonction top-level (jamais imbriquée dans ParametresScreen) : un
+ * composant défini à l'intérieur d'un autre composant est recréé
+ * (nouvelle identité de fonction) à chaque rendu du parent, ce qui force
+ * React à démonter/remonter ce <div> — et donc le <input> de renommage
+ * qu'il contient — à chaque frappe, faisant perdre le focus dès le
+ * premier caractère saisi (même classe de bug que celle corrigée dans
+ * ProduitsScreen.tsx/VarianteFormRow, 2026-10-09).
+ */
+function LignePointDeVente({
+  depot,
+  renommageId,
+  renommageValeur,
+  setRenommageValeur,
+  actionEnCours,
+  confirmerRenommage,
+  setRenommageId,
+  commencerRenommage,
+  suppressibles,
+  setSuppressionCible,
+  setArchivageCible,
+  handleReactiver,
+}: {
+  depot: Emplacement;
+  renommageId: string | null;
+  renommageValeur: string;
+  setRenommageValeur: (v: string) => void;
+  actionEnCours: string | null;
+  confirmerRenommage: () => Promise<void>;
+  setRenommageId: (v: string | null) => void;
+  commencerRenommage: (depot: Emplacement) => void;
+  suppressibles: Record<string, boolean>;
+  setSuppressionCible: (depot: Emplacement) => void;
+  setArchivageCible: (depot: Emplacement) => void;
+  handleReactiver: (depot: Emplacement) => Promise<void>;
+}) {
+  const enRenommage = renommageId === depot.id;
+  const enCours = actionEnCours === depot.id;
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+      {enRenommage ? (
+        <input
+          style={{ ...inputStyle, marginRight: 10 }}
+          value={renommageValeur}
+          onChange={(e) => setRenommageValeur(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void confirmerRenommage()}
+          autoFocus
+        />
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>{depot.nom}</span>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "2px 8px",
+              borderRadius: defaultTokens.radius.pill,
+              background: depot.actif ? defaultTokens.colors.successSoft : defaultTokens.colors.dangerSoft,
+              color: depot.actif ? defaultTokens.colors.success : defaultTokens.colors.danger,
+            }}
+          >
+            {depot.actif ? "Actif" : "Archivé"}
+          </span>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        {enRenommage ? (
+          <>
+            <Button variant="ghost" onClick={() => void confirmerRenommage()} loading={enCours} title="Valider">
+              <Check size={15} color={defaultTokens.colors.success} />
+            </Button>
+            <Button variant="ghost" onClick={() => setRenommageId(null)} title="Annuler">
+              <X size={15} />
+            </Button>
+          </>
+        ) : depot.actif ? (
+          <>
+            <Button variant="ghost" onClick={() => commencerRenommage(depot)} title="Renommer">
+              <Pencil size={15} />
+            </Button>
+            {suppressibles[depot.id] ? (
+              <Button variant="ghost" onClick={() => setSuppressionCible(depot)} title="Supprimer définitivement (jamais utilisé)">
+                <Trash2 size={15} color={defaultTokens.colors.danger} />
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={() => setArchivageCible(depot)} title="Archiver">
+                <Archive size={15} color={defaultTokens.colors.warning} />
+              </Button>
+            )}
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={() => void handleReactiver(depot)} loading={enCours} title="Réactiver">
+              <RotateCcw size={15} color={defaultTokens.colors.accent} />
+            </Button>
+            {/* Correction "Finaliser Paramètres" §H : un point de vente
+                archivé sans aucune donnée métier associée (créé puis
+                archivé par erreur, jamais utilisé) peut aussi être
+                supprimé définitivement — jamais uniquement Restaurer. */}
+            {suppressibles[depot.id] && (
+              <Button variant="ghost" onClick={() => setSuppressionCible(depot)} title="Supprimer définitivement (jamais utilisé)">
+                <Trash2 size={15} color={defaultTokens.colors.danger} />
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Écran Paramètres — Administrateur uniquement (canEditCompanySettings).
  *
  * Identité et coordonnées : enregistrement protégé par une double
@@ -219,82 +331,6 @@ export function ParametresScreen() {
   const depotsActifs = depots.filter((d) => d.actif);
   const depotsArchives = depots.filter((d) => !d.actif);
 
-  function LignePointDeVente({ depot }: { depot: Emplacement }) {
-    const enRenommage = renommageId === depot.id;
-    const enCours = actionEnCours === depot.id;
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${defaultTokens.colors.borderSoft}` }}>
-        {enRenommage ? (
-          <input
-            style={{ ...inputStyle, marginRight: 10 }}
-            value={renommageValeur}
-            onChange={(e) => setRenommageValeur(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void confirmerRenommage()}
-            autoFocus
-          />
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontWeight: 600, fontSize: 14 }}>{depot.nom}</span>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                padding: "2px 8px",
-                borderRadius: defaultTokens.radius.pill,
-                background: depot.actif ? defaultTokens.colors.successSoft : defaultTokens.colors.dangerSoft,
-                color: depot.actif ? defaultTokens.colors.success : defaultTokens.colors.danger,
-              }}
-            >
-              {depot.actif ? "Actif" : "Archivé"}
-            </span>
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-          {enRenommage ? (
-            <>
-              <Button variant="ghost" onClick={() => void confirmerRenommage()} loading={enCours} title="Valider">
-                <Check size={15} color={defaultTokens.colors.success} />
-              </Button>
-              <Button variant="ghost" onClick={() => setRenommageId(null)} title="Annuler">
-                <X size={15} />
-              </Button>
-            </>
-          ) : depot.actif ? (
-            <>
-              <Button variant="ghost" onClick={() => commencerRenommage(depot)} title="Renommer">
-                <Pencil size={15} />
-              </Button>
-              {suppressibles[depot.id] ? (
-                <Button variant="ghost" onClick={() => setSuppressionCible(depot)} title="Supprimer définitivement (jamais utilisé)">
-                  <Trash2 size={15} color={defaultTokens.colors.danger} />
-                </Button>
-              ) : (
-                <Button variant="ghost" onClick={() => setArchivageCible(depot)} title="Archiver">
-                  <Archive size={15} color={defaultTokens.colors.warning} />
-                </Button>
-              )}
-            </>
-          ) : (
-            <>
-              <Button variant="ghost" onClick={() => void handleReactiver(depot)} loading={enCours} title="Réactiver">
-                <RotateCcw size={15} color={defaultTokens.colors.accent} />
-              </Button>
-              {/* Correction "Finaliser Paramètres" §H : un point de vente
-                  archivé sans aucune donnée métier associée (créé puis
-                  archivé par erreur, jamais utilisé) peut aussi être
-                  supprimé définitivement — jamais uniquement Restaurer. */}
-              {suppressibles[depot.id] && (
-                <Button variant="ghost" onClick={() => setSuppressionCible(depot)} title="Supprimer définitivement (jamais utilisé)">
-                  <Trash2 size={15} color={defaultTokens.colors.danger} />
-                </Button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ padding: 28, maxWidth: 640 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>Paramètres</h1>
@@ -416,7 +452,21 @@ export function ParametresScreen() {
         <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Actifs</div>
         {depotsActifs.length === 0 && <p style={{ fontSize: 13, color: defaultTokens.colors.textSoft }}>Aucun point de vente actif.</p>}
         {depotsActifs.map((depot) => (
-          <LignePointDeVente key={depot.id} depot={depot} />
+          <LignePointDeVente
+            key={depot.id}
+            depot={depot}
+            renommageId={renommageId}
+            renommageValeur={renommageValeur}
+            setRenommageValeur={setRenommageValeur}
+            actionEnCours={actionEnCours}
+            confirmerRenommage={confirmerRenommage}
+            setRenommageId={setRenommageId}
+            commencerRenommage={commencerRenommage}
+            suppressibles={suppressibles}
+            setSuppressionCible={setSuppressionCible}
+            setArchivageCible={setArchivageCible}
+            handleReactiver={handleReactiver}
+          />
         ))}
 
         {depotsArchives.length > 0 && (
@@ -425,7 +475,21 @@ export function ParametresScreen() {
               Archivés
             </div>
             {depotsArchives.map((depot) => (
-              <LignePointDeVente key={depot.id} depot={depot} />
+              <LignePointDeVente
+                key={depot.id}
+                depot={depot}
+                renommageId={renommageId}
+                renommageValeur={renommageValeur}
+                setRenommageValeur={setRenommageValeur}
+                actionEnCours={actionEnCours}
+                confirmerRenommage={confirmerRenommage}
+                setRenommageId={setRenommageId}
+                commencerRenommage={commencerRenommage}
+                suppressibles={suppressibles}
+                setSuppressionCible={setSuppressionCible}
+                setArchivageCible={setArchivageCible}
+                handleReactiver={handleReactiver}
+              />
             ))}
           </>
         )}

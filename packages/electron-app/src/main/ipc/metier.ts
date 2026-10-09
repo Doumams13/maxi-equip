@@ -92,6 +92,7 @@ export function registerMetierIpcHandlers(
           hauteur: v.hauteur,
           reference: v.reference,
           prix: v.prix,
+          carreauxParCarton: v.carreauxParCarton,
           seuilAlerte: v.seuilAlerte,
           deletedAt: v.deletedAt,
           stockTotal: stockTotaux.get(v.id) ?? 0,
@@ -121,6 +122,7 @@ export function registerMetierIpcHandlers(
     hauteur?: number | null;
     reference: string;
     prix: number;
+    carreauxParCarton?: number | null;
     seuilAlerte?: number;
   };
 
@@ -149,6 +151,7 @@ export function registerMetierIpcHandlers(
           hauteur: v.hauteur ?? null,
           reference: v.reference,
           prix: v.prix,
+          carreauxParCarton: v.carreauxParCarton ?? null,
           seuilAlerte: v.seuilAlerte ?? 0,
         });
         enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(varianteId)!, "create");
@@ -176,6 +179,7 @@ export function registerMetierIpcHandlers(
           hauteur: v.hauteur,
           reference: v.reference,
           prix: v.prix,
+          carreauxParCarton: v.carreauxParCarton,
           seuilAlerte: v.seuilAlerte,
         });
         enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(v.id)!, "update");
@@ -218,6 +222,7 @@ export function registerMetierIpcHandlers(
       hauteur: input.hauteur ?? null,
       reference: input.reference,
       prix: input.prix,
+      carreauxParCarton: input.carreauxParCarton ?? null,
       seuilAlerte: input.seuilAlerte ?? 0,
     });
     enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(id)!, "create");
@@ -241,6 +246,7 @@ export function registerMetierIpcHandlers(
         hauteur,
         reference: input.reference ?? existante.reference,
         prix: input.prix ?? existante.prix,
+        carreauxParCarton: input.carreauxParCarton !== undefined ? (input.carreauxParCarton ?? null) : existante.carreauxParCarton,
         seuilAlerte: input.seuilAlerte ?? existante.seuilAlerte,
       });
       enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(varianteId)!, "update");

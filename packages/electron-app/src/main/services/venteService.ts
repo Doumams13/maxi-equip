@@ -224,6 +224,16 @@ export class VenteService {
           }
         }
 
+        // Surface du carton — snapshot au moment de la vente (voir
+        // shared-types/facture.ts), calculée UNIQUEMENT si les trois
+        // informations nécessaires sont renseignées pour ce produit ;
+        // `null` sinon, jamais une valeur inventée (produit créé avant
+        // cette correction, ou carreauxParCarton pas encore saisi).
+        const surfaceCartonM2 =
+          produit.carreauxParCarton && produit.largeur && produit.hauteur
+            ? domainPricing.calculerSurfaceCartonM2(produit.carreauxParCarton, produit.largeur, produit.hauteur)
+            : null;
+
         const ligneFacture = domainInvoicing.buildLigneFacture({
           produitId: produit.id,
           motif: produit.motif,
@@ -234,6 +244,7 @@ export class VenteService {
           quantiteExterne,
           fournisseur: ligne.fournisseurExterne,
           prixAchatExterne: ligne.prixAchatExterne,
+          surfaceCartonM2,
           ...promotionInfo,
         });
         lignesFacture.push(ligneFacture);

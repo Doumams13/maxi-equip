@@ -13,6 +13,7 @@ interface ProduitRow {
   hauteur: number | null;
   reference: string;
   prix: number;
+  carreaux_par_carton: number | null;
   seuil_alerte: number;
   deleted_at: string | null;
   deleted_by: string | null;
@@ -32,6 +33,7 @@ function rowToProduit(row: ProduitRow): Produit {
     hauteur: row.hauteur,
     reference: row.reference,
     prix: row.prix,
+    carreauxParCarton: row.carreaux_par_carton,
     seuilAlerte: row.seuil_alerte,
     deletedAt: row.deleted_at,
     deletedBy: row.deleted_by,
@@ -129,14 +131,15 @@ export class ProduitRepository {
     hauteur?: number | null;
     reference: string;
     prix: number;
+    carreauxParCarton?: number | null;
     seuilAlerte: number;
   }): string {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO produits (id, modele_id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, seuil_alerte, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO produits (id, modele_id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, carreaux_par_carton, seuil_alerte, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -149,6 +152,7 @@ export class ProduitRepository {
         input.hauteur ?? null,
         input.reference,
         input.prix,
+        input.carreauxParCarton ?? null,
         input.seuilAlerte,
         now,
         now
@@ -168,6 +172,7 @@ export class ProduitRepository {
       hauteur?: number | null;
       reference: string;
       prix: number;
+      carreauxParCarton?: number | null;
       seuilAlerte: number;
     }
   ): void {
@@ -176,18 +181,18 @@ export class ProduitRepository {
       this.db
         .prepare(
           `UPDATE produits
-           SET motif = ?, type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, seuil_alerte = ?, updated_at = ?
+           SET motif = ?, type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, carreaux_par_carton = ?, seuil_alerte = ?, updated_at = ?
            WHERE id = ? AND deleted_at IS NULL`
         )
-        .run(input.motif, input.type, input.taille, input.tailleTri, input.largeur ?? null, input.hauteur ?? null, input.reference, input.prix, input.seuilAlerte, now, id);
+        .run(input.motif, input.type, input.taille, input.tailleTri, input.largeur ?? null, input.hauteur ?? null, input.reference, input.prix, input.carreauxParCarton ?? null, input.seuilAlerte, now, id);
     } else {
       this.db
         .prepare(
           `UPDATE produits
-           SET type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, seuil_alerte = ?, updated_at = ?
+           SET type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, carreaux_par_carton = ?, seuil_alerte = ?, updated_at = ?
            WHERE id = ? AND deleted_at IS NULL`
         )
-        .run(input.type, input.taille, input.tailleTri, input.largeur ?? null, input.hauteur ?? null, input.reference, input.prix, input.seuilAlerte, now, id);
+        .run(input.type, input.taille, input.tailleTri, input.largeur ?? null, input.hauteur ?? null, input.reference, input.prix, input.carreauxParCarton ?? null, input.seuilAlerte, now, id);
     }
   }
 

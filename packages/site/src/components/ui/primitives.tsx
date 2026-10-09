@@ -59,13 +59,18 @@ export function PriceTag({
   const strikeSizes = { sm: "text-[11px]", md: "text-sm", lg: "text-[15px]" }[size];
   const now = price.isPromotionActive && price.promoPriceFcfa !== null ? price.promoPriceFcfa : price.normalPriceFcfa;
 
+  // Correction "préciser que les prix sont au m²" (2026-10-08) — le prix
+  // catalogue (Produit.prix) est au m², jamais un prix de carton (voir
+  // shared-types/produit.ts côté app) ; affiché tel quel ici, jamais un
+  // prix de carton calculé (le site ne connaît pas carreauxParCarton,
+  // resté une donnée strictement interne à l'app).
   if (context === "general") {
     return (
       <div className="whitespace-nowrap text-right">
         <span className="block font-body text-[11px] font-normal text-ink-mute">À partir de</span>
-        <span className={`block font-display font-semibold ${sizes} ${price.isPromotionActive ? "text-clay" : "text-ink"}`}>{formatFcfa(now)}</span>
+        <span className={`block font-display font-semibold ${sizes} ${price.isPromotionActive ? "text-clay" : "text-ink"}`}>{formatFcfa(now)}/m²</span>
         {price.isPromotionActive && price.promoPriceFcfa !== null && (
-          <span className={`block ${strikeSizes} text-ink-mute line-through`}>{formatFcfa(price.normalPriceFcfa)}</span>
+          <span className={`block ${strikeSizes} text-ink-mute line-through`}>{formatFcfa(price.normalPriceFcfa)}/m²</span>
         )}
       </div>
     );
@@ -73,9 +78,9 @@ export function PriceTag({
 
   return (
     <div className="flex items-baseline gap-2.5">
-      <span className={`font-display font-semibold ${sizes} ${price.isPromotionActive ? "text-clay" : "text-ink"}`}>{formatFcfa(now)}</span>
+      <span className={`font-display font-semibold ${sizes} ${price.isPromotionActive ? "text-clay" : "text-ink"}`}>{formatFcfa(now)}/m²</span>
       {price.isPromotionActive && price.promoPriceFcfa !== null && (
-        <span className={`${strikeSizes} text-ink-mute line-through`}>{formatFcfa(price.normalPriceFcfa)}</span>
+        <span className={`${strikeSizes} text-ink-mute line-through`}>{formatFcfa(price.normalPriceFcfa)}/m²</span>
       )}
     </div>
   );

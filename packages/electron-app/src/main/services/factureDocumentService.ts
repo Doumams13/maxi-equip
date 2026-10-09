@@ -3,7 +3,7 @@ import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
 import type { Facture, IdentiteEntrepriseSnapshot } from "@maxi-equip/shared-types";
-import { invoicing as domainInvoicing } from "@maxi-equip/domain";
+import { invoicing as domainInvoicing, pricing as domainPricing } from "@maxi-equip/domain";
 
 /**
  * Génération du document PDF de la facture MAXI EQUIP.
@@ -244,19 +244,30 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   doc.text(`Vendeur : ${vendeurNomAffiche}`, 314.7, 316.1 + DECALAGE_EN_TETE);
 
   // --- Tableau ---
+  // Correction "modèle de facture manuscrit fourni" (2026-10-09) : ordre
+  // des colonnes et libellés repris EXACTEMENT du croquis validé par
+  // l'utilisateur — QTÉ en première position, puis DESIGN/RÉF/TAILLE,
+  // et nouvelle colonne M²/CTN (surface du carton, déjà calculée en
+  // interne via ligne.surfaceCartonM2 mais jamais affichée jusqu'ici).
+  // Largeurs recalculées pour 8 colonnes sur la même largeur totale
+  // (530.5pt, bords 45.5 → 576.0 — cf. MARGE_DROITE), en conservant les
+  // largeurs déjà vérifiées visuellement pour TAILLE et QTÉ (58pt) qui
+  // avaient causé un retour à la ligne avant correction.
   const colonnes = [
-    { x: 45.5, largeur: 135, titre: "DESIGNATION" },
-    { x: 181, largeur: 75, titre: "REFERENCE" },
-    { x: 256.5, largeur: 55, titre: "TAILLE" },
-    { x: 312, largeur: 50, titre: "QTÉ" },
-    { x: 362.5, largeur: 93, titre: "PRIX UNITAIRE" },
-    { x: 456, largeur: 119.6, titre: "TOTAL" },
+    { x: 45.5, largeur: 60, titre: "QTÉ" },
+    { x: 105.5, largeur: 78, titre: "DESIGN" },
+    { x: 183.5, largeur: 70, titre: "RÉF" },
+    { x: 253.5, largeur: 58, titre: "TAILLE" },
+    { x: 311.5, largeur: 62, titre: "PRIX/M²" },
+    { x: 373.5, largeur: 44, titre: "M²/CTN" },
+    { x: 417.5, largeur: 68, titre: "PRIX/CTN" },
+    { x: 485.5, largeur: 90.5, titre: "TOTAL" },
   ];
   const tableTop = 369.9 + DECALAGE_EN_TETE;
   const headerHeight = 17.7;
   const rowHeight = 21;
 
-  doc.rect(45, tableTop, 531.1, headerHeight).fillAndStroke("#ffffff", "#cccccc");
+  doc.rect(45, tableTop, 531, headerHeight).fillAndStroke("#ffffff", "#cccccc");
   doc.font("Helvetica-Bold").fontSize(9).fillColor(NOIR);
   for (const col of colonnes) {
     doc.text(col.titre, col.x + 6, tableTop + 5, { width: col.largeur - 10 });
@@ -267,7 +278,7 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   doc.font("Helvetica").fontSize(9);
   for (let i = 0; i < nombreLignesAffichees; i++) {
     const ligne = facture.lignes[i];
-    doc.rect(45, ligneY, 531.1, rowHeight).strokeColor("#cccccc").lineWidth(0.5).stroke();
+    doc.rect(45, ligneY, 531, rowHeight).strokeColor("#cccccc").lineWidth(0.5).stroke();
     for (const col of colonnes) {
       doc
         .moveTo(col.x - 0.3, ligneY)
@@ -277,14 +288,28 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
         .stroke();
     }
     if (ligne) {
+      // Prix au m² — correction "le prix de référence est au m², ce qui
+      // se vend c'est le carton" (2026-10-08) : calculé à partir du
+      // prix de carton RÉELLEMENT facturé (ligne.prixUnitaire, qui peut
+      // avoir été négocié) et de la surface du carton figée au moment de
+      // la vente (ligne.surfaceCartonM2, jamais recalculée depuis le
+      // produit actuel — voir shared-types/facture.ts). "—" si cette
+      // information n'était pas disponible à l'époque de la vente.
+      const prixM2 =
+        ligne.surfaceCartonM2 !== null ? domainPricing.calculerPrixM2DepuisPrixCarton(ligne.prixUnitaire, ligne.surfaceCartonM2) : null;
+
       doc.fillColor(NOIR);
-      doc.text(ligne.motif, colonnes[0]!.x + 6, ligneY + 6, { width: colonnes[0]!.largeur - 10 });
-      doc.text(ligne.reference ?? "—", colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10 });
-      doc.text(ligne.taille, colonnes[2]!.x + 6, ligneY + 6, { width: colonnes[2]!.largeur - 10 });
-      doc.text(String(ligne.quantite), colonnes[3]!.x + 6, ligneY + 6, { width: colonnes[3]!.largeur - 10 });
-      doc.text(`${formaterMontant(ligne.prixUnitaire)} FCFA`, colonnes[4]!.x + 6, ligneY + 6, { width: colonnes[4]!.largeur - 10 });
-      doc.text(`${formaterMontant(ligne.quantite * ligne.prixUnitaire)} FCFA`, colonnes[5]!.x + 6, ligneY + 6, {
+      doc.text(`${ligne.quantite} carton${ligne.quantite > 1 ? "s" : ""}`, colonnes[0]!.x + 6, ligneY + 6, { width: colonnes[0]!.largeur - 10 });
+      doc.text(ligne.motif, colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10 });
+      doc.text(ligne.reference ?? "—", colonnes[2]!.x + 6, ligneY + 6, { width: colonnes[2]!.largeur - 10 });
+      doc.text(ligne.taille, colonnes[3]!.x + 6, ligneY + 6, { width: colonnes[3]!.largeur - 10 });
+      doc.text(prixM2 !== null ? `${formaterMontant(prixM2)} FCFA` : "—", colonnes[4]!.x + 6, ligneY + 6, { width: colonnes[4]!.largeur - 10 });
+      doc.text(ligne.surfaceCartonM2 !== null ? ligne.surfaceCartonM2.toFixed(2) : "—", colonnes[5]!.x + 6, ligneY + 6, {
         width: colonnes[5]!.largeur - 10,
+      });
+      doc.text(`${formaterMontant(ligne.prixUnitaire)} FCFA`, colonnes[6]!.x + 6, ligneY + 6, { width: colonnes[6]!.largeur - 10 });
+      doc.text(`${formaterMontant(ligne.quantite * ligne.prixUnitaire)} FCFA`, colonnes[7]!.x + 6, ligneY + 6, {
+        width: colonnes[7]!.largeur - 10,
       });
     }
     ligneY += rowHeight;
@@ -334,13 +359,19 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
 
   // --- Conditions générales de vente (NOUVEAU, référence
   // Facture_MAXI_EQUIP final.pdf) — texte fixe, jamais paramétrable.
-  // Positionnement en flux (doc.y, jamais une coordonnée fixe devinée) :
-  // la hauteur réelle du bloc Total/Remise ci-dessus varie légèrement
-  // selon la police, plus sûr de repartir du curseur réel de pdfkit que
-  // de recalculer une position à la main — jamais de chevauchement avec
-  // le pied de page, quel que soit le nombre de lignes du tableau
-  // au-dessus (déjà borné à 8 minimum par nombreLignesAffichees).
-  doc.y = ligneY + 76 + decalageCgv;
+  // Positionnement en flux (doc.y, jamais une coordonnée fixe devinée) à
+  // partir du curseur réel de pdfkit — jamais de chevauchement avec le
+  // pied de page, quel que soit le nombre de lignes du tableau au-dessus
+  // (déjà borné à 8 minimum par nombreLignesAffichees). Correction
+  // "faire descendre les CGV" (2026-10-09) : plancher à CGV_Y_MINIMUM
+  // pour utiliser l'espace vide en bas de page sur une facture courte —
+  // mesuré visuellement (PDF réel généré) : le bloc CGV complet mesure
+  // environ 70pt de haut, donc un plancher à 655 laisse ~23pt avant la
+  // ligne du pied de page (748.4), jamais un chevauchement. Sur une
+  // facture longue, le flux naturel (ligneY + 76) dépasse déjà ce
+  // plancher — Math.max garde alors le comportement existant.
+  const CGV_Y_MINIMUM = 655;
+  doc.y = Math.max(ligneY + 76 + decalageCgv, CGV_Y_MINIMUM);
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(VERT);
   doc.text("CONDITIONS GENERALES DE VENTE", MARGE_GAUCHE, doc.y, { width: MARGE_DROITE - MARGE_GAUCHE });
   doc.moveDown(0.4);

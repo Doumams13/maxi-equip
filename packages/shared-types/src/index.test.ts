@@ -16,6 +16,7 @@ describe("shared-types (Phase 0 smoke test)", () => {
       tailleTri: 60,
       reference: "MB-6060",
       prix: 8500,
+      carreauxParCarton: 4,
       seuilAlerte: 20,
       deletedAt: null,
       deletedBy: null,
@@ -37,7 +38,7 @@ describe("shared-types (Phase 0 smoke test)", () => {
       vendeurUtilisateurId: "00000000-0000-4000-8000-0000000000aa",
       vendeurNomManuel: null,
       lignes: [
-        { produitId: null, motif: "Marbre Blanc", reference: "REF-MB-6060", taille: "60x60 cm", quantite: 30, prixUnitaire: 8500, prixUnitaireNormal: null, promotionId: null, promotionLibelle: null, promotionType: null, promotionValeur: null },
+        { produitId: null, motif: "Marbre Blanc", reference: "REF-MB-6060", taille: "60x60 cm", quantite: 30, prixUnitaire: 8500, prixUnitaireNormal: null, promotionId: null, promotionLibelle: null, promotionType: null, promotionValeur: null, surfaceCartonM2: 1.44 },
       ],
       total: 255000,
       remise: 0,

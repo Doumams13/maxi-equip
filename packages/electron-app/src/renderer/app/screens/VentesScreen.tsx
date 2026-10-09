@@ -2,7 +2,19 @@ import { useEffect, useState } from "react";
 import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Plus, Trash2, Pencil, CheckCircle2, X, RotateCcw } from "lucide-react";
 import type { Produit, Emplacement, Promotion } from "@maxi-equip/shared-types";
+import { pricing as domainPricing } from "@maxi-equip/domain";
 import { ProduitSelector } from "../components/ProduitSelector.js";
+
+/**
+ * Surface d'un carton (m²) pour un produit du catalogue — `null` si
+ * largeur/hauteur/carreauxParCarton ne sont pas tous renseignés (prix de
+ * carton non calculable) — correction "le prix de référence est au m²"
+ * (2026-10-08).
+ */
+function surfaceCartonProduit(p: Produit | undefined): number | null {
+  if (!p || !p.carreauxParCarton || !p.largeur || !p.hauteur) return null;
+  return domainPricing.calculerSurfaceCartonM2(p.carreauxParCarton, p.largeur, p.hauteur);
+}
 
 interface LigneVenteForm {
   produitId: string;
@@ -340,7 +352,13 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         // n'existe plus au catalogue — jamais une donnée perdue.
         const lignesChargees = demande.lignes.map((l) => {
           const produit = produits.find((p) => p.id === l.produitId);
-          const prixUnitaire = produit ? getPrixEffectif(produit.prix, promotions, l.produitId).price : l.prixIndicatif;
+          const prixUnitaire = produit
+            ? (() => {
+                const ep = getPrixEffectif(produit.prix, promotions, l.produitId);
+                const surface = surfaceCartonProduit(produit);
+                return surface !== null ? domainPricing.calculerPrixCartonDepuisPrixM2(ep.price, surface) : ep.price;
+              })()
+            : l.prixIndicatif;
           return {
             produitId: l.produitId,
             quantite: String(l.quantite),
@@ -418,7 +436,13 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
       return;
     }
     const ep = getPrixEffectif(produit.prix, promotions, produitId);
-    updateLigne(index, { produitId, prixUnitaire: String(ep.price), allocations: {} });
+    // ep.price est un prix au m² (Produit.prix) — converti en prix de
+    // carton pour prixUnitaire quand la surface du carton est connue ;
+    // sinon repli sur l'ancien comportement (produit non encore migré,
+    // carreauxParCarton/dimensions pas renseignés).
+    const surface = surfaceCartonProduit(produit);
+    const prixUnitaire = surface !== null ? domainPricing.calculerPrixCartonDepuisPrixM2(ep.price, surface) : ep.price;
+    updateLigne(index, { produitId, prixUnitaire: String(prixUnitaire), allocations: {} });
   }
 
   function totalAlloue(ligne: LigneVenteForm): number {
@@ -601,7 +625,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
               const externe = quantiteExterne(ligne);
               return (
                 <div key={index} style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.md, padding: 12 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
                     <div>
                       <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Produit</label>
                       <ProduitSelector produits={produits} value={ligne.produitId} onChange={(id) => handleProduitChange(index, id)} />
@@ -625,11 +649,11 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
                         const promoInfo = prod ? getPrixEffectif(prod.prix, promotions, ligne.produitId) : null;
                         return (
                           <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>
-                            Prix unitaire
+                            Prix / carton
                             {promoInfo?.isPromoActive && prod && (
                               <>
                                 <span style={{ marginLeft: 6, textDecoration: "line-through", color: defaultTokens.colors.textFaint, fontWeight: 400 }}>
-                                  {prod.prix.toLocaleString("fr-FR")} FCFA
+                                  {prod.prix.toLocaleString("fr-FR")} FCFA/m²
                                 </span>
                                 <span style={{ marginLeft: 4, color: defaultTokens.colors.danger, fontWeight: 700, fontSize: 10, letterSpacing: 0.3 }}>
                                   PROMO
@@ -649,6 +673,31 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
                           updateLigne(index, { prixUnitaire: brut === "" ? "" : String(Math.max(0, Number(brut))) });
                         }}
                       />
+                    </div>
+                    <div>
+                      {(() => {
+                        const prod = produits.find((p) => p.id === ligne.produitId);
+                        const surface = surfaceCartonProduit(prod);
+                        const prixM2 = surface !== null && ligne.prixUnitaire ? domainPricing.calculerPrixM2DepuisPrixCarton(Number(ligne.prixUnitaire) || 0, surface) : null;
+                        return (
+                          <>
+                            <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Prix / m²</label>
+                            <input
+                              style={{ ...inputStyle, opacity: surface === null ? 0.5 : 1 }}
+                              type="number"
+                              min={0}
+                              disabled={surface === null}
+                              title={surface === null ? "Carreaux/carton ou dimensions non renseignés pour ce produit" : undefined}
+                              value={prixM2 !== null ? String(prixM2) : ""}
+                              onChange={(e) => {
+                                if (surface === null) return;
+                                const valeur = Number(e.target.value) || 0;
+                                updateLigne(index, { prixUnitaire: valeur ? String(domainPricing.calculerPrixCartonDepuisPrixM2(valeur, surface)) : "" });
+                              }}
+                            />
+                          </>
+                        );
+                      })()}
                     </div>
                     <Button type="button" variant="ghost" onClick={() => setLignes((prev) => prev.filter((_, i) => i !== index))}>
                       <Trash2 size={15} />

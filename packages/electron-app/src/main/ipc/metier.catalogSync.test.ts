@@ -37,6 +37,7 @@ const PRODUIT: Produit = {
   hauteur: 60,
   reference: "MB-6060",
   prix: 15000,
+  carreauxParCarton: 4,
   seuilAlerte: 5,
   deletedAt: null,
   deletedBy: null,

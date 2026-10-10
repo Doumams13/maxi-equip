@@ -50,6 +50,13 @@ export interface ApiResponse {
    * contrat déjà utilisé par les routes en place.
    */
   raw?: { contentType: string; data: Buffer };
+  /**
+   * En-têtes additionnels (ex. Cache-Control/ETag pour les images
+   * catalogue, correction "photos lentes à charger" 2026-10-10) — fusionnés
+   * par-dessus Content-Type/CORS dans l'adaptateur, jamais un remplacement
+   * total des en-têtes déjà posés par celui-ci.
+   */
+  headers?: Record<string, string>;
 }
 
 export type Handler = (req: ApiRequest) => Promise<ApiResponse> | ApiResponse;

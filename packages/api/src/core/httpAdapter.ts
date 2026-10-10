@@ -66,11 +66,11 @@ export function creerGestionnaireHttp(router: Router): (nodeReq: IncomingMessage
 
         const apiRes = await router.dispatch(apiReq);
         if (apiRes.raw) {
-          nodeRes.writeHead(apiRes.status, { "Content-Type": apiRes.raw.contentType, ...corsHeaders });
+          nodeRes.writeHead(apiRes.status, { "Content-Type": apiRes.raw.contentType, ...corsHeaders, ...apiRes.headers });
           nodeRes.end(apiRes.raw.data);
           return;
         }
-        nodeRes.writeHead(apiRes.status, { "Content-Type": "application/json", ...corsHeaders });
+        nodeRes.writeHead(apiRes.status, { "Content-Type": "application/json", ...corsHeaders, ...apiRes.headers });
         nodeRes.end(JSON.stringify(apiRes.body));
       })();
     });

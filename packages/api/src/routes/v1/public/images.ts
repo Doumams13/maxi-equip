@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Route } from "../../../core/types.js";
 import { NotFoundError, ValidationError } from "../../../core/errors.js";
@@ -41,6 +42,21 @@ export const publicImageRoute: Route = {
     }
     const extension = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
     const data = readFileSync(chemin);
-    return { status: 200, body: undefined, raw: { contentType: CONTENT_TYPE_PAR_EXTENSION[extension] ?? "application/octet-stream", data } };
+    // Cache long + ETag — correction "photos lentes à charger" (2026-10-10) :
+    // le nom de fichier inclut un suffixe aléatoire généré à chaque sync
+    // (voir routes/v1/app/images/sync.ts), donc pour UN nom de fichier donné
+    // le contenu ne change jamais — un cache "immutable" d'un an est sûr,
+    // jamais un risque de servir une image périmée sous le même nom.
+    const etag = `"${createHash("sha1").update(data).digest("hex")}"`;
+    const headers = { "Cache-Control": "public, max-age=31536000, immutable", ETag: etag };
+    if (req.headers["if-none-match"] === etag) {
+      return { status: 304, body: undefined, headers };
+    }
+    return {
+      status: 200,
+      body: undefined,
+      raw: { contentType: CONTENT_TYPE_PAR_EXTENSION[extension] ?? "application/octet-stream", data },
+      headers,
+    };
   },
 };

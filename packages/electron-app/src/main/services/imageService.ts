@@ -1,12 +1,68 @@
 import { dialog, app, type BrowserWindow } from "electron";
-import { existsSync, mkdirSync, copyFileSync, unlinkSync, readFileSync, renameSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, copyFileSync, unlinkSync, readFileSync, writeFileSync, renameSync, readdirSync } from "node:fs";
 import { join, extname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { Jimp } from "jimp";
 import { ImageProduitRepository } from "../repositories/imageProduitRepository.js";
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 
 const ACCEPTED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
 const MIME_BY_EXT: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
+
+/**
+ * Correction "photos lentes à charger sur le site" (2026-10-10) : les
+ * photos ajoutées depuis un téléphone/appareil photo font souvent
+ * plusieurs Mo alors qu'elles ne sont jamais affichées aussi grand sur le
+ * site (voir next/image côté packages/site, qui redimensionne déjà à
+ * l'affichage mais doit télécharger/décoder l'original en entier pour
+ * chaque variante). Réduit le poids à la source, une seule fois, plutôt
+ * que de payer ce coût à chaque visite du site.
+ *
+ * 1600px de long côté = largement au-dessus de ce qu'un produit affiche
+ * jamais sur le site, même plein écran. Qualité 80 = niveau standard
+ * e-commerce, perte visuelle non perceptible.
+ */
+const DIMENSION_MAX_IMAGE = 1600;
+const QUALITE_JPEG = 80;
+
+/**
+ * Redimensionne/compresse une image JPEG ou PNG vers `destPath`. Ne
+ * touche jamais aux dimensions d'une image déjà plus petite que
+ * `DIMENSION_MAX_IMAGE` (jamais d'agrandissement). Retourne `false` pour
+ * un format non pris en charge par Jimp tel que configuré ici (ex.
+ * `.webp` — pas de plugin installé) : l'appelant copie alors le fichier
+ * tel quel, comme avant cette correction.
+ */
+async function comprimerImage(sourcePath: string, destPath: string, ext: string): Promise<boolean> {
+  if (ext !== ".jpg" && ext !== ".jpeg" && ext !== ".png") return false;
+  const image = await Jimp.read(sourcePath);
+  const coteLong = Math.max(image.bitmap.width, image.bitmap.height);
+  if (coteLong > DIMENSION_MAX_IMAGE) {
+    image.scale(DIMENSION_MAX_IMAGE / coteLong);
+  }
+  const buffer =
+    ext === ".png" ? await image.getBuffer("image/png") : await image.getBuffer("image/jpeg", { quality: QUALITE_JPEG });
+  writeFileSync(destPath, buffer);
+  return true;
+}
+
+/**
+ * Copie une image source vers `destPath` en tentant d'abord la
+ * compression — jamais un échec bloquant pour l'utilisateur : un fichier
+ * corrompu ou un format non pris en charge retombe sur une copie brute
+ * (comportement identique à avant cette correction).
+ */
+async function copierImageComprimee(sourcePath: string, destPath: string): Promise<void> {
+  const ext = extname(sourcePath).toLowerCase();
+  try {
+    const compresse = await comprimerImage(sourcePath, destPath, ext);
+    if (compresse) return;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[images] compression impossible, copie brute à la place :", sourcePath, err);
+  }
+  copyFileSync(sourcePath, destPath);
+}
 
 export interface StagedImage {
   stagingId: string;
@@ -173,7 +229,7 @@ export class ImageService {
       const ext = extname(sourcePath).toLowerCase();
       if (!ACCEPTED_EXTENSIONS.includes(ext)) continue;
       const fileName = `${randomUUID()}${ext}`;
-      copyFileSync(sourcePath, join(this.storageDir, fileName));
+      await copierImageComprimee(sourcePath, join(this.storageDir, fileName));
       const imageId = this.repository.create({ modeleId, cheminLocal: fileName });
       const cree = this.repository.findById(imageId)!;
       this.enqueueImageSync({ imageId, modeleId, fileName, ordre: cree.ordre, estPrincipale: cree.estPrincipale, operation: "create" });
@@ -198,7 +254,7 @@ export class ImageService {
       if (!ACCEPTED_EXTENSIONS.includes(ext)) continue;
       const stagingId = `${randomUUID()}${ext}`;
       const stagingPath = join(this.stagingDir, stagingId);
-      copyFileSync(sourcePath, stagingPath);
+      await copierImageComprimee(sourcePath, stagingPath);
       const dataUrl = this.fileToDataUrl(stagingPath);
       if (dataUrl) staged.push({ stagingId, dataUrl });
     }

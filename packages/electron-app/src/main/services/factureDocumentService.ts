@@ -254,9 +254,9 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   // largeurs déjà vérifiées visuellement pour TAILLE et QTÉ (58pt) qui
   // avaient causé un retour à la ligne avant correction.
   const colonnes = [
-    { x: 45.5, largeur: 60, titre: "QTÉ" },
-    { x: 105.5, largeur: 78, titre: "DESIGN" },
-    { x: 183.5, largeur: 70, titre: "RÉF" },
+    { x: 45.5, largeur: 60, titre: "QUANTITÉ" },
+    { x: 105.5, largeur: 78, titre: "DÉSIGNATION" },
+    { x: 183.5, largeur: 70, titre: "RÉFÉRENCE" },
     { x: 253.5, largeur: 58, titre: "TAILLE" },
     { x: 311.5, largeur: 62, titre: "PRIX/M²" },
     { x: 373.5, largeur: 44, titre: "M²/CTN" },
@@ -268,9 +268,12 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   const rowHeight = 21;
 
   doc.rect(45, tableTop, 531, headerHeight).fillAndStroke("#ffffff", "#cccccc");
-  doc.font("Helvetica-Bold").fontSize(9).fillColor(NOIR);
+  // Police réduite à 7.5 (au lieu de 9) : titres non abrégés ("DÉSIGNATION",
+  // "QUANTITÉ", "RÉFÉRENCE" — décision utilisateur du 2026-10-10) plus longs
+  // que les anciens libellés abrégés, à largeur de colonne inchangée.
+  doc.font("Helvetica-Bold").fontSize(7.5).fillColor(NOIR);
   for (const col of colonnes) {
-    doc.text(col.titre, col.x + 6, tableTop + 5, { width: col.largeur - 10 });
+    doc.text(col.titre, col.x + 6, tableTop + 6, { width: col.largeur - 10 });
   }
 
   let ligneY = tableTop + headerHeight;
@@ -299,8 +302,11 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
         ligne.surfaceCartonM2 !== null ? domainPricing.calculerPrixM2DepuisPrixCarton(ligne.prixUnitaire, ligne.surfaceCartonM2) : null;
 
       doc.fillColor(NOIR);
-      doc.text(`${ligne.quantite} carton${ligne.quantite > 1 ? "s" : ""}`, colonnes[0]!.x + 6, ligneY + 6, { width: colonnes[0]!.largeur - 10 });
-      doc.text(ligne.motif, colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10 });
+      doc.text(`${ligne.quantite}`, colonnes[0]!.x + 6, ligneY + 6, { width: colonnes[0]!.largeur - 10 });
+      // DÉSIGNATION = libellé générique de l'article vendu, PAS le motif du
+      // carreau — l'identification précise se fait via RÉFÉRENCE + TAILLE
+      // (décision utilisateur du 2026-10-10 : le motif disparaît de la facture).
+      doc.text("Cartons", colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10 });
       doc.text(ligne.reference ?? "—", colonnes[2]!.x + 6, ligneY + 6, { width: colonnes[2]!.largeur - 10 });
       doc.text(ligne.taille, colonnes[3]!.x + 6, ligneY + 6, { width: colonnes[3]!.largeur - 10 });
       doc.text(prixM2 !== null ? `${formaterMontant(prixM2)} FCFA` : "—", colonnes[4]!.x + 6, ligneY + 6, { width: colonnes[4]!.largeur - 10 });

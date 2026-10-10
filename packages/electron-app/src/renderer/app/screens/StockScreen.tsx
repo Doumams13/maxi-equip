@@ -4,6 +4,7 @@ import { RotateCcw } from "lucide-react";
 import type { Produit, Emplacement } from "@maxi-equip/shared-types";
 import { ProduitSelector } from "../components/ProduitSelector.js";
 import { HistoriqueOperationsTable } from "../components/HistoriqueOperationsTable.js";
+import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
 import type { EvenementHistorique } from "../../../preload/index.js";
 
 const inputStyleModal: React.CSSProperties = {
@@ -134,6 +135,14 @@ export function StockScreen({
 
   const [evenementAAnnuler, setEvenementAAnnuler] = useState<EvenementHistorique | null>(null);
   const [annulationEnCours, setAnnulationEnCours] = useState(false);
+
+  // Pagination du tableau multi-dépôts — correction "formulaires de
+  // saisie restent visibles sans scroll, tableau paginé" (2026-10-10) :
+  // la liste complète des produits est déjà chargée en mémoire (voir
+  // listProduits ci-dessous), donc le découpage se fait ici côté client,
+  // jamais un rechargement serveur par page (inutile, tout est déjà là).
+  const PRODUITS_PAR_PAGE = 10;
+  const [pageStock, setPageStock] = useState(1);
 
   const depots = emplacements.filter((e) => !e.estPointDeVente && e.actif);
 
@@ -291,64 +300,15 @@ export function StockScreen({
   const sortieProduit = produits.find((p) => p.id === sortieProduitId) ?? null;
   const sortieDepot = depots.find((d) => d.id === sortieDepotId) ?? null;
 
+  const totalPagesStock = Math.max(1, Math.ceil(produits.length / PRODUITS_PAR_PAGE));
+  const pageStockActuelle = Math.min(pageStock, totalPagesStock);
+  const produitsPage = produits.slice((pageStockActuelle - 1) * PRODUITS_PAR_PAGE, pageStockActuelle * PRODUITS_PAR_PAGE);
+
   return (
     <div style={{ padding: 28 }}>
       <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, marginTop: 0 }}>
         Stock & Mouvements
       </h1>
-
-      {/* ── Table multi-dépôts ── */}
-      <Card padding={0} style={{ marginBottom: 24 }}>
-        {produits.length === 0 ? (
-          <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Aucun produit au catalogue.</p>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-              <thead>
-                <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
-                  {["Motif", "Taille", "Référence", ...depots.map((d) => d.nom), "Total", "Seuil"].map((h) => (
-                    <th key={h} style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12, whiteSpace: "nowrap" }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {produits.map((p) => {
-                  const qParDepot = depots.map((d) => stockParDepot[d.id]?.[p.id] ?? 0);
-                  const total = qParDepot.reduce((s, q) => s + q, 0);
-                  const sousSeuil = p.seuilAlerte > 0 && total <= p.seuilAlerte;
-                  return (
-                    <tr key={p.id} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
-                      <td style={{ padding: "10px 16px" }}>{p.motif}</td>
-                      <td style={{ padding: "10px 16px", fontWeight: 700 }}>{p.taille}</td>
-                      <td style={{ padding: "10px 16px", color: defaultTokens.colors.textFaint }}>{p.reference}</td>
-                      {qParDepot.map((q, i) => (
-                        <td key={depots[i]!.id} style={{ padding: "10px 16px", textAlign: "center" }}>
-                          {q}
-                        </td>
-                      ))}
-                      <td
-                        style={{
-                          padding: "10px 16px",
-                          textAlign: "center",
-                          fontWeight: 700,
-                          color: sousSeuil ? defaultTokens.colors.danger : defaultTokens.colors.text,
-                        }}
-                      >
-                        {total}
-                      </td>
-                      <td style={{ padding: "10px 16px", textAlign: "center", color: defaultTokens.colors.textFaint }}>
-                        {p.seuilAlerte}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
 
       {/* ── Formulaire entrée ── */}
       <Card style={{ marginBottom: 20 }}>
@@ -445,6 +405,73 @@ export function StockScreen({
             </Button>
           </div>
         </form>
+      </Card>
+
+      {/* ── Table multi-dépôts — descendue sous les formulaires de saisie
+          (2026-10-10) pour que ceux-ci restent accessibles sans scroll
+          même avec une centaine de produits, et paginée à 10 lignes/page
+          pour éviter un scroll infini. ── */}
+      <Card padding={0} style={{ marginBottom: 24 }}>
+        {produits.length === 0 ? (
+          <p style={{ padding: 24, color: defaultTokens.colors.textSoft, margin: 0 }}>Aucun produit au catalogue.</p>
+        ) : (
+          <>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+                <thead>
+                  <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
+                    {["Motif", "Taille", "Référence", ...depots.map((d) => d.nom), "Total", "Seuil"].map((h) => (
+                      <th key={h} style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12, whiteSpace: "nowrap" }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {produitsPage.map((p) => {
+                    const qParDepot = depots.map((d) => stockParDepot[d.id]?.[p.id] ?? 0);
+                    const total = qParDepot.reduce((s, q) => s + q, 0);
+                    const sousSeuil = p.seuilAlerte > 0 && total <= p.seuilAlerte;
+                    return (
+                      <tr key={p.id} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
+                        <td style={{ padding: "10px 16px" }}>{p.motif}</td>
+                        <td style={{ padding: "10px 16px", fontWeight: 700 }}>{p.taille}</td>
+                        <td style={{ padding: "10px 16px", color: defaultTokens.colors.textFaint }}>{p.reference}</td>
+                        {qParDepot.map((q, i) => (
+                          <td key={depots[i]!.id} style={{ padding: "10px 16px", textAlign: "center" }}>
+                            {q}
+                          </td>
+                        ))}
+                        <td
+                          style={{
+                            padding: "10px 16px",
+                            textAlign: "center",
+                            fontWeight: 700,
+                            color: sousSeuil ? defaultTokens.colors.danger : defaultTokens.colors.text,
+                          }}
+                        >
+                          {total}
+                        </td>
+                        <td style={{ padding: "10px 16px", textAlign: "center", color: defaultTokens.colors.textFaint }}>
+                          {p.seuilAlerte}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {totalPagesStock > 1 && (
+              <PaginationIntelligente
+                page={pageStockActuelle}
+                totalPages={totalPagesStock}
+                totalResultats={produits.length}
+                libelleUnite="produits"
+                onChangerPage={setPageStock}
+              />
+            )}
+          </>
+        )}
       </Card>
 
       {/* ── Historique des mouvements (Entrées / Sorties / Transferts) ── */}

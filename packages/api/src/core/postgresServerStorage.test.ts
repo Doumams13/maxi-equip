@@ -233,6 +233,25 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
       expect(modeles.some((m) => m.id === MODELE_ID)).toBe(false);
     });
 
+    it("RÉGRESSION bug réel (sync en boucle sur 500) : recréer un modèle avec le même nom qu'un modèle supprimé ne plante jamais — la contrainte UNIQUE sur slug est globale (inclut les lignes supprimées), slugUnique() doit en tenir compte", async () => {
+      const NOUVEAU_ID = uuidDeterministe("205");
+      await expect(
+        storage.appliquerOperationModele({
+          operation: "create",
+          modeleId: NOUVEAU_ID,
+          motif: "Marbre Postgres Test Modifié", // même motif que le modèle supprimé juste au-dessus
+          type: "Faïence",
+          ordreVitrine: null,
+          updatedAt: "2026-01-04T00:00:00.000Z",
+        })
+      ).resolves.toMatchObject({ applique: true });
+
+      const modeles = await storage.listerModelesActifs();
+      const recree = modeles.find((m) => m.id === NOUVEAU_ID);
+      expect(recree?.motif).toBe("Marbre Postgres Test Modifié");
+      expect(recree?.slug).not.toBe("marbre-postgres-test-modifie"); // slug déjà occupé par la ligne supprimée
+    });
+
     it("image : upsert de métadonnées + URL, puis suppression réelle", async () => {
       const IMAGE_ID = uuidDeterministe("203");
       const MODELE_IMG = uuidDeterministe("204");

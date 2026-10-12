@@ -168,7 +168,7 @@ export class SqliteServerStorage implements ServerStorage {
     const existants = new Set(
       (
         this.db
-          .prepare("SELECT slug FROM catalogue_modeles WHERE id != ? AND deleted_at IS NULL")
+          .prepare("SELECT slug FROM catalogue_modeles WHERE id != ?")
           .all(modeleId) as { slug: string }[]
       ).map((r) => r.slug)
     );

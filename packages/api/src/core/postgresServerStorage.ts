@@ -207,7 +207,7 @@ export class PostgresServerStorage implements ServerStorage {
 
   private async slugUnique(motif: string, modeleId: string): Promise<string> {
     const base = slugify(motif);
-    const res = await this.pool.query("SELECT slug FROM catalogue_modeles WHERE id != $1 AND deleted_at IS NULL", [modeleId]);
+    const res = await this.pool.query("SELECT slug FROM catalogue_modeles WHERE id != $1", [modeleId]);
     const existants = new Set((res.rows as { slug: string }[]).map((r) => r.slug));
     if (!existants.has(base)) return base;
     let n = 2;

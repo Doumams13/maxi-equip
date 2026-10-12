@@ -4,6 +4,8 @@ import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Cir
 import type { ModeleProduitAvecVariantes, VarianteProduit, StagedImage } from "../../../preload/index.js";
 import { ImagesModal } from "./ImagesModal.js";
 import { VitrineModal } from "./VitrineModal.js";
+import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
+import { useSurbrillanceOperation } from "../highlight.js";
 import { pricing as domainPricing } from "@maxi-equip/domain";
 
 const inputStyle: React.CSSProperties = {
@@ -238,6 +240,21 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
   const [recherche, setRecherche] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  // Pagination de la liste des modèles — correction "pagination page
+  // Carreaux" (2026-10-10), même principe que StockScreen : la liste
+  // complète est déjà chargée en mémoire (listModelesProduits), le
+  // découpage se fait donc côté client.
+  const MODELES_PAR_PAGE = 10;
+  const [pageCarreaux, setPageCarreaux] = useState(1);
+
+  // Surbrillance du modèle tout juste modifié — correction "se perdre
+  // après avoir enregistré une modification" (2026-10-10), d'autant plus
+  // nécessaire depuis l'ajout de la pagination ci-dessus : le modèle
+  // modifié peut désormais se trouver sur une autre page que celle
+  // affichée au moment de l'édition. Même principe que l'historique des
+  // mouvements (voir highlight.ts), réutilisé tel quel.
+  const [modeleEnSurbrillance, setModeleEnSurbrillance] = useState<string | null>(null);
+
   // Formulaire modèle
   const [showModeleForm, setShowModeleForm] = useState(false);
   const [editingModeleId, setEditingModeleId] = useState<string | null>(null);
@@ -286,6 +303,21 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
         m.variantes.some((v) => v.reference.toLowerCase().includes(q) || v.taille.toLowerCase().includes(q))
     );
   }, [modeles, recherche]);
+
+  // Retrouve le modèle visé même si une recherche active le masquerait.
+  useEffect(() => {
+    if (!modeleEnSurbrillance) return;
+    setRecherche("");
+  }, [modeleEnSurbrillance]);
+
+  // Bascule automatiquement sur la page où se trouve désormais le modèle
+  // modifié, plutôt que de laisser l'utilisateur la chercher lui-même.
+  useEffect(() => {
+    if (!modeleEnSurbrillance) return;
+    const index = modelesFiltres.findIndex((m) => m.id === modeleEnSurbrillance);
+    if (index === -1) return;
+    setPageCarreaux(Math.floor(index / MODELES_PAR_PAGE) + 1);
+  }, [modeleEnSurbrillance, modelesFiltres]);
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -389,6 +421,9 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
 
   async function handleConfirmerSaveModele() {
     setSavingModele(true);
+    // Capturé AVANT handleCloseModeleForm() ci-dessous, qui réinitialise
+    // editingModeleId via resetModeleForm() — jamais lu après coup.
+    const modeleIdModifie = editingModeleId;
     try {
       if (editingModeleId) {
         const result = await window.maxiEquip.modifierModeleProduit(editingModeleId, { motif: modeleForm.motif, type: modeleForm.type });
@@ -442,6 +477,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
       setShowConfirmSaveModele(false);
       await handleCloseModeleForm();
       await refresh();
+      if (modeleIdModifie) setModeleEnSurbrillance(modeleIdModifie);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[produits] enregistrement impossible :", err);
@@ -546,6 +582,17 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
       setDeleting(false);
     }
   }
+
+  const totalPagesCarreaux = Math.max(1, Math.ceil(modelesFiltres.length / MODELES_PAR_PAGE));
+  const pageCarreauxActuelle = Math.min(pageCarreaux, totalPagesCarreaux);
+  const modelesPage = modelesFiltres.slice((pageCarreauxActuelle - 1) * MODELES_PAR_PAGE, pageCarreauxActuelle * MODELES_PAR_PAGE);
+
+  // La cible n'est transmise au hook QUE si elle est réellement présente
+  // sur la page actuellement affichée — garantit que la ligne existe déjà
+  // dans le DOM quand le défilement/surbrillance s'applique (voir
+  // HistoriqueOperationsTable, même principe).
+  const modeleCibleActif = modeleEnSurbrillance && modelesPage.some((m) => m.id === modeleEnSurbrillance) ? modeleEnSurbrillance : null;
+  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(modeleCibleActif, () => setModeleEnSurbrillance(null));
 
   return (
     <div style={{ padding: 28 }}>
@@ -743,7 +790,10 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
         <input
           style={{ ...inputStyle, paddingLeft: 36 }}
           value={recherche}
-          onChange={(e) => setRecherche(e.target.value)}
+          onChange={(e) => {
+            setRecherche(e.target.value);
+            setPageCarreaux(1);
+          }}
           placeholder="Motif, type, référence, taille…"
         />
       </div>
@@ -754,7 +804,8 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
             {modeles.length === 0 ? "Aucun modèle au catalogue pour l'instant." : "Aucun modèle ne correspond à cette recherche."}
           </p>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <>
+          <div ref={conteneurRef} style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
               <thead>
                 <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
@@ -769,13 +820,14 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                 </tr>
               </thead>
               <tbody>
-                {modelesFiltres.map((m) => {
+                {modelesPage.map((m) => {
                   const isOpen = expanded.has(m.id);
                   const stockTotal = m.variantes.reduce((acc, v) => acc + v.stockTotal, 0);
                   return (
                     <Fragment key={m.id}>
                       <tr
-                        style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: "pointer" }}
+                        data-operation-id={m.id}
+                        style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: "pointer", ...styleSurbrillance(m.id) }}
                         onClick={() => toggleExpand(m.id)}
                       >
                         <td style={{ padding: "8px 4px 8px 16px", color: defaultTokens.colors.textFaint }}>
@@ -932,6 +984,16 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
               </tbody>
             </table>
           </div>
+          {totalPagesCarreaux > 1 && (
+            <PaginationIntelligente
+              page={pageCarreauxActuelle}
+              totalPages={totalPagesCarreaux}
+              totalResultats={modelesFiltres.length}
+              libelleUnite="modèles"
+              onChangerPage={setPageCarreaux}
+            />
+          )}
+          </>
         )}
       </Card>
 

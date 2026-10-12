@@ -116,6 +116,18 @@ function createMainWindow(): BrowserWindow {
     });
   }
 
+  // Correction "écran blanc fréquent, nécessite de relancer l'appli"
+  // (2026-10-10) — distinct de l'ErrorBoundary React (renderer/main.tsx),
+  // qui ne peut rien pour un crash du PROCESSUS renderer lui-même (ex.
+  // crash GPU) : sans ce gestionnaire, la fenêtre restait figée/blanche
+  // indéfiniment après un tel crash, sans aucun moyen de la récupérer
+  // autrement qu'en fermant et relançant toute l'application.
+  window.webContents.on("render-process-gone", (_event, details) => {
+    // eslint-disable-next-line no-console
+    console.error("[main] processus renderer disparu, rechargement automatique :", details.reason);
+    if (!window.isDestroyed()) window.webContents.reload();
+  });
+
   window.once("ready-to-show", () => {
     // Démarre maximisée (correction : "l'écran de connexion était coupé
     // au lancement" — 1280×720 fixe ne suffit pas sur tous les postes,

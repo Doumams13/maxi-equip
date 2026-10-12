@@ -150,6 +150,12 @@ const maxiEquipApi = {
   dbHealthCheck: (): Promise<{ tableCount: number; tables: string[] }> =>
     ipcRenderer.invoke("app:dbHealthCheck"),
   quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
+  /**
+   * Correction "écran blanc fréquent" (2026-10-10) — fire-and-forget,
+   * jamais de réponse attendue (voir ipc/index.ts).
+   */
+  reportRendererError: (payload: { source: string; message: string; stack?: string }): void =>
+    ipcRenderer.send("app:reportRendererError", payload),
 
   // --- Configuration initiale (Phase 6C) — remplace le mot de passe
   // Administrateur généré aléatoirement. Le mot de passe choisi transite

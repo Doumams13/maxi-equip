@@ -1,4 +1,6 @@
 import { app, ipcMain } from "electron";
+import { existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { join } from "node:path";
 import type Database from "better-sqlite3-multiple-ciphers";
 
 /**
@@ -27,5 +29,26 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   ipcMain.handle("app:quit", () => {
     app.quit();
+  });
+
+  /**
+   * Correction "écran blanc fréquent, nécessite de relancer l'appli"
+   * (2026-10-10) — reçoit les erreurs attrapées côté Renderer (frontière
+   * React via ErrorBoundary, ou exceptions/rejets non gérés ailleurs, voir
+   * renderer/main.tsx) et les écrit dans un fichier, seul moyen de
+   * diagnostiquer ce qui casse réellement chez un client sans accès à ses
+   * DevTools. `ipcMain.on` (fire-and-forget) et jamais bloquant : une
+   * erreur d'écriture ici ne doit jamais devenir une DEUXIÈME erreur non
+   * gérée qui aggraverait le problème initial.
+   */
+  ipcMain.on("app:reportRendererError", (_e, payload: { source: string; message: string; stack?: string }) => {
+    try {
+      const dir = join(app.getPath("userData"), "logs");
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const ligne = `${JSON.stringify({ date: new Date().toISOString(), ...payload })}\n`;
+      appendFileSync(join(dir, "erreurs-renderer.log"), ligne);
+    } catch {
+      // Best-effort — ne doit jamais faire planter quoi que ce soit.
+    }
   });
 }

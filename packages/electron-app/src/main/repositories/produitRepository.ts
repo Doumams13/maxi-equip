@@ -73,8 +73,17 @@ export class ProduitRepository {
     return this.listSousSeuilDepots(depotIds).length;
   }
 
-  /** Produits sous seuil, avec leur stock cumulé sur les dépôts donnés — section "Produits en stock faible" du dashboard (§8/§13). */
-  listSousSeuilDepots(depotIds: string[]): { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[] {
+  /**
+   * Produits sous seuil, avec leur stock cumulé sur les dépôts donnés —
+   * section "Produits en stock faible" du dashboard (§8/§13).
+   *
+   * `modeleId` ajouté (correction "Dashboard cliquable", 2026-10-21) : seul
+   * identifiant permettant de retrouver et mettre en surbrillance le bon
+   * modèle sur l'écran Carreaux (la liste y est groupée par modèle, pas
+   * par variante) — `null` pour une variante antérieure à la migration
+   * multi-format, jamais reconstruit rétroactivement.
+   */
+  listSousSeuilDepots(depotIds: string[]): { id: string; modeleId: string | null; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[] {
     if (depotIds.length === 0) return [];
     const placeholders = depotIds.map(() => "?").join(",");
     // IMPORTANT : HAVING sans GROUP BY n'est pas valide en SQLite sur une
@@ -85,7 +94,7 @@ export class ProduitRepository {
     const rows = this.db
       .prepare(
         `SELECT * FROM (
-           SELECT p.id, p.motif, p.type, p.taille, p.seuil_alerte as seuilAlerte,
+           SELECT p.id, p.modele_id as modeleId, p.motif, p.type, p.taille, p.seuil_alerte as seuilAlerte,
                   COALESCE((SELECT SUM(s.quantite) FROM stocks s WHERE s.produit_id = p.id AND s.emplacement_id IN (${placeholders})), 0) as stock
            FROM produits p
            WHERE p.deleted_at IS NULL AND p.seuil_alerte > 0
@@ -93,7 +102,7 @@ export class ProduitRepository {
          WHERE stock <= seuilAlerte
          ORDER BY stock ASC`
       )
-      .all(...depotIds) as { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
+      .all(...depotIds) as { id: string; modeleId: string | null; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
     return rows;
   }
 

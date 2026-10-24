@@ -127,6 +127,25 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
     expect(appelsFetch).toBe(2);
   });
 
+  it("RÉGRESSION bug réel (sync bloquée après plusieurs tâches) : push et pull sont bornés par un AbortSignal, jamais un fetch sans timeout", async () => {
+    const signauxRecus: (AbortSignal | undefined)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        signauxRecus.push(init?.signal ?? undefined);
+        return new Response(JSON.stringify({ results: [], operations: [], cursor: 0 }), { status: 200 });
+      })
+    );
+
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+    await service.executerSynchronisation(); // rien dans la boîte d'envoi → seul le PULL appelle fetch ici
+
+    expect(signauxRecus.length).toBeGreaterThan(0);
+    for (const signal of signauxRecus) {
+      expect(signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+
   it("TEST 5 — JWT invalide (401 du serveur) : erreur propre, opération conservée", async () => {
     const id = ajouterEntreeBoiteEnvoi();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: { code: "unauthorized" } }), { status: 401 })));

@@ -224,6 +224,52 @@ export class MouvementRepository {
   }
 
   /**
+   * Bilan d'activité (2026-10-21) — même agrégat que sommeQuantiteParType()
+   * ci-dessus (même exclusion des ventes/mouvements annulés), borné à une
+   * plage de dates LIBRE [debut, fin] inclusive, jamais filtré par
+   * utilisateur (le bilan est une vue Administrateur globale).
+   */
+  sommeQuantiteParTypeEntre(type: Mouvement["type"], debut: string, fin: string): number {
+    return (
+      this.db
+        .prepare(
+          `SELECT COALESCE(SUM(m.quantite), 0) as total FROM mouvements m
+           LEFT JOIN factures f ON f.id = m.facture_id
+           WHERE m.type = ? AND m.date >= ? AND m.date <= ?
+             AND (m.facture_id IS NULL OR f.annulee_le IS NULL) AND m.annule_le IS NULL`
+        )
+        .get(type, debut, fin) as { total: number }
+    ).total;
+  }
+
+  /**
+   * Bilan d'activité — tableau détaillé par produit (2026-10-22). Distingue,
+   * pour chaque produit et sur la période [debut, fin], les sorties liées à
+   * une vente ("vendu", `facture_id` non NULL) des sorties manuelles
+   * ("sortie", `facture_id` NULL — réassort, casse, etc.) — jamais les
+   * transferts (type différent, déjà exclus par le WHERE). Même exclusion
+   * que `sommeQuantiteParTypeEntre` ci-dessus (vente annulée, mouvement
+   * manuel lui-même annulé) : un produit totalement sans activité sur la
+   * période n'apparaît simplement pas dans la Map (0 implicite côté
+   * appelant), jamais une ligne à zéro superflue ici.
+   */
+  detailVenteSortieParProduitEntre(debut: string, fin: string): Map<string, { vendu: number; sortie: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT m.produit_id as produitId,
+           COALESCE(SUM(CASE WHEN m.facture_id IS NOT NULL THEN m.quantite ELSE 0 END), 0) as vendu,
+           COALESCE(SUM(CASE WHEN m.facture_id IS NULL THEN m.quantite ELSE 0 END), 0) as sortie
+         FROM mouvements m
+         LEFT JOIN factures f ON f.id = m.facture_id
+         WHERE m.type = 'sortie' AND m.date >= ? AND m.date <= ?
+           AND (m.facture_id IS NULL OR f.annulee_le IS NULL) AND m.annule_le IS NULL
+         GROUP BY m.produit_id`
+      )
+      .all(debut, fin) as { produitId: string; vendu: number; sortie: number }[];
+    return new Map(rows.map((r) => [r.produitId, { vendu: r.vendu, sortie: r.sortie }]));
+  }
+
+  /**
    * Série Entrées/Sorties des 7 derniers jours, un point par jour
    * (§5 de la correction — graphique du dashboard). Un jour sans
    * mouvement retourne explicitement 0, jamais une valeur inventée.

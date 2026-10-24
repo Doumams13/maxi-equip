@@ -21,7 +21,8 @@ export type TypeOperationSync =
   | "parametres_entreprise"
   | "promotion"
   | "modele"
-  | "produit";
+  | "produit"
+  | "compte";
 
 export interface OperationRecue {
   entityType: TypeOperationSync;
@@ -124,6 +125,89 @@ export interface IdentiteRow {
   updatedAt: string;
 }
 
+/**
+ * Compte utilisateur — correction "travail à distance / plusieurs
+ * machines en parallèle" (2026-10-22). Avant cette correction, un compte
+ * créé par l'Administrateur n'existait que dans le SQLite local du poste
+ * qui l'a créé (voir authService.ts côté Electron, "fonctionne entièrement
+ * hors-ligne") — inutilisable depuis un autre poste. Même mécanisme de
+ * projection idempotente que modele/produit/identite (upsert conditionné
+ * par `updatedAt`), poussé par l'écran Utilisateurs de l'app à chaque
+ * création/modification/désactivation.
+ *
+ * `hashMotDePasse` : hash Argon2id calculé CÔTÉ ELECTRON (mêmes
+ * paramètres que core/argon2Hasher.ts, voir
+ * packages/electron-app/src/main/auth/argon2Hasher.ts) — jamais le mot de
+ * passe en clair transmis à ce stade (contrairement au mot de passe de
+ * récupération d'installation, qui lui transite en clair une seule fois
+ * pour que le SERVEUR le hache lui-même, voir
+ * recuperationInstallationStore.ts : ce n'est pas le même besoin ici,
+ * l'app a déjà le hash qu'elle doit de toute façon stocker localement).
+ */
+export interface CompteCataloguePayload {
+  operation: "create" | "update" | "delete";
+  compteId: string;
+  identifiant: string;
+  hashMotDePasse: string;
+  nom: string;
+  role: string;
+  actif: boolean;
+  updatedAt: string;
+}
+
+export interface CompteRow {
+  id: string;
+  identifiant: string;
+  hashMotDePasse: string;
+  nom: string;
+  role: string;
+  actif: boolean;
+}
+
+/**
+ * Demande de validation atomique d'une opération de stock — correction
+ * "travailler en parallèle sur le même stock" (2026-10-22). AUCUNE vente
+ * ni mouvement ne doit jamais se baser sur le stock local lorsque la
+ * synchronisation est configurée (décision utilisateur explicite) : cette
+ * méthode est le SEUL endroit où une quantité de stock partagée est
+ * réellement vérifiée et décrémentée/incrémentée, dans une unique
+ * transaction serveur avec verrou de ligne — la 2ᵉ requête concurrente
+ * attend naturellement que la 1ʳᵉ ait validé/appliqué la sienne avant de
+ * vérifier à son tour (jamais une file d'attente applicative maison,
+ * jamais nécessaire : un verrou de ligne SQL suffit).
+ *
+ * `deltas` : un delta signé par (produit, emplacement) — négatif pour une
+ * sortie/vente, positif pour une entrée, DEUX lignes pour un transfert
+ * (négatif à la source, positif à la destination). Toujours exprimé en
+ * variation relative, jamais en valeur absolue (même principe que
+ * `Mouvement.quantite` côté app, voir shared-types/stock.ts).
+ *
+ * `demandeNumeroFacture` : présent uniquement pour une vente — `prefix`
+ * déjà calculé côté app (ex. "FAC-2026-", voir factureRepository.nextNumero()
+ * côté Electron — format `FAC-AAAA-XXXX` inchangé, jamais un nouveau
+ * format introduit par cette correction), le serveur attribue le
+ * PROCHAIN numéro (4 chiffres, complété de zéros à gauche) de façon
+ * atomique dans la MÊME transaction que la vérification du stock, pour
+ * que les deux garanties (pas de survente, pas de numéro de facture en
+ * double) soient obtenues ensemble ou pas du tout.
+ */
+export interface DemandeValidationStock {
+  deltas: { produitId: string; emplacementId: string; delta: number }[];
+  demandeNumeroFacture?: { prefix: string };
+}
+
+export type ResultatValidationStock =
+  | {
+      success: true;
+      numero?: string;
+      stockApres: { produitId: string; emplacementId: string; quantite: number }[];
+    }
+  | {
+      success: false;
+      raison: "stock_insuffisant";
+      details: { produitId: string; emplacementId: string; disponible: number; demande: number }[];
+    };
+
 export interface ModeleRow {
   id: string;
   motif: string;
@@ -181,6 +265,11 @@ export interface ServerStorage {
   upsertImageMeta(payload: ImageSyncPayload, fichier?: { url: string; filename: string }): Promise<{ applique: boolean }>;
   findImageFilename(imageId: string): Promise<string | null>;
   appliquerOperationIdentite(payload: IdentiteCataloguePayload): Promise<{ applique: boolean }>;
+
+  appliquerOperationCompte(payload: CompteCataloguePayload): Promise<{ applique: boolean }>;
+  trouverCompteParIdentifiant(identifiant: string): Promise<CompteRow | null>;
+
+  validerEtAppliquerOperationStock(demande: DemandeValidationStock): Promise<ResultatValidationStock>;
 
   listerModelesActifs(): Promise<ModeleRow[]>;
   listerProduitsActifs(): Promise<ProduitRow[]>;

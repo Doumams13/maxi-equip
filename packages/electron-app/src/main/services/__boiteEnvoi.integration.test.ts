@@ -32,14 +32,14 @@ function ouvrirBaseDeTest(): Database.Database {
   return db;
 }
 
-describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
+describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", async () => {
   let db: Database.Database;
   let produitId: string;
   let depotId: string;
   let depot2Id: string;
   let shopId: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     db = ouvrirBaseDeTest();
     db.prepare(
       "INSERT INTO utilisateurs (id, identifiant, nom, role, password_hash, actif, created_at, updated_at) VALUES ('u1','test','Testeur','administrateur','x',1,?,?)"
@@ -65,7 +65,7 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
     });
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     db.close();
     if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
   });
@@ -81,10 +81,10 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
     return { stockService, venteService, boiteEnvoiRepository, stockRepository, mouvementRepository, factureRepository };
   }
 
-  it("TEST 2 — une entrée de stock crée une entrée pending dans la boîte d'envoi, avec le bon UUID", () => {
+  it("TEST 2 — une entrée de stock crée une entrée pending dans la boîte d'envoi, avec le bon UUID", async () => {
     const { stockService, boiteEnvoiRepository, stockRepository } = construireServices(db);
 
-    stockService.enregistrerEntree(produitId, depotId, 100, "u1");
+    await stockService.enregistrerEntree(produitId, depotId, 100, "u1");
 
     expect(stockRepository.getQuantite(produitId, depotId)).toBe(100);
     const enAttente = boiteEnvoiRepository.listerEnAttente().filter((e) => e.entityType === "entree");
@@ -98,10 +98,10 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
     expect(enAttente[0]!.entityId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it("TEST 3 — un transfert crée une entrée boîte d'envoi et les stocks source/destination restent cohérents", () => {
+  it("TEST 3 — un transfert crée une entrée boîte d'envoi et les stocks source/destination restent cohérents", async () => {
     const { stockService, boiteEnvoiRepository, stockRepository } = construireServices(db);
 
-    stockService.enregistrerTransfert(produitId, depotId, depot2Id, 30, "u1");
+    await stockService.enregistrerTransfert(produitId, depotId, depot2Id, 30, "u1");
 
     expect(stockRepository.getQuantite(produitId, depotId)).toBe(70); // 100 - 30
     expect(stockRepository.getQuantite(produitId, depot2Id)).toBe(30);
@@ -115,10 +115,10 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
 
   let factureId: string;
 
-  it("TEST 1 — une vente crée facture + mouvement + stock + une entrée boîte d'envoi cohérente", () => {
+  it("TEST 1 — une vente crée facture + mouvement + stock + une entrée boîte d'envoi cohérente", async () => {
     const { venteService, boiteEnvoiRepository, stockRepository, factureRepository } = construireServices(db);
 
-    const resultat = venteService.enregistrerVente({
+    const resultat = await venteService.enregistrerVente({
       pointDeVenteId: shopId,
       clientNom: "Client Test",
       clientTelephone: "077000000",
@@ -150,10 +150,10 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
     expect(payload.mouvementIds).toHaveLength(1);
   });
 
-  it("TEST 4 — une annulation crée sa PROPRE entrée boîte d'envoi, distincte de celle de la vente d'origine", () => {
+  it("TEST 4 — une annulation crée sa PROPRE entrée boîte d'envoi, distincte de celle de la vente d'origine", async () => {
     const { venteService, boiteEnvoiRepository, stockRepository } = construireServices(db);
 
-    venteService.annulerVente(factureId, "Test d'annulation Phase 3.3", "u1");
+    await venteService.annulerVente(factureId, "Test d'annulation Phase 3.3", "u1");
 
     // Stock restauré (60 + 10 restaurés = 70).
     expect(stockRepository.getQuantite(produitId, depotId)).toBe(70);
@@ -169,11 +169,11 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
     expect(entreeVente[0]!.status).toBe("pending");
   });
 
-  it("TEST 4b — une sortie de stock crée une entrée boîte d'envoi de type 'sortie' avec quantite positive", () => {
+  it("TEST 4b — une sortie de stock crée une entrée boîte d'envoi de type 'sortie' avec quantite positive", async () => {
     const { stockService, boiteEnvoiRepository, stockRepository, mouvementRepository } = construireServices(db);
 
     // Après annulation (TEST 4), depotId a 70 cartons restaurés.
-    stockService.enregistrerSortie(produitId, depotId, 20, "u1");
+    await stockService.enregistrerSortie(produitId, depotId, 20, "u1");
 
     expect(stockRepository.getQuantite(produitId, depotId)).toBe(50);
     const enAttente = boiteEnvoiRepository.listerEnAttente().filter((e) => e.entityType === "sortie");
@@ -193,14 +193,14 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
     expect(sorties[0]!.quantite).toBe(20);
   });
 
-  it("TEST 5 (sans internet) — aucune opération n'a nécessité de réseau : toutes les opérations ci-dessus se sont exécutées sans jamais appeler fetch/http", () => {
+  it("TEST 5 (sans internet) — aucune opération n'a nécessité de réseau : toutes les opérations ci-dessus se sont exécutées sans jamais appeler fetch/http", async () => {
     // Vérifié structurellement : StockService et VenteService n'importent
     // aucun module réseau (voir l'audit Phase 3, §6 : confirmé par
     // recherche exhaustive). Ce test documente explicitement l'attente.
     expect(true).toBe(true);
   });
 
-  it("filet de sécurité — enregistrerErreur incrémente bien les tentatives et bascule le statut", () => {
+  it("filet de sécurité — enregistrerErreur incrémente bien les tentatives et bascule le statut", async () => {
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
     const id = boiteEnvoiRepository.creer("entree", "test-entity", { test: true });
     boiteEnvoiRepository.enregistrerErreur(id, "Erreur simulée pour test");
@@ -210,7 +210,7 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
     expect(entree!.lastError).toBe("Erreur simulée pour test");
   });
 
-  it("compterParStatut reflète correctement la répartition réelle", () => {
+  it("compterParStatut reflète correctement la répartition réelle", async () => {
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
     const compteurs = boiteEnvoiRepository.compterParStatut();
     expect(compteurs["pending"]).toBeGreaterThanOrEqual(4); // entree, transfert, vente, annulation
@@ -218,10 +218,10 @@ describe("Boîte d'envoi locale — Phase 3.3 (base SQLite réelle)", () => {
   });
 });
 
-describe("TEST 6 — persistance réelle après fermeture/réouverture de la base", () => {
+describe("TEST 6 — persistance réelle après fermeture/réouverture de la base", async () => {
   const cheminPersistance = join(tmpdir(), "test-boite-envoi-persistance.sqlite");
 
-  it("les entrées de la boîte d'envoi et les UUID survivent à une vraie fermeture/réouverture de connexion", () => {
+  it("les entrées de la boîte d'envoi et les UUID survivent à une vraie fermeture/réouverture de connexion", async () => {
     if (existsSync(cheminPersistance)) unlinkSync(cheminPersistance);
 
     // --- Première "session" : créer des données puis fermer la connexion, comme au redémarrage de l'application. ---
@@ -249,7 +249,7 @@ describe("TEST 6 — persistance réelle après fermeture/réouverture de la bas
 
     const boiteEnvoiRepository1 = new BoiteEnvoiRepository(db);
     const stockService1 = new StockService(db, new StockRepository(db), new MouvementRepository(db), boiteEnvoiRepository1);
-    stockService1.enregistrerEntree(produitId, depot.id, 50, "u1");
+    await stockService1.enregistrerEntree(produitId, depot.id, 50, "u1");
 
     const entreesAvant = boiteEnvoiRepository1.listerEnAttente();
     expect(entreesAvant).toHaveLength(1);

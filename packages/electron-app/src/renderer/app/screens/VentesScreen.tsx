@@ -24,10 +24,20 @@ interface LigneVenteForm {
   allocations: Record<string, string>;
   fournisseurExterne: string;
   prixAchatExterne: string;
+  /**
+   * Correction "Ajoute un champ de dimension qui calcule le nombre de
+   * cartons" (2026-10-21) — surface totale souhaitée par le client, en m².
+   * Purement un OUTIL DE SAISIE : modifie `quantite` (nombre de cartons,
+   * arrondi au carton supérieur — on ne vend jamais un demi-carton), mais
+   * n'est elle-même jamais transmise à la vente (voir handleConfirmerVente,
+   * qui ne lit que `quantite`). Non applicable (champ désactivé) pour un
+   * produit sans carreauxParCarton/dimensions connus, voir surfaceCartonProduit.
+   */
+  surfaceSouhaitee: string;
 }
 
 function ligneVide(): LigneVenteForm {
-  return { produitId: "", quantite: "1", prixUnitaire: "", allocations: {}, fournisseurExterne: "", prixAchatExterne: "" };
+  return { produitId: "", quantite: "1", prixUnitaire: "", allocations: {}, fournisseurExterne: "", prixAchatExterne: "", surfaceSouhaitee: "" };
 }
 
 const inputStyle: React.CSSProperties = {
@@ -296,6 +306,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
         allocations: Object.fromEntries(l.allocationsDepots.map((a) => [a.emplacementId, String(a.quantite)])),
         fournisseurExterne: l.fournisseurExterne ?? "",
         prixAchatExterne: l.prixAchatExterne !== null ? String(l.prixAchatExterne) : "",
+        surfaceSouhaitee: "",
       }));
       setLignes(lignesChargees);
       // Cliché des données telles que chargées initialement — jamais
@@ -366,6 +377,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
             allocations: {},
             fournisseurExterne: "",
             prixAchatExterne: "",
+            surfaceSouhaitee: "",
           };
         });
         setLignes(lignesChargees.length > 0 ? lignesChargees : [ligneVide()]);
@@ -476,8 +488,11 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
       showWarning("Client requis", "Veuillez renseigner le nom du client.");
       return;
     }
-    if (!clientTelephone.trim() || !validerTelephone(clientTelephone)) {
-      showWarning("Téléphone requis", "Le numéro de téléphone du client est obligatoire et doit être valide.");
+    // Correction "Rendre le numéro de téléphone facultatif" (2026-10-21) :
+    // un champ vide est désormais accepté — seul un numéro RENSEIGNÉ doit
+    // être valide (comportement historique : toujours obligatoire).
+    if (clientTelephone.trim() && !validerTelephone(clientTelephone)) {
+      showWarning("Téléphone invalide", "Le numéro de téléphone du client, s'il est renseigné, doit être valide.");
       return;
     }
     const lignesValides = lignes.filter((l) => l.produitId && Number(l.quantite) > 0);
@@ -515,7 +530,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
       const result = await window.maxiEquip.enregistrerVente({
         pointDeVenteId,
         clientNom: clientNom.trim(),
-        clientTelephone: clientTelephone.trim(),
+        clientTelephone: clientTelephone.trim() || null,
         clientAdresse: null,
         vendeurUtilisateurId: session.userId,
         vendeurCompteConnecteNom: session.nom,
@@ -593,14 +608,13 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
             </div>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                Téléphone <span style={{ color: defaultTokens.colors.danger }}>*</span>
+                Téléphone <span style={{ color: defaultTokens.colors.textFaint, fontWeight: 400 }}>(facultatif)</span>
               </label>
               <input
                 style={{ ...inputStyle, borderColor: clientTelephone && !validerTelephone(clientTelephone) ? defaultTokens.colors.danger : defaultTokens.colors.border }}
                 value={clientTelephone}
                 onChange={(e) => setClientTelephone(e.target.value)}
                 placeholder="Ex. 077 12 34 56"
-                required
               />
             </div>
             <div>
@@ -623,9 +637,14 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {lignes.map((ligne, index) => {
               const externe = quantiteExterne(ligne);
+              // Correction "synchroniser quantité ↔ surface souhaitée dans les deux
+              // sens" (2026-10-21) — calculé une seule fois ici, réutilisé par les
+              // deux champs (Quantité et Surface souhaitée, voir plus bas).
+              const produitLigne = produits.find((p) => p.id === ligne.produitId);
+              const surfaceCartonLigne = surfaceCartonProduit(produitLigne);
               return (
                 <div key={index} style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.md, padding: 12 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
                     <div>
                       <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Produit</label>
                       <ProduitSelector produits={produits} value={ligne.produitId} onChange={(id) => handleProduitChange(index, id)} />
@@ -639,7 +658,39 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
                         value={ligne.quantite}
                         onChange={(e) => {
                           const brut = e.target.value;
-                          updateLigne(index, { quantite: brut === "" ? "" : String(Math.max(1, Math.trunc(Number(brut)))) });
+                          const quantiteNormalisee = brut === "" ? "" : String(Math.max(1, Math.trunc(Number(brut))));
+                          // Correction "synchroniser quantité ↔ surface souhaitée dans
+                          // les deux sens" (2026-10-21) : une quantité saisie
+                          // manuellement recalcule la surface correspondante (jamais
+                          // l'inverse — on ne devine jamais un arrondi à rebours),
+                          // uniquement quand la surface d'un carton est connue.
+                          const surfaceRecalculee =
+                            surfaceCartonLigne !== null && quantiteNormalisee !== ""
+                              ? String(Math.round(Number(quantiteNormalisee) * surfaceCartonLigne * 100) / 100)
+                              : "";
+                          updateLigne(index, { quantite: quantiteNormalisee, surfaceSouhaitee: surfaceRecalculee });
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Surface souhaitée (m²)</label>
+                      <input
+                        style={{ ...inputStyle, opacity: surfaceCartonLigne === null ? 0.5 : 1 }}
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        disabled={surfaceCartonLigne === null}
+                        title={surfaceCartonLigne === null ? "Carreaux/carton ou dimensions non renseignés pour ce produit" : undefined}
+                        value={ligne.surfaceSouhaitee}
+                        onChange={(e) => {
+                          const brut = e.target.value;
+                          if (surfaceCartonLigne === null) return;
+                          const m2 = Number(brut) || 0;
+                          const nombreCartons = m2 > 0 ? Math.ceil(m2 / surfaceCartonLigne) : 0;
+                          updateLigne(index, {
+                            surfaceSouhaitee: brut,
+                            quantite: nombreCartons > 0 ? String(nombreCartons) : ligne.quantite,
+                          });
                         }}
                       />
                     </div>
@@ -842,7 +893,25 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
                     <div style={{ fontSize: 16, fontWeight: 800 }}>Solde restant : {Math.max(0, totalNet - acompteValeur).toLocaleString("fr-FR")} FCFA</div>
                   </>
                 ) : (
-                  <div style={{ fontSize: 16, fontWeight: 800 }}>Total Net à payer : {totalNet.toLocaleString("fr-FR")} FCFA</div>
+                  <div>
+                    {/* Correction "Total net à payer modifiable" (2026-10-21) : modifiable
+                        dans les deux sens avec la Remise, même principe que Prix/m² ↔
+                        Prix/carton déjà existant sur l'écran Carreaux — une seule source
+                        de vérité (`remise`), jamais un second état qui pourrait diverger. */}
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Total Net à payer (FCFA)</label>
+                    <input
+                      style={{ ...inputStyle, width: 150, fontSize: 16, fontWeight: 800, borderColor: remiseDepasseLeTotal ? defaultTokens.colors.danger : defaultTokens.colors.border }}
+                      type="number"
+                      min={0}
+                      max={total}
+                      value={totalNet}
+                      onChange={(e) => {
+                        const brut = e.target.value;
+                        const totalNetSaisi = brut === "" ? 0 : Math.max(0, Number(brut));
+                        setRemise(String(Math.max(0, total - totalNetSaisi)));
+                      }}
+                    />
+                  </div>
                 )}
               </div>
             </div>

@@ -11,11 +11,14 @@ import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 import { PromotionRepository } from "../repositories/promotionRepository.js";
 import { StockService, StockValidationError } from "../services/stockService.js";
 import { VenteService, VenteValidationError, type VenteInput } from "../services/venteService.js";
+import { ConnexionRequiseError } from "../services/validationStockDistanteService.js";
 import { ImageService } from "../services/imageService.js";
 import { SessionManager } from "../auth/sessionManager.js";
 import { anonymiserActivite, anonymiserFactures } from "../services/visibiliteService.js";
 import { genererFacturePdf } from "../services/factureDocumentService.js";
 import { genererDocumentInternePdf } from "../services/documentInterneDocumentService.js";
+import { genererBilanPdf } from "../services/bilanDocumentService.js";
+import { checkAdminGuard } from "../auth/checkAdminGuard.js";
 import { stock as domainStock } from "@maxi-equip/domain";
 import type { ModeleProduit, Produit } from "@maxi-equip/shared-types";
 
@@ -318,33 +321,33 @@ export function registerMetierIpcHandlers(
   // --- Stock ---
   ipcMain.handle("stock:byEmplacement", (_e, emplacementId: string) => stockRepository.listByEmplacement(emplacementId));
 
-  ipcMain.handle("stock:entree", (_e, produitId: string, emplacementId: string, quantite: number) => {
+  ipcMain.handle("stock:entree", async (_e, produitId: string, emplacementId: string, quantite: number) => {
     const session = sessionManager.get();
     if (!session) return { success: false, reason: { code: "UNKNOWN" as const, message: "Session expirée. Veuillez vous reconnecter." } };
     try {
-      stockService.enregistrerEntree(produitId, emplacementId, quantite, session.userId);
+      await stockService.enregistrerEntree(produitId, emplacementId, quantite, session.userId);
       return { success: true };
     } catch (err) {
       return { success: false, reason: mapStockError(err) };
     }
   });
 
-  ipcMain.handle("stock:sortie", (_e, produitId: string, emplacementId: string, quantite: number) => {
+  ipcMain.handle("stock:sortie", async (_e, produitId: string, emplacementId: string, quantite: number) => {
     const session = sessionManager.get();
     if (!session) return { success: false, reason: { code: "UNKNOWN" as const, message: "Session expirée. Veuillez vous reconnecter." } };
     try {
-      stockService.enregistrerSortie(produitId, emplacementId, quantite, session.userId);
+      await stockService.enregistrerSortie(produitId, emplacementId, quantite, session.userId);
       return { success: true };
     } catch (err) {
       return { success: false, reason: mapStockError(err) };
     }
   });
 
-  ipcMain.handle("stock:transfert", (_e, produitId: string, sourceId: string, destinationId: string, quantite: number) => {
+  ipcMain.handle("stock:transfert", async (_e, produitId: string, sourceId: string, destinationId: string, quantite: number) => {
     const session = sessionManager.get();
     if (!session) return { success: false, reason: { code: "UNKNOWN" as const, message: "Session expirée. Veuillez vous reconnecter." } };
     try {
-      stockService.enregistrerTransfert(produitId, sourceId, destinationId, quantite, session.userId);
+      await stockService.enregistrerTransfert(produitId, sourceId, destinationId, quantite, session.userId);
       return { success: true };
     } catch (err) {
       return { success: false, reason: mapStockError(err) };
@@ -370,7 +373,7 @@ export function registerMetierIpcHandlers(
   });
 
   // --- Ventes ---
-  ipcMain.handle("ventes:create", (_e, input: VenteInput) => {
+  ipcMain.handle("ventes:create", async (_e, input: VenteInput) => {
     const session = sessionManager.get();
     if (!session) return { success: false, reason: { code: "UNKNOWN" as const, message: "Session expirée. Veuillez vous reconnecter." } };
     try {
@@ -378,7 +381,7 @@ export function registerMetierIpcHandlers(
       // authentifiée, jamais une valeur transmise par le Renderer — seul
       // `vendeurNomManuel` (précision d'affichage, pas d'identité) reste
       // du ressort du Renderer.
-      const result = venteService.enregistrerVente({ ...input, vendeurUtilisateurId: session.userId });
+      const result = await venteService.enregistrerVente({ ...input, vendeurUtilisateurId: session.userId });
       return { success: true, ...result };
     } catch (err) {
       return { success: false, reason: mapStockError(err) };
@@ -419,7 +422,14 @@ export function registerMetierIpcHandlers(
           ? session.userId
           : filtres.vendeurUtilisateurId;
 
-      const { resultats, totalResultats } = factureRepository.listAvecVendeurPagine({ ...filtres, vendeurUtilisateurId: vendeurSecurise });
+      const { resultats, totalResultats } = factureRepository.listAvecVendeurPagine({
+        ...filtres,
+        vendeurUtilisateurId: vendeurSecurise,
+        // Même garde que vendeurSecurise ci-dessus : seul un
+        // Administrateur peut rechercher par nom de vendeur, jamais un
+        // Gérant (voir le commentaire de listAvecVendeurPagine).
+        inclureVendeurDansRecherche: session?.role === "administrateur",
+      });
       const resultatsAnonymises = session ? anonymiserFactures(resultats, session) : resultats;
       return {
         resultats: resultatsAnonymises,
@@ -535,6 +545,91 @@ export function registerMetierIpcHandlers(
       // eslint-disable-next-line no-console
       console.error("[factures] génération document interne impossible :", err);
       return { success: false, message: "Impossible de générer le document interne." };
+    }
+  });
+
+  /**
+   * Bilan d'activité (2026-10-21) — réservé à l'Administrateur
+   * (checkAdminGuard, même garde que backup/utilisateurs). `debut`/`fin`
+   * sont des bornes ISO [debut, fin] inclusives, choisies par
+   * BilanScreen.tsx (boutons rapides ou plage personnalisée) — jamais
+   * recalculées ici, pour que l'écran et le PDF portent STRICTEMENT sur
+   * la même période.
+   */
+  function calculerBilan(debut: string, fin: string) {
+    const emplacements = emplacementRepository.list();
+    // Même décision que le dashboard : SHOP n'a pas de stock (Phase 2 §3/§7).
+    const depots = emplacements.filter((e) => !e.estPointDeVente);
+    const depotIds = depots.map((e) => e.id);
+
+    // Tableau détaillé par produit (2026-10-22) — une seule requête par
+    // dépôt (jamais une par produit) pour construire la matrice
+    // produit × dépôt, voir stockRepository.listByEmplacement. "Vendu"/
+    // "Sortie" viennent d'une seule requête groupée côté
+    // MouvementRepository, jamais recalculées produit par produit.
+    const stockParDepot = new Map(depots.map((e) => [e.id, new Map(stockRepository.listByEmplacement(e.id).map((r) => [r.produitId, r.quantite]))]));
+    const ventesSortiesParProduit = mouvementRepository.detailVenteSortieParProduitEntre(debut, fin);
+    const detailProduits = produitRepository.list().map((p) => {
+      const activite = ventesSortiesParProduit.get(p.id);
+      return {
+        produitId: p.id,
+        motif: p.motif,
+        taille: p.taille,
+        reference: p.reference,
+        stockParEmplacement: depots.map((e) => ({ emplacementId: e.id, cartons: stockParDepot.get(e.id)?.get(p.id) ?? 0 })),
+        vendu: activite?.vendu ?? 0,
+        sortie: activite?.sortie ?? 0,
+      };
+    });
+
+    return {
+      ventes: factureRepository.bilanVentesEntre(debut, fin),
+      topProduits: factureRepository.topProduitsVendusEntre(debut, fin, 10),
+      mouvements: {
+        totalEntrees: mouvementRepository.sommeQuantiteParTypeEntre("entree", debut, fin),
+        totalSorties: mouvementRepository.sommeQuantiteParTypeEntre("sortie", debut, fin),
+      },
+      stockParEmplacement: depots.map((e) => ({
+        emplacementId: e.id,
+        nom: e.nom,
+        cartons: stockRepository.listByEmplacement(e.id).reduce((s, r) => s + r.quantite, 0),
+      })),
+      produitsSousSeuilCount: produitRepository.countSousSeuilDepots(depotIds),
+      promotionsActivesPendantPeriode: promotionRepository ? promotionRepository.compterChevauchantPeriode(debut, fin) : 0,
+      depots: depots.map((e) => ({ id: e.id, nom: e.nom })),
+      detailProduits,
+    };
+  }
+
+  ipcMain.handle("bilan:generer", (_e, input: { debut: string; fin: string }) => {
+    const guard = checkAdminGuard(sessionManager);
+    if (!guard.ok) return { success: false as const, message: guard.message };
+    return { success: true as const, ...calculerBilan(input.debut, input.fin) };
+  });
+
+  ipcMain.handle("bilan:genererPdf", async (_e, input: { debut: string; fin: string; periodeLibelle: string }) => {
+    const guard = checkAdminGuard(sessionManager);
+    if (!guard.ok) return { success: false, message: guard.message };
+    try {
+      const bilan = calculerBilan(input.debut, input.fin);
+      const identite = parametresRepository.getIdentite();
+      const chemin = await genererBilanPdf({
+        identite,
+        periodeLibelle: input.periodeLibelle,
+        ventes: bilan.ventes,
+        topProduits: bilan.topProduits,
+        mouvements: bilan.mouvements,
+        stockParEmplacement: bilan.stockParEmplacement,
+        produitsSousSeuilCount: bilan.produitsSousSeuilCount,
+        promotionsActivesPendantPeriode: bilan.promotionsActivesPendantPeriode,
+        depots: bilan.depots,
+        detailProduits: bilan.detailProduits,
+      });
+      return { success: true, chemin, nomSuggere: `bilan-${input.debut.slice(0, 10)}-au-${input.fin.slice(0, 10)}.pdf` };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[bilan] génération PDF impossible :", err);
+      return { success: false, message: "Impossible de générer le bilan." };
     }
   });
 
@@ -787,14 +882,17 @@ export function registerMetierIpcHandlers(
     }
   });
 
-  ipcMain.handle("factures:annuler", (_e, factureId: string, motif: string) => {
+  ipcMain.handle("factures:annuler", async (_e, factureId: string, motif: string) => {
     const session = sessionManager.get();
     if (!session) return { success: false, message: "Session expirée." };
     try {
-      venteService.annulerVente(factureId, motif, session.userId);
+      await venteService.annulerVente(factureId, motif, session.userId);
       return { success: true };
     } catch (err) {
-      const message = err instanceof VenteValidationError ? err.message : "Une erreur inattendue s'est produite.";
+      // Correction "travailler en parallèle sur le même stock" (2026-10-22) :
+      // réutilise mapStockError pour que ConnexionRequiseError (serveur
+      // injoignable) affiche aussi son message réel, jamais le générique.
+      const message = err instanceof VenteValidationError ? err.message : mapStockError(err).message;
       return { success: false, message };
     }
   });
@@ -940,6 +1038,15 @@ export function registerMetierIpcHandlers(
     const factures = factureRepository.list(200); // fenêtre raisonnable pour les agrégats "aujourd'hui" en Phase 2
     const aujourdhui = new Date().toDateString();
     const facturesAujourdhui = factures.filter((f) => new Date(f.date).toDateString() === aujourdhui);
+    // Correction "voir le revenu journalier et mensuel" (2026-10-21) — "Mon
+    // CA du mois" (Gérant) reste calculé depuis la fenêtre en mémoire déjà
+    // chargée ci-dessus (comme mesVentesAujourdhui/monChiffreAffaires) :
+    // le volume de ventes d'UN SEUL vendeur sur un mois ne dépasse
+    // raisonnablement jamais 200 factures, contrairement au CA GLOBAL
+    // (voir factureRepository.sommeTotalJourCourant/MoisCourant ci-dessous,
+    // qui interrogent la base entière, jamais limitées à cette fenêtre).
+    const moisCourant = new Date().toISOString().slice(0, 7);
+    const facturesMoisCourant = factures.filter((f) => f.date.slice(0, 7) === moisCourant);
 
     const stockDepots = depots.reduce((s, e) => s + stockRepository.listByEmplacement(e.id).reduce((a, r) => a + r.quantite, 0), 0);
     const stockParEmplacement = depots.map((e) => {
@@ -956,6 +1063,8 @@ export function registerMetierIpcHandlers(
       // Administrateur — vue globale (ligne 1)
       stockTousDepots: stockDepots,
       caTotal: factureRepository.sommeTotal(),
+      caJour: factureRepository.sommeTotalJourCourant(),
+      caMois: factureRepository.sommeTotalMoisCourant().total,
       produitsSousSeuilGlobal: produitRepository.countSousSeuilDepots(depotIds),
       totalFactures: factureRepository.count(),
       totalProduits: produitRepository.count(),
@@ -967,7 +1076,10 @@ export function registerMetierIpcHandlers(
       serieEntreesSorties: mouvementRepository.serieEntreesSortiesSeptJours(),
       stockParEmplacement,
       topProduitsVendus: factureRepository.topProduitsVendus(5),
-      produitsSousSeuilListe: produitRepository.listSousSeuilDepots(depotIds).slice(0, 6),
+      // Correction "liste des alertes incomplète" (2026-10-22) — toutes les
+      // alertes sont renvoyées (plus de troncature à 6) : l'écran affiche
+      // désormais la liste complète dans une zone à défilement.
+      produitsSousSeuilListe: produitRepository.listSousSeuilDepots(depotIds),
 
       // Activité récente — GLOBALE pour les deux rôles (§3/§14 de la
       // correction : le Gérant voit toute l'activité opérationnelle),
@@ -987,6 +1099,7 @@ export function registerMetierIpcHandlers(
       // indicateur global ambigu du même type).
       mesVentesAujourdhui: facturesAujourdhui.filter((f) => f.vendeurUtilisateurId === userId).reduce((s, f) => s + f.total, 0),
       monChiffreAffaires: factures.filter((f) => f.vendeurUtilisateurId === userId).reduce((s, f) => s + f.total, 0),
+      monChiffreAffairesMois: facturesMoisCourant.filter((f) => f.vendeurUtilisateurId === userId).reduce((s, f) => s + f.total, 0),
       mesFacturesAujourdhuiCount: facturesAujourdhui.filter((f) => f.vendeurUtilisateurId === userId).length,
       mesEntrees: mouvementRepository.sommeQuantiteParType("entree", userId),
       mesSorties: mouvementRepository.sommeQuantiteParType("sortie", userId),
@@ -1037,7 +1150,7 @@ export function enqueueProduitSync(boiteEnvoiRepository: BoiteEnvoiRepository, p
   });
 }
 
-type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "UNKNOWN";
+type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "CONNEXION_REQUISE" | "UNKNOWN";
 
 function mapStockError(err: unknown): { code: StockErrorReason; message: string; available?: number; requested?: number } {
   if (err instanceof domainStock.InsufficientStockError) {
@@ -1045,6 +1158,13 @@ function mapStockError(err: unknown): { code: StockErrorReason; message: string;
   }
   if (err instanceof domainStock.InvalidQuantityError) {
     return { code: "INVALID_QUANTITY", message: err.message };
+  }
+  // Correction "travailler en parallèle sur le même stock" (2026-10-22) —
+  // la synchronisation est configurée mais le serveur central est
+  // injoignable/en erreur : jamais confondu avec un stock insuffisant
+  // (ValidationStockDistanteService.valider côté app).
+  if (err instanceof ConnexionRequiseError) {
+    return { code: "CONNEXION_REQUISE", message: err.message };
   }
   if (err instanceof VenteValidationError || err instanceof StockValidationError) {
     return { code: "VALIDATION_ERROR", message: err.message };

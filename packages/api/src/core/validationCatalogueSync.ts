@@ -1,6 +1,7 @@
 import { ValidationError } from "./errors.js";
 import type { ModeleCataloguePayload, ProduitCataloguePayload, PromotionCataloguePayload, ImageSyncPayload } from "./catalogStore.js";
 import type { IdentiteCataloguePayload } from "./identiteStore.js";
+import type { CompteCataloguePayload } from "./compteStore.js";
 
 /**
  * Validation stricte des opérations catalogue reçues (modèle, produit,
@@ -154,6 +155,39 @@ export function validerOperationIdentite(payload: unknown): IdentiteCataloguePay
     telephones,
     whatsapp: texteOuVide(payload["whatsapp"], "whatsapp", 50),
     email: texteOuVide(payload["email"], "email", 200),
+    updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
+  };
+}
+
+const ROLES = new Set(["administrateur", "gerant"]);
+
+/**
+ * Compte utilisateur — correction "travail à distance / plusieurs
+ * machines en parallèle" (2026-10-22). `hashMotDePasse` est un hash
+ * Argon2id déjà calculé côté Electron (jamais un mot de passe en clair
+ * ici, voir serverStorage.ts/CompteCataloguePayload) — ce champ n'est
+ * donc volontairement PAS limité en longueur par `texte()` (un hash
+ * encodé Argon2id dépasse largement 200 caractères).
+ */
+export function validerOperationCompte(payload: unknown): CompteCataloguePayload {
+  if (!estObjetPlain(payload)) throw new ValidationError("Le payload 'compte' doit être un objet.");
+  const role = payload["role"];
+  if (typeof role !== "string" || !ROLES.has(role)) {
+    throw new ValidationError("Le champ 'role' doit être 'administrateur' ou 'gerant'.");
+  }
+  const hashMotDePasse = payload["hashMotDePasse"];
+  if (typeof hashMotDePasse !== "string" || hashMotDePasse.length === 0) {
+    throw new ValidationError("Le champ 'hashMotDePasse' est obligatoire.");
+  }
+
+  return {
+    operation: operation(payload["operation"]),
+    compteId: uuid(payload["compteId"], "compteId"),
+    identifiant: texte(payload["identifiant"], "identifiant", 100),
+    hashMotDePasse,
+    nom: texte(payload["nom"], "nom", 150),
+    role,
+    actif: Boolean(payload["actif"]),
     updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
   };
 }

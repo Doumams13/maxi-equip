@@ -378,6 +378,174 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
       expect(await storage.getRecuperationCleChiffreeCloudBackup()).toBe(blobCloudBackup);
     });
   });
+
+  describe("Comptes utilisateurs centralisés (réel PostgreSQL) — correction 'travail à distance' (2026-10-22)", () => {
+    const COMPTE_1 = uuidDeterministe("501");
+    const COMPTE_2 = uuidDeterministe("502");
+
+    it("appliquerOperationCompte crée le compte, retrouvable ensuite par identifiant", async () => {
+      await storage.appliquerOperationCompte({
+        operation: "create",
+        compteId: COMPTE_1,
+        identifiant: "admin.test",
+        hashMotDePasse: "$argon2id$hash-admin",
+        nom: "Jean Dupont",
+        role: "administrateur",
+        actif: true,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      const compte = await storage.trouverCompteParIdentifiant("admin.test");
+      expect(compte).toMatchObject({ id: COMPTE_1, identifiant: "admin.test", nom: "Jean Dupont", role: "administrateur", actif: true });
+    });
+
+    it("trouverCompteParIdentifiant renvoie null pour un identifiant inconnu", async () => {
+      expect(await storage.trouverCompteParIdentifiant("inconnu.jamais.cree")).toBeNull();
+    });
+
+    it("une modification plus récente écrase les champs (upsert conditionné par updatedAt, même principe que modele/produit)", async () => {
+      await storage.appliquerOperationCompte({
+        operation: "update",
+        compteId: COMPTE_1,
+        identifiant: "admin.test",
+        hashMotDePasse: "$argon2id$nouveau-hash",
+        nom: "Jean Dupont",
+        role: "administrateur",
+        actif: false,
+        updatedAt: "2026-02-01T00:00:00.000Z",
+      });
+      const compte = await storage.trouverCompteParIdentifiant("admin.test");
+      expect(compte).toMatchObject({ hashMotDePasse: "$argon2id$nouveau-hash", actif: false });
+    });
+
+    it("une modification PLUS ANCIENNE que la version déjà stockée est ignorée (jamais de recul dans le temps)", async () => {
+      const { applique } = await storage.appliquerOperationCompte({
+        operation: "update",
+        compteId: COMPTE_1,
+        identifiant: "admin.test",
+        hashMotDePasse: "$argon2id$hash-perime",
+        nom: "Jean Dupont",
+        role: "administrateur",
+        actif: true,
+        updatedAt: "2026-01-15T00:00:00.000Z",
+      });
+      expect(applique).toBe(false);
+      expect((await storage.trouverCompteParIdentifiant("admin.test"))?.actif).toBe(false);
+    });
+
+    it("un compte 'delete' (deleted_at renseigné) n'est plus retrouvé par identifiant", async () => {
+      await storage.appliquerOperationCompte({
+        operation: "create",
+        compteId: COMPTE_2,
+        identifiant: "gerant.test",
+        hashMotDePasse: "$argon2id$hash-gerant",
+        nom: "Awa Ndiaye",
+        role: "gerant",
+        actif: true,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      expect(await storage.trouverCompteParIdentifiant("gerant.test")).not.toBeNull();
+
+      await storage.appliquerOperationCompte({
+        operation: "delete",
+        compteId: COMPTE_2,
+        identifiant: "gerant.test",
+        hashMotDePasse: "$argon2id$hash-gerant",
+        nom: "Awa Ndiaye",
+        role: "gerant",
+        actif: true,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      expect(await storage.trouverCompteParIdentifiant("gerant.test")).toBeNull();
+    });
+  });
+
+  describe("Validation atomique du stock partagé (réel PostgreSQL) — correction 'travailler en parallèle' (2026-10-22)", () => {
+    const PRODUIT_STOCK_1 = uuidDeterministe("601");
+    const DEPOT_AKEBE = uuidDeterministe("602");
+    const DEPOT_AKANDA = uuidDeterministe("603");
+
+    it("une entrée (delta positif) sur un produit jamais vu crée la ligne de stock à partir de 0", async () => {
+      const resultat = await storage.validerEtAppliquerOperationStock({
+        deltas: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, delta: 10 }],
+      });
+      expect(resultat).toMatchObject({ success: true, stockApres: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, quantite: 10 }] });
+    });
+
+    it("une sortie (delta négatif) dans la limite du stock disponible est acceptée et décrémente réellement", async () => {
+      const resultat = await storage.validerEtAppliquerOperationStock({
+        deltas: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, delta: -4 }],
+      });
+      expect(resultat).toMatchObject({ success: true, stockApres: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, quantite: 6 }] });
+    });
+
+    it("une sortie qui dépasserait le stock disponible est REFUSÉE et ne modifie rien", async () => {
+      const resultat = await storage.validerEtAppliquerOperationStock({
+        deltas: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, delta: -100 }],
+      });
+      expect(resultat).toMatchObject({ success: false, raison: "stock_insuffisant", details: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, disponible: 6, demande: 100 }] });
+
+      // Le refus d'UNE ligne annule TOUTE la demande (transaction unique) —
+      // vérifié ici avec un transfert (2 lignes : source OK, destination
+      // insuffisante côté source) pour prouver qu'aucune des deux n'est
+      // appliquée partiellement.
+      const transfert = await storage.validerEtAppliquerOperationStock({
+        deltas: [
+          { produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, delta: -1 }, // source, suffisant
+          { produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKANDA, delta: -5 }, // destination inexistante, insuffisant
+        ],
+      });
+      expect(transfert.success).toBe(false);
+      // Delta nul : relit le stock actuel sans le modifier — Akébé doit
+      // rester à 6, jamais décrémenté par le transfert refusé ci-dessus.
+      const stockAkebeInchange = await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, delta: 0 }] });
+      expect(stockAkebeInchange).toMatchObject({ success: true, stockApres: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, quantite: 6 }] });
+    });
+
+    it("demandeNumeroFacture attribue des numéros strictement séquentiels par préfixe, jamais de doublon", async () => {
+      const prefix = "F-TEST-SEQ-";
+      const r1 = await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, delta: -1 }], demandeNumeroFacture: { prefix } });
+      const r2 = await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: PRODUIT_STOCK_1, emplacementId: DEPOT_AKEBE, delta: -1 }], demandeNumeroFacture: { prefix } });
+      expect(r1.success && r2.success).toBe(true);
+      expect(r1.success && r1.numero).toBe(`${prefix}0001`);
+      expect(r2.success && r2.numero).toBe(`${prefix}0002`);
+    });
+
+    it("PREUVE DE SÉRIALISATION RÉELLE : deux ventes concurrentes sur le DERNIER article du même produit/dépôt — une seule réussit, jamais les deux (pas de survente)", async () => {
+      const produitConcurrence = uuidDeterministe("701");
+      const depot = uuidDeterministe("702");
+
+      // Stock initial : exactement 1 — assez pour UNE vente, jamais deux.
+      await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: produitConcurrence, emplacementId: depot, delta: 1 }] });
+
+      // Deux "ventes" du dernier carton, envoyées EN MÊME TEMPS (Promise.all,
+      // jamais l'une après l'autre) — si le verrou de ligne ne sérialisait
+      // pas réellement les deux transactions, les deux pourraient lire
+      // "stock = 1" et réussir toutes les deux (survente).
+      const [a, b] = await Promise.all([
+        storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: produitConcurrence, emplacementId: depot, delta: -1 }] }),
+        storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: produitConcurrence, emplacementId: depot, delta: -1 }] }),
+      ]);
+
+      const succes = [a, b].filter((r) => r.success);
+      const echecs = [a, b].filter((r) => !r.success);
+      expect(succes).toHaveLength(1);
+      expect(echecs).toHaveLength(1);
+      expect(echecs[0]).toMatchObject({ raison: "stock_insuffisant" });
+    });
+
+    it("PREUVE DE SÉRIALISATION RÉELLE : 10 ventes concurrentes pour 5 unités de stock — exactement 5 réussissent", async () => {
+      const produitConcurrence = uuidDeterministe("703");
+      const depot = uuidDeterministe("704");
+      await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: produitConcurrence, emplacementId: depot, delta: 5 }] });
+
+      const resultats = await Promise.all(
+        Array.from({ length: 10 }, () => storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: produitConcurrence, emplacementId: depot, delta: -1 }] }))
+      );
+      expect(resultats.filter((r) => r.success)).toHaveLength(5);
+      expect(resultats.filter((r) => !r.success)).toHaveLength(5);
+    });
+  });
 });
 
 describe("PostgresServerStorage — sélection automatique du backend (storeServeur.ts)", () => {

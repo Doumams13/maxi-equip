@@ -137,11 +137,23 @@ export class BackupRestoreService {
     const { metadata } = lireMetadataBrut(dossier);
     const cheminBaseSauvegarde = join(dossier, "database.sqlite");
 
+    // Correction "récupération d'installation après vol/panne du PC Shop"
+    // (2026-10-24, bug réel reproduit en production : "file is not a
+    // database") — la clé à utiliser ne dépend JAMAIS de `backup.type`
+    // ("manual" vs "automatic"), seulement de la présence de
+    // `keyProtection`. Avant cette correction, une sauvegarde cloud
+    // AUTOMATIQUE (jamais "manual") porteuse d'un `keyProtection` injecté
+    // par installationRecuperationService.ts (voir son commentaire —
+    // chiffré avec le mot de passe Administrateur, reçu du serveur)
+    // retombait silencieusement sur `this.cleInstallation` — la clé LOCALE
+    // de CE poste, qui n'a jamais servi à chiffrer la sauvegarde
+    // originale : ouverture impossible, "file is not a database" (clé
+    // SQLCipher incorrecte, jamais un fichier réellement corrompu).
     let cleSauvegarde: string;
     if (metadata.database.encryptionKeyHex) {
       cleSauvegarde = metadata.database.encryptionKeyHex;
-    } else if (metadata.backup.type === "manual") {
-      if (!metadata.database.keyProtection || !motDePasse) {
+    } else if (metadata.database.keyProtection) {
+      if (!motDePasse) {
         return { success: false, message: "Un mot de passe est requis pour cette sauvegarde.", etape: "mot_de_passe" };
       }
       try {
@@ -168,10 +180,12 @@ export class BackupRestoreService {
       const message = err instanceof Error ? err.message : String(err);
       return {
         success: false,
-        message:
-          metadata.backup.type === "manual"
-            ? "Mot de passe incorrect ou sauvegarde invalide."
-            : `Cette sauvegarde ne peut pas être ouverte sur cette installation : ${message}`,
+        // Même critère que la résolution de clé ci-dessus (présence de
+        // `keyProtection`, jamais `backup.type`) — un échec d'ouverture
+        // après déverrouillage par mot de passe est presque toujours un
+        // mot de passe incorrect, jamais utile de montrer le message
+        // technique SQLCipher brut dans ce cas précis.
+        message: metadata.database.keyProtection ? "Mot de passe incorrect ou sauvegarde invalide." : `Cette sauvegarde ne peut pas être ouverte sur cette installation : ${message}`,
         etape: "verification",
       };
     }

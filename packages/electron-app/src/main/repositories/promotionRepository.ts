@@ -70,6 +70,20 @@ export class PromotionRepository {
     return row.n;
   }
 
+  /**
+   * Bilan d'activité (2026-10-21) — nombre de promotions ayant chevauché
+   * (même partiellement) la période [debut, fin], contrairement à
+   * compterActives() ci-dessus qui ne regarde qu'un seul instant. Deux
+   * intervalles [date_debut, date_fin] et [debut, fin] se chevauchent
+   * ssi date_debut <= fin ET date_fin >= debut.
+   */
+  compterChevauchantPeriode(debut: string, fin: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) as n FROM promotions WHERE date_debut <= ? AND date_fin >= ?")
+      .get(fin, debut) as { n: number };
+    return row.n;
+  }
+
   create(input: Omit<Promotion, "id" | "createdAt" | "updatedAt">): string {
     const id = randomUUID();
     const now = new Date().toISOString();

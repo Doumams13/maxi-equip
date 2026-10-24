@@ -495,7 +495,7 @@ export function FacturesScreen({
             <Search size={15} color={defaultTokens.colors.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
             <input
               style={{ ...inputStyle, width: "100%", boxSizing: "border-box", paddingLeft: 34 }}
-              placeholder="Rechercher par numéro ou client…"
+              placeholder={session.role === "administrateur" ? "Rechercher par numéro, client ou vendeur…" : "Rechercher par numéro ou client…"}
               value={recherche}
               onChange={(e) => { setRecherche(e.target.value); setPage(1); }}
             />
@@ -581,7 +581,11 @@ export function FacturesScreen({
               </thead>
               <tbody>
                 {factures.map((f) => {
-                  const nomAffiche = f.vendeurUtilisateurId === session.userId ? "Vous" : f.vendeurNom;
+                  // Correction "vendeur affiché incorrect" (2026-10-21) : `vendeurNomManuel` précise
+                  // qui est RÉELLEMENT à l'origine de la vente quand ce n'est pas le compte utilisé
+                  // pour l'enregistrer (voir shared-types/facture.ts) — il doit toujours primer sur
+                  // le compte connecté, jamais être ignoré au profit de "Vous"/vendeurNom.
+                  const nomAffiche = f.vendeurNomManuel ?? (f.vendeurUtilisateurId === session.userId ? "Vous" : f.vendeurNom);
                   const enTraitement = chargementAction === f.id;
                   return (
                     <tr key={f.id} data-operation-id={f.id} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}`, ...styleSurbrillance(f.id) }}>

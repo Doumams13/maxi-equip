@@ -242,4 +242,39 @@ describe("BackupRestoreService — Phase 3.9", () => {
     const restauration = await restoreService.executerRestauration(dossier);
     expect(restauration.success).toBe(true);
   });
+
+  it("RÉGRESSION réelle (2026-10-24, production) — une sauvegarde 'automatic' porteuse d'un keyProtection (récupération après vol/panne, voir installationRecuperationService.ts) se restaure avec le bon mot de passe, jamais 'file is not a database'", async () => {
+    const { backupService, restoreService } = creerServices();
+    // Même mécanique EXACTE que installationRecuperationService.ts : une
+    // sauvegarde cloud "automatic" dont le metadata.json reçoit un
+    // `keyProtection` injecté après coup (chiffré avec le mot de passe
+    // Administrateur) — AVANT la correction, `backup.type !== "manual"`
+    // faisait ignorer ce `keyProtection` et retomber sur la clé LOCALE de
+    // ce poste (jamais celle de la sauvegarde), d'où l'échec "file is not
+    // a database" reproduit en production.
+    const resultat = backupService.creerSauvegardeManuelle(join(dossierTravail, "backup-recuperation"), MOT_DE_PASSE);
+    const cheminMetadata = join(resultat.chemin!, "metadata.json");
+    const metadata = JSON.parse(readFileSync(cheminMetadata, "utf-8")) as { backup: { type: string } };
+    expect(metadata.backup.type).toBe("manual"); // hypothèse de départ du test, avant modification
+    metadata.backup.type = "automatic";
+    writeFileSync(cheminMetadata, JSON.stringify(metadata));
+
+    const restauration = await restoreService.executerRestauration(resultat.chemin!, MOT_DE_PASSE);
+    expect(restauration.success).toBe(true);
+  });
+
+  it("RÉGRESSION — même scénario 'automatic' + keyProtection, mais avec un mauvais mot de passe : échec propre (message 'incorrect'), jamais le message technique SQLCipher brut", async () => {
+    const { backupService, restoreService } = creerServices();
+    const resultat = backupService.creerSauvegardeManuelle(join(dossierTravail, "backup-recuperation-mauvais-mdp"), MOT_DE_PASSE);
+    const cheminMetadata = join(resultat.chemin!, "metadata.json");
+    const metadata = JSON.parse(readFileSync(cheminMetadata, "utf-8")) as { backup: { type: string } };
+    metadata.backup.type = "automatic";
+    writeFileSync(cheminMetadata, JSON.stringify(metadata));
+
+    const avant = readFileSync(cheminBaseLive);
+    const restauration = await restoreService.executerRestauration(resultat.chemin!, "MauvaisMotDePasse");
+    expect(restauration.success).toBe(false);
+    expect(restauration.message).toContain("incorrect");
+    expect(readFileSync(cheminBaseLive).equals(avant)).toBe(true);
+  });
 });

@@ -126,6 +126,10 @@ export function IndicateurMiseAJour() {
           fontWeight: 600,
         }}
       >
+        {/* Correction "savoir où on est, pas seulement où on va" (2026-10-21) :
+            la version ACTUELLE disparaissait dès qu'une mise à jour était
+            disponible/en cours — seule la version CIBLE restait visible. */}
+        <span style={{ color: defaultTokens.colors.textFaint, fontWeight: 400 }}>v{etat.versionActuelle}</span>
         {etat.telechargee ? (
           <>
             <RefreshCw size={14} />

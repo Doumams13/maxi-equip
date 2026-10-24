@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, Fragment } from "react";
 import { Card, Button, Combobox, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import type { ModeleProduitAvecVariantes, VarianteProduit, StagedImage } from "../../../preload/index.js";
+import type { Emplacement } from "@maxi-equip/shared-types";
 import { ImagesModal } from "./ImagesModal.js";
 import { VitrineModal } from "./VitrineModal.js";
 import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
@@ -233,7 +234,16 @@ function VarianteFormRow({
   );
 }
 
-export function ProduitsScreen({ session: _session }: { session: { userId: string } }) {
+export function ProduitsScreen({
+  session: _session,
+  cibleSurbrillance,
+  onSurbrillanceAppliquee,
+}: {
+  session: { userId: string };
+  /** Correction "Dashboard cliquable" (2026-10-21) — modeleId visé depuis un autre écran (ex. "Produits en stock faible"), même mécanisme que modeleEnSurbrillance ci-dessous. */
+  cibleSurbrillance: string | null;
+  onSurbrillanceAppliquee: () => void;
+}) {
   const { showSuccess, showWarning, showError } = useToast();
   const [modeles, setModeles] = useState<ModeleProduitAvecVariantes[]>([]);
   const [suggestions, setSuggestions] = useState<{ types: string[]; tailles: string[] }>({ types: [], tailles: [] });
@@ -254,6 +264,15 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
   // affichée au moment de l'édition. Même principe que l'historique des
   // mouvements (voir highlight.ts), réutilisé tel quel.
   const [modeleEnSurbrillance, setModeleEnSurbrillance] = useState<string | null>(null);
+
+  // Correction "Dashboard cliquable" (2026-10-21) : une cible externe
+  // (ex. ligne "Produits en stock faible" du Dashboard) rejoint le même
+  // état/mécanisme que la surbrillance post-édition ci-dessus — voir
+  // l'appel à useSurbrillanceOperation plus bas, qui notifie le parent
+  // (onSurbrillanceAppliquee) une fois la mise en évidence consommée.
+  useEffect(() => {
+    if (cibleSurbrillance) setModeleEnSurbrillance(cibleSurbrillance);
+  }, [cibleSurbrillance]);
 
   // Formulaire modèle
   const [showModeleForm, setShowModeleForm] = useState(false);
@@ -283,26 +302,63 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
   // Vitrine du site (2026-10-07)
   const [showVitrineModal, setShowVitrineModal] = useState(false);
 
+  // Correction "Menu déroulant pour les tris des tailles et des types"
+  // (2026-10-21) : filtre en complément de la recherche texte existante,
+  // jamais à sa place — "" = aucun filtre actif (comportement historique).
+  const [filtreType, setFiltreType] = useState("");
+  const [filtreTaille, setFiltreTaille] = useState("");
+
+  // Correction "voir le stock par dépôt dans le détail d'un carreau"
+  // (2026-10-21) — stockParDepot[depotId][varianteId] = quantité, même
+  // principe que StockScreen.tsx (réutilise le même appel IPC existant,
+  // aucune nouvelle route serveur nécessaire).
+  const [depots, setDepots] = useState<Emplacement[]>([]);
+  const [stockParDepot, setStockParDepot] = useState<Record<string, Record<string, number>>>({});
+
   async function refresh() {
     const [liste, sugg] = await Promise.all([window.maxiEquip.listModelesProduits(), window.maxiEquip.getCatalogueSuggestions()]);
     setModeles(liste);
     setSuggestions(sugg);
+    // Le stock par dépôt peut changer après une suppression (écoulement
+    // automatique, voir StockService.ecoulerStockPourSuppression) — déjà
+    // rafraîchi au montage, refait ici pour rester cohérent après toute
+    // action qui appelle refresh().
+    await refreshStockParDepot(depots);
+  }
+
+  async function refreshStockParDepot(depotsActifs: Emplacement[]) {
+    if (depotsActifs.length === 0) return;
+    const results = await Promise.all(depotsActifs.map((d) => window.maxiEquip.getStockByEmplacement(d.id)));
+    const map: Record<string, Record<string, number>> = {};
+    depotsActifs.forEach((d, i) => {
+      map[d.id] = Object.fromEntries((results[i] ?? []).map((s) => [s.produitId, s.quantite]));
+    });
+    setStockParDepot(map);
   }
 
   useEffect(() => {
     void refresh();
+    void (async () => {
+      const emplacements = await window.maxiEquip.listEmplacements();
+      const depotsActifs = emplacements.filter((e) => !e.estPointDeVente && e.actif);
+      setDepots(depotsActifs);
+      await refreshStockParDepot(depotsActifs);
+    })();
   }, []);
 
   const modelesFiltres = useMemo(() => {
     const q = recherche.trim().toLowerCase();
-    if (!q) return modeles;
-    return modeles.filter(
-      (m) =>
+    return modeles.filter((m) => {
+      if (filtreType && m.type !== filtreType) return false;
+      if (filtreTaille && !m.variantes.some((v) => v.taille === filtreTaille)) return false;
+      if (!q) return true;
+      return (
         m.motif.toLowerCase().includes(q) ||
         m.type.toLowerCase().includes(q) ||
         m.variantes.some((v) => v.reference.toLowerCase().includes(q) || v.taille.toLowerCase().includes(q))
-    );
-  }, [modeles, recherche]);
+      );
+    });
+  }, [modeles, recherche, filtreType, filtreTaille]);
 
   // Retrouve le modèle visé même si une recherche active le masquerait.
   useEffect(() => {
@@ -592,7 +648,10 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
   // dans le DOM quand le défilement/surbrillance s'applique (voir
   // HistoriqueOperationsTable, même principe).
   const modeleCibleActif = modeleEnSurbrillance && modelesPage.some((m) => m.id === modeleEnSurbrillance) ? modeleEnSurbrillance : null;
-  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(modeleCibleActif, () => setModeleEnSurbrillance(null));
+  const { conteneurRef, styleSurbrillance } = useSurbrillanceOperation(modeleCibleActif, () => {
+    setModeleEnSurbrillance(null);
+    onSurbrillanceAppliquee();
+  });
 
   return (
     <div style={{ padding: 28 }}>
@@ -785,17 +844,46 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
         </Card>
       )}
 
-      <div style={{ position: "relative", marginBottom: 14, maxWidth: 320 }}>
-        <Search size={15} color={defaultTokens.colors.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
-        <input
-          style={{ ...inputStyle, paddingLeft: 36 }}
-          value={recherche}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ position: "relative", maxWidth: 320, flex: 1, minWidth: 220 }}>
+          <Search size={15} color={defaultTokens.colors.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+          <input
+            style={{ ...inputStyle, paddingLeft: 36 }}
+            value={recherche}
+            onChange={(e) => {
+              setRecherche(e.target.value);
+              setPageCarreaux(1);
+            }}
+            placeholder="Motif, type, référence, taille…"
+          />
+        </div>
+        {/* Correction "Menu déroulant pour les tris des tailles et des types" (2026-10-21). */}
+        <select
+          style={{ ...inputStyle, width: 170 }}
+          value={filtreType}
           onChange={(e) => {
-            setRecherche(e.target.value);
+            setFiltreType(e.target.value);
             setPageCarreaux(1);
           }}
-          placeholder="Motif, type, référence, taille…"
-        />
+        >
+          <option value="">Tous les types</option>
+          {suggestions.types.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+        <select
+          style={{ ...inputStyle, width: 170 }}
+          value={filtreTaille}
+          onChange={(e) => {
+            setFiltreTaille(e.target.value);
+            setPageCarreaux(1);
+          }}
+        >
+          <option value="">Toutes les tailles</option>
+          {suggestions.tailles.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
       </div>
 
       <Card padding={0}>
@@ -812,6 +900,9 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                   <th style={{ width: 32, padding: "10px 8px 10px 16px" }} />
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Photo</th>
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Motif</th>
+                  {/* Correction "Remplacer/ajouter colonne Taille" (2026-10-21) — un modèle peut
+                      avoir plusieurs formats, voir la cellule ci-dessous (résumé, pas une valeur unique). */}
+                  <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Taille</th>
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Référence</th>
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Type</th>
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12, textAlign: "right" }}>Formats</th>
@@ -822,7 +913,13 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
               <tbody>
                 {modelesPage.map((m) => {
                   const isOpen = expanded.has(m.id);
-                  const stockTotal = m.variantes.reduce((acc, v) => acc + v.stockTotal, 0);
+                  // Correction "le tri par taille doit n'afficher que les formats
+                  // correspondants, pas tout le modèle" (2026-10-21) : un filtre
+                  // taille actif ne change jamais QUELS modèles apparaissent (déjà
+                  // géré dans modelesFiltres), mais narrowe désormais aussi QUELS
+                  // formats de ce modèle sont montrés (résumé + détail).
+                  const variantesAffichees = filtreTaille ? m.variantes.filter((v) => v.taille === filtreTaille) : m.variantes;
+                  const stockTotal = variantesAffichees.reduce((acc, v) => acc + v.stockTotal, 0);
                   return (
                     <Fragment key={m.id}>
                       <tr
@@ -837,6 +934,9 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                           <Miniature dataUrl={m.imagePrincipaleDataUrl} />
                         </td>
                         <td style={{ padding: "8px 16px", fontWeight: 700 }}>{m.motif}</td>
+                        <td style={{ padding: "8px 16px", color: defaultTokens.colors.textSoft, fontSize: 12.5 }}>
+                          {variantesAffichees.map((v) => v.taille).join(", ")}
+                        </td>
                         <td
                           style={{
                             padding: "8px 16px",
@@ -845,12 +945,12 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                             fontSize: 12,
                           }}
                         >
-                          {m.variantes.map((v) => v.reference).join(", ")}
+                          {variantesAffichees.map((v) => v.reference).join(", ")}
                         </td>
                         <td style={{ padding: "8px 16px", color: defaultTokens.colors.textSoft }}>{m.type}</td>
                         <td style={{ padding: "8px 16px", textAlign: "right" }}>
-                          <span style={{ fontWeight: 700 }}>{m.variantes.length}</span>
-                          <span style={{ color: defaultTokens.colors.textFaint, fontSize: 12, marginLeft: 4 }}>format{m.variantes.length !== 1 ? "s" : ""}</span>
+                          <span style={{ fontWeight: 700 }}>{variantesAffichees.length}</span>
+                          <span style={{ color: defaultTokens.colors.textFaint, fontSize: 12, marginLeft: 4 }}>format{variantesAffichees.length !== 1 ? "s" : ""}</span>
                           <span style={{ marginLeft: 10, color: defaultTokens.colors.textFaint, fontSize: 12 }}>({stockTotal} ct. total)</span>
                         </td>
                         <td style={{ padding: "8px 16px" }}>
@@ -893,20 +993,41 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                         <>
                           <tr style={{ background: defaultTokens.colors.surfaceAlt + "88" }}>
                             <td />
-                            <td colSpan={7} style={{ padding: "0 16px" }}>
-                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                            <td colSpan={8} style={{ padding: "0 16px" }}>
+                              {/* Correction "État décalé" (2026-10-21), étendue : un <table> en layout
+                                  "auto" redistribue la largeur des colonnes selon leur contenu LE PLUS
+                                  LONG sur toutes les lignes (ex. la ligne "Akanda : 0 · Akébé : 60" du
+                                  Stock) — ce qui déplace la frontière des colonnes suivantes de façon
+                                  imprévisible et pouvait créer un vide visuel avant "État", même une fois
+                                  son text-align corrigé. `tableLayout: "fixed"` + largeurs explicites par
+                                  colonne rendent cette frontière stable, quel que soit le contenu. */}
+                              {/* Correction "espace pas toujours réglé" (2026-10-21) : mélanger
+                                  largeurs en % et en px sous tableLayout "fixed" donne un résultat
+                                  incohérent selon la largeur réelle du conteneur (le total ne
+                                  correspond pas forcément à 100%, laissant un vide variable après
+                                  les icônes). Les colonnes à contenu BORNÉ (Taille, Référence, État,
+                                  actions) ont désormais toutes une largeur fixe en px ; Prix et Stock
+                                  (contenu variable) n'ont AUCUNE largeur déclarée — elles absorbent
+                                  donc TOUJOURS exactement l'espace restant, jamais plus, jamais moins. */}
+                              <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
                                 <thead>
                                   <tr>
-                                    <th style={{ padding: "8px 0", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>Taille</th>
-                                    <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>Référence</th>
+                                    <th style={{ width: 110, padding: "8px 0", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>Taille</th>
+                                    <th style={{ width: 100, padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>Référence</th>
                                     <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "right" }}>Prix / m²</th>
                                     <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "right" }}>Stock</th>
-                                    <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11 }}>État</th>
-                                    <th style={{ padding: "8px 0" }} />
+                                    <th style={{ width: 120, padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>État</th>
+                                    {/* Correction "poubelles décalées / barre de défilement" (2026-10-21) :
+                                        60px était trop étroit — chaque <Button variant="ghost"> a un padding
+                                        de 11px/18px (voir design-system/Button.tsx), donc même une icône seule
+                                        occupe ~49px ; les deux boutons côte à côte (pas de wrap possible,
+                                        whiteSpace: nowrap) ont besoin d'au moins ~98px pour ne jamais déborder
+                                        du tableau et déclencher le défilement horizontal. */}
+                                    <th style={{ width: 104, padding: "8px 0" }} />
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {m.variantes.map((v) => (
+                                  {variantesAffichees.map((v) => (
                                     <tr key={v.id} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
                                       <td style={{ padding: "7px 0", fontWeight: 700 }}>{v.taille}</td>
                                       <td style={{ padding: "7px 8px", color: defaultTokens.colors.textSoft, fontFamily: defaultTokens.typography.mono, fontSize: 12 }}>{v.reference}</td>
@@ -921,7 +1042,15 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                                           </div>
                                         )}
                                       </td>
-                                      <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700 }}>{v.stockTotal} ct.</td>
+                                      <td style={{ padding: "7px 8px", textAlign: "right" }}>
+                                        <div style={{ fontWeight: 700 }}>{v.stockTotal} ct.</div>
+                                        {/* Correction "voir le stock par dépôt dans le détail" (2026-10-21). */}
+                                        {depots.length > 0 && (
+                                          <div style={{ fontSize: 10.5, color: defaultTokens.colors.textFaint, fontWeight: 400 }}>
+                                            {depots.map((d) => `${d.nom} : ${stockParDepot[d.id]?.[v.id] ?? 0}`).join(" · ")}
+                                          </div>
+                                        )}
+                                      </td>
                                       <td style={{ padding: "7px 8px" }}>
                                         <StatutStock quantite={v.stockTotal} seuil={v.seuilAlerte} />
                                       </td>
@@ -963,7 +1092,7 @@ export function ProduitsScreen({ session: _session }: { session: { userId: strin
                           </tr>
                           <tr style={{ background: defaultTokens.colors.surfaceAlt + "88" }}>
                             <td />
-                            <td colSpan={7} style={{ padding: "6px 16px 12px" }}>
+                            <td colSpan={8} style={{ padding: "6px 16px 12px" }}>
                               {ajoutVarianteModeleId !== m.id && editingVariante?.modeleId !== m.id && (
                                 <Button
                                   variant="ghost"

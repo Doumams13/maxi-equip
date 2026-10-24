@@ -44,6 +44,28 @@ export class StockRepository {
     return new Map(rows.map((r) => [r.produitId, r.total]));
   }
 
+  /**
+   * Fixe une quantité ABSOLUE — correction "travailler en parallèle sur le
+   * même stock" (2026-10-22). Utilisé UNIQUEMENT pour refléter localement
+   * la valeur déjà vérifiée/appliquée par le serveur central
+   * (ValidationStockDistanteService), jamais pour une saisie utilisateur
+   * directe (qui reste toujours `applyDelta`, Corrections §4 : "jamais une
+   * valeur absolue"). Sans ça, un stock local resté en retard (une autre
+   * machine a vendu entre-temps) ne serait jamais corrigé par un simple
+   * delta relatif.
+   */
+  setQuantite(produitId: string, emplacementId: string, quantite: number): void {
+    const existing = this.db.prepare("SELECT id FROM stocks WHERE produit_id = ? AND emplacement_id = ?").get(produitId, emplacementId) as { id: string } | undefined;
+    const now = new Date().toISOString();
+    if (existing) {
+      this.db.prepare("UPDATE stocks SET quantite = ?, updated_at = ? WHERE id = ?").run(quantite, now, existing.id);
+    } else {
+      this.db
+        .prepare(`INSERT INTO stocks (id, produit_id, emplacement_id, quantite, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(randomUUID(), produitId, emplacementId, quantite, now, now);
+    }
+  }
+
   /** Applique un delta (positif ou négatif) — jamais une valeur absolue (Corrections §4). */
   applyDelta(delta: domainStock.StockDelta & { produitId: string }): void {
     const existing = this.db

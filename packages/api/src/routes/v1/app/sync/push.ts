@@ -4,6 +4,8 @@ import { enregistrerOperations, type OperationRecue, type ResultatEnregistrement
 import { validerOperationModele, validerOperationProduit, validerOperationPromotion, validerOperationIdentite } from "../../../../core/validationCatalogueSync.js";
 import { appliquerOperationModele, appliquerOperationProduit, appliquerOperationPromotion } from "../../../../core/catalogStore.js";
 import { appliquerOperationIdentite } from "../../../../core/identiteStore.js";
+import { appliquerOperationCompte } from "../../../../core/compteStore.js";
+import { validerOperationCompte } from "../../../../core/validationCatalogueSync.js";
 
 /**
  * POST /v1/sync/push — Phase 3.6, Partie 3.
@@ -42,7 +44,7 @@ import { appliquerOperationIdentite } from "../../../../core/identiteStore.js";
  */
 
 const TYPES_CATALOGUE = new Set(["modele", "produit", "promotion"]);
-const TYPES_PROJECTION = new Set([...TYPES_CATALOGUE, "parametres_entreprise"]);
+const TYPES_PROJECTION = new Set([...TYPES_CATALOGUE, "parametres_entreprise", "compte"]);
 
 export const pushRoute: Route = {
   method: "POST",
@@ -71,7 +73,9 @@ export const pushRoute: Route = {
             ? validerOperationProduit(op.payload)
             : op.entityType === "promotion"
               ? validerOperationPromotion(op.payload)
-              : validerOperationIdentite(op.payload);
+              : op.entityType === "compte"
+                ? validerOperationCompte(op.payload)
+                : validerOperationIdentite(op.payload);
       operationsCatalogue.push({ index, entityType: op.entityType, payload });
     });
 
@@ -84,6 +88,7 @@ export const pushRoute: Route = {
       if (entityType === "modele") await appliquerOperationModele(payload as never);
       else if (entityType === "produit") await appliquerOperationProduit(payload as never);
       else if (entityType === "promotion") await appliquerOperationPromotion(payload as never);
+      else if (entityType === "compte") await appliquerOperationCompte(payload as never);
       else await appliquerOperationIdentite(payload as never);
       // Idempotent par construction (upsert conditionné par updatedAt) —
       // toujours "cree" du point de vue du client, qui n'a besoin que de

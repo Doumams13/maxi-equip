@@ -81,7 +81,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         // outcome.reason est un motif métier connu (retour normal du
         // domaine, jamais une exception) — traduit en message utilisateur,
         // jamais affiché tel quel.
-        const { title, message } = mapAuthFailureReason(outcome.reason);
+        const { title, message } = mapAuthFailureReason(outcome.reason, outcome.message);
         showError(title, message);
         setIdentifiantHasError(true);
         setMotDePasseHasError(true);

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { IpcRendererEvent } from "electron";
 import type { auth } from "@maxi-equip/domain";
 import type { Produit, Emplacement, Facture, Mouvement } from "@maxi-equip/shared-types";
 
@@ -16,7 +17,15 @@ import type { Produit, Emplacement, Facture, Mouvement } from "@maxi-equip/share
  */
 type LoginOutcome =
   | { success: true; session: auth.SessionLocale }
-  | { success: false; reason: auth.AuthenticationFailureReason };
+  | {
+      success: false;
+      // Correction "travail à distance / plusieurs machines en parallèle"
+      // (2026-10-22) — "CONNEXION_REQUISE"/"TROP_DE_TENTATIVES" viennent
+      // de la connexion en ligne (voir authService.ts), absents du
+      // domaine (qui ignore tout du réseau).
+      reason: auth.AuthenticationFailureReason | "CONNEXION_REQUISE" | "TROP_DE_TENTATIVES";
+      message?: string;
+    };
 
 /**
  * Vue publique d'un utilisateur — définie localement pour éviter tout
@@ -33,7 +42,7 @@ interface UtilisateurPublic {
   updatedAt: string;
 }
 
-type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "UNKNOWN";
+type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "CONNEXION_REQUISE" | "UNKNOWN";
 type StockOperationResult =
   | { success: true; [key: string]: unknown }
   | { success: false; reason: { code: StockErrorReason; message: string; available?: number; requested?: number } };
@@ -53,7 +62,8 @@ export interface VenteLigneInput {
 export interface VenteInput {
   pointDeVenteId: string;
   clientNom: string;
-  clientTelephone: string;
+  /** Correction "Rendre le numéro de téléphone facultatif" (2026-10-21) — `null` = non renseigné. */
+  clientTelephone: string | null;
   clientAdresse: string | null;
   vendeurUtilisateurId: string;
   vendeurCompteConnecteNom: string;
@@ -176,6 +186,28 @@ const maxiEquipApi = {
     motDePasse: string
   ): Promise<{ success: boolean; etape?: string; message?: string }> =>
     ipcRenderer.invoke("installation:verifierEtRestaurer", motDePasse),
+  /**
+   * Progression de `installationVerifierEtRestaurer` (2026-10-22, retour
+   * utilisateur : "on ne voit rien pendant le téléchargement") — canal
+   * PUSH (main → Renderer), contrairement au reste de ce fichier
+   * (toujours request/response). S'abonne juste avant l'appel ci-dessus,
+   * se désabonne dans le `finally` de l'appelant — retourne la fonction
+   * de désabonnement, jamais un abonnement permanent oublié.
+   */
+  onInstallationRecuperationProgression: (
+    callback: (
+      etape: "verification" | "telechargement" | "restauration" | "finalisation",
+      detail?: { recuOctets: number; totalOctets: number | null }
+    ) => void
+  ): (() => void) => {
+    const listener = (
+      _event: IpcRendererEvent,
+      etape: "verification" | "telechargement" | "restauration" | "finalisation",
+      detail?: { recuOctets: number; totalOctets: number | null }
+    ) => callback(etape, detail);
+    ipcRenderer.on("installation:recuperationProgression", listener);
+    return () => ipcRenderer.removeListener("installation:recuperationProgression", listener);
+  },
 
   login: (identifiant: string, motDePasse: string): Promise<LoginOutcome> =>
     ipcRenderer.invoke("auth:login", identifiant, motDePasse),
@@ -334,6 +366,38 @@ const maxiEquipApi = {
     ipcRenderer.invoke("factures:genererPdf", factureId),
   genererDocumentInternePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererDocumentInternePdf", factureId),
+  // --- Bilan d'activité (2026-10-21) — réservé à l'Administrateur, voir checkAdminGuard côté Main. ---
+  genererBilan: (
+    debut: string,
+    fin: string
+  ): Promise<
+    | {
+        success: true;
+        ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
+        topProduits: { label: string; quantite: number }[];
+        mouvements: { totalEntrees: number; totalSorties: number };
+        stockParEmplacement: { emplacementId: string; nom: string; cartons: number }[];
+        produitsSousSeuilCount: number;
+        promotionsActivesPendantPeriode: number;
+        depots: { id: string; nom: string }[];
+        detailProduits: {
+          produitId: string;
+          motif: string;
+          taille: string;
+          reference: string;
+          stockParEmplacement: { emplacementId: string; cartons: number }[];
+          vendu: number;
+          sortie: number;
+        }[];
+      }
+    | { success: false; message: string }
+  > => ipcRenderer.invoke("bilan:generer", { debut, fin }),
+  genererBilanPdf: (
+    debut: string,
+    fin: string,
+    periodeLibelle: string
+  ): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
+    ipcRenderer.invoke("bilan:genererPdf", { debut, fin, periodeLibelle }),
   lireDocumentBase64: (chemin: string): Promise<{ success: boolean; base64?: string; message?: string }> =>
     ipcRenderer.invoke("documents:lireBase64", chemin),
   telechargerDocument: (chemin: string, nomSuggere: string): Promise<{ success: boolean; canceled?: boolean; chemin?: string; message?: string }> =>
@@ -431,6 +495,9 @@ const maxiEquipApi = {
   getDashboardSummary: (): Promise<{
     stockTousDepots: number;
     caTotal: number;
+    /** Correction "voir le revenu journalier et mensuel" (2026-10-21). */
+    caJour: number;
+    caMois: number;
     produitsSousSeuilGlobal: number;
     totalFactures: number;
     totalProduits: number;
@@ -440,12 +507,13 @@ const maxiEquipApi = {
     serieEntreesSorties: { jour: string; entrees: number; sorties: number }[];
     stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
     topProduitsVendus: { label: string; quantite: number }[];
-    produitsSousSeuilListe: { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
+    produitsSousSeuilListe: { id: string; modeleId: string | null; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
     activiteRecente: EvenementHistorique[];
     stockDepots: number;
     stockParEmplacementPourGerant: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
     mesVentesAujourdhui: number;
     monChiffreAffaires: number;
+    monChiffreAffairesMois: number;
     mesFacturesAujourdhuiCount: number;
     mesEntrees: number;
     mesSorties: number;

@@ -13,6 +13,7 @@ import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
 import { ParametresScreen } from "./screens/ParametresScreen.js";
 import { UtilisateursScreen } from "./screens/UtilisateursScreen.js";
 import { PromotionsScreen } from "./screens/PromotionsScreen.js";
+import { BilanScreen } from "./screens/BilanScreen.js";
 
 type Session = { userId: string; identifiant: string; nom: string; role: string };
 
@@ -22,7 +23,15 @@ type Session = { userId: string; identifiant: string; nom: string; role: string 
  * §12-§17) — un type d'opération + son identifiant réel, jamais une
  * correspondance approximative par nom/date/montant.
  */
-export type CibleOperation = { type: "facture"; id: string } | { type: "entree"; id: string } | { type: "transfert"; id: string } | { type: "demande"; id: string };
+export type CibleOperation =
+  | { type: "facture"; id: string }
+  | { type: "entree"; id: string }
+  | { type: "transfert"; id: string }
+  | { type: "demande"; id: string }
+  // Correction "Dashboard cliquable" (2026-10-21) — `id` = identifiant du
+  // MODÈLE (jamais une variante : la liste Carreaux est groupée par
+  // modèle, voir ProduitsScreen.tsx).
+  | { type: "produit"; id: string };
 
 export interface AppRootProps {
   onLoggedOut: () => void;
@@ -68,7 +77,12 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
    * une correspondance approximative par texte affiché.
    */
   function irVersOperation(cible: CibleOperation) {
-    const ecran = cible.type === "facture" ? "factures" : cible.type === "entree" ? "stock" : cible.type === "transfert" ? "transferts" : "demandes";
+    const ecran =
+      cible.type === "facture" ? "factures" :
+      cible.type === "entree" ? "stock" :
+      cible.type === "transfert" ? "transferts" :
+      cible.type === "produit" ? "produits" :
+      "demandes";
     setActiveScreen(ecran);
     setCibleSurbrillance(cible);
   }
@@ -105,6 +119,10 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     { id: "promotions", label: "Promotions", autorise: permissions.canManagePromotions },
     { id: "utilisateurs", label: "Utilisateurs", autorise: permissions.canManageUsers },
     { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
+    // Correction "bilan d'activité" (2026-10-21) — réservé à l'Administrateur
+    // (décision confirmée), la protection réelle restant côté IPC
+    // (checkAdminGuard, voir main/ipc/metier.ts), jamais uniquement ici.
+    { id: "bilan", label: "Bilan", autorise: session!.role === "administrateur" },
   ];
 
   function renderScreen() {
@@ -114,10 +132,17 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
           <DashboardScreen
             session={{ userId: session!.userId, nom: session!.nom, role: session!.role }}
             onNaviguerVersOperation={irVersOperation}
+            onNaviguerVersEcran={(ecran) => setActiveScreen(ecran)}
           />
         );
       case "produits":
-        return <ProduitsScreen session={{ userId: session!.userId }} />;
+        return (
+          <ProduitsScreen
+            session={{ userId: session!.userId }}
+            cibleSurbrillance={cibleSurbrillance?.type === "produit" ? cibleSurbrillance.id : null}
+            onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}
+          />
+        );
       case "stock":
         return (
           <StockScreen
@@ -190,6 +215,9 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       case "parametres":
         if (!permissions!.canEditCompanySettings) return null;
         return <ParametresScreen />;
+      case "bilan":
+        if (session!.role !== "administrateur") return null;
+        return <BilanScreen />;
       default:
         return null;
     }

@@ -101,9 +101,21 @@ export class FactureRepository {
    * d'appareil ni préfixe technique n'est ajouté par ce commentaire —
    * c'est une note d'intention, pas du code.
    */
+  /**
+   * Correction "travail à distance / plusieurs machines en parallèle"
+   * (2026-10-22) — PRÉPARATION ARCHITECTURALE FUTURE ci-dessus,
+   * maintenant implémentée : le préfixe seul (ex. "FAC-2026-"), calculé
+   * ici pour que VenteService.enregistrerVente l'envoie au serveur
+   * central (ValidationStockDistanteService), qui attribue alors le
+   * PROCHAIN numéro complet lui-même — format `FAC-AAAA-XXXX` inchangé,
+   * jamais un numéro technique/d'appareil ajouté.
+   */
+  prefixNumeroCourant(): string {
+    return `FAC-${new Date().getFullYear()}-`;
+  }
+
   nextNumero(): string {
-    const year = new Date().getFullYear();
-    const prefix = `FAC-${year}-`;
+    const prefix = this.prefixNumeroCourant();
     const row = this.db
       .prepare("SELECT numero FROM factures WHERE numero LIKE ? ORDER BY numero DESC LIMIT 1")
       .get(`${prefix}%`) as { numero: string } | undefined;
@@ -159,18 +171,80 @@ export class FactureRepository {
   }
 
   /**
+   * Total facturé sur le jour en cours (factures actives uniquement) —
+   * correction "voir le revenu journalier" (2026-10-21), dashboard
+   * Administrateur. Même principe que sommeTotalMoisCourant() ci-dessus
+   * (strftime sur la date SQLite), jamais recalculé côté JS pour rester
+   * cohérent avec elle.
+   */
+  sommeTotalJourCourant(): number {
+    return (
+      this.db
+        .prepare(
+          `SELECT COALESCE(SUM(total), 0) as s FROM factures
+           WHERE annulee_le IS NULL AND strftime('%Y-%m-%d', date) = strftime('%Y-%m-%d', 'now')`
+        )
+        .get() as { s: number }
+    ).s;
+  }
+
+  /**
+   * Bilan d'activité (2026-10-21) — agrégats sur une plage de dates LIBRE
+   * (contrairement à sommeTotalJourCourant/MoisCourant ci-dessus, bornées
+   * au jour/mois en cours) : CA, nombre de factures et remises accordées,
+   * factures actives uniquement. `debut`/`fin` sont des bornes ISO
+   * [debut, fin] INCLUSIVES — l'appelant (BilanScreen) passe la fin de
+   * journée (23:59:59.999) pour une plage se terminant "aujourd'hui".
+   */
+  bilanVentesEntre(debut: string, fin: string): { caTotal: number; nombreFactures: number; remiseTotale: number } {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(total), 0) as caTotal, COUNT(*) as nombreFactures, COALESCE(SUM(remise), 0) as remiseTotale
+         FROM factures WHERE annulee_le IS NULL AND date >= ? AND date <= ?`
+      )
+      .get(debut, fin) as { caTotal: number; nombreFactures: number; remiseTotale: number };
+    return row;
+  }
+
+  /**
+   * Produits les plus vendus sur une plage de dates LIBRE — même principe
+   * que topProduitsVendus() ci-dessous (référence, jamais le motif — voir
+   * sa propre correction "motif → référence"), borné à la période.
+   */
+  topProduitsVendusEntre(debut: string, fin: string, limite = 5): { label: string; quantite: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT COALESCE(lf.reference, lf.motif || ' — ' || lf.taille) as label, SUM(lf.quantite) as quantite
+         FROM lignes_facture lf
+         JOIN factures f ON f.id = lf.facture_id
+         WHERE f.annulee_le IS NULL AND f.date >= ? AND f.date <= ?
+         GROUP BY COALESCE(lf.reference, lf.motif || ' — ' || lf.taille) ORDER BY quantite DESC LIMIT ?`
+      )
+      .all(debut, fin, limite) as { label: string; quantite: number }[];
+    return rows;
+  }
+
+  /**
    * Produits les plus vendus, agrégés depuis les lignes de facture des
    * factures ACTIVES uniquement (§7/§13 d'une correction précédente,
    * complété pour exclure les ventes annulées).
+   *
+   * Correction "motif → référence" (2026-10-21) : affiche la référence du
+   * produit plutôt que son motif (plusieurs produits différents peuvent
+   * partager le même motif, ex. plusieurs tailles d'un même carreau — la
+   * référence identifie une variante précise). `COALESCE` vers l'ancien
+   * libellé motif+taille UNIQUEMENT pour les lignes de facture antérieures
+   * à l'ajout de la référence (`reference` NULL) — jamais une valeur
+   * inventée pour ces lignes historiques.
    */
   topProduitsVendus(limite = 5): { label: string; quantite: number }[] {
     const rows = this.db
       .prepare(
-        `SELECT lf.motif || ' — ' || lf.taille as label, SUM(lf.quantite) as quantite
+        `SELECT COALESCE(lf.reference, lf.motif || ' — ' || lf.taille) as label, SUM(lf.quantite) as quantite
          FROM lignes_facture lf
          JOIN factures f ON f.id = lf.facture_id
          WHERE f.annulee_le IS NULL
-         GROUP BY lf.motif, lf.taille ORDER BY quantite DESC LIMIT ?`
+         GROUP BY COALESCE(lf.reference, lf.motif || ' — ' || lf.taille) ORDER BY quantite DESC LIMIT ?`
       )
       .all(limite) as { label: string; quantite: number }[];
     return rows;
@@ -358,6 +432,21 @@ export class FactureRepository {
     recherche: string;
     statutFiltre: "tous" | "annulee" | "en_attente" | "livree";
     vendeurUtilisateurId: string | null;
+    /**
+     * Correction "recherche limitée à client/numéro" (2026-10-22, retour
+     * utilisateur) : inclut `u.nom` (compte réellement utilisé pour
+     * enregistrer la vente) ET `f.vendeur_nom_manuel` (Corrections §7,
+     * quand ce n'est pas le compte connecté qui est réellement à l'origine
+     * de la vente) dans la recherche texte libre. DÉCISION PRISE PLUS HAUT
+     * (IPC, jamais ici — même principe que `vendeurUtilisateurId`
+     * ci-dessus) : un Gérant ne doit jamais pouvoir découvrir quels
+     * vendeurs existent ni deviner leur activité en tâtonnant dans la
+     * barre de recherche (ça contournerait silencieusement
+     * `anonymiserFactures`, qui ne masque que le résultat APRÈS coup, pas
+     * la capacité de filtrer dessus) — seul un Administrateur doit passer
+     * `true` ici.
+     */
+    inclureVendeurDansRecherche: boolean;
     colonneTri: "numero" | "date" | "client" | "vendeur" | "montant" | "statut" | null;
     direction: "asc" | "desc";
     page: number;
@@ -368,8 +457,13 @@ export class FactureRepository {
 
     const q = filtres.recherche.trim();
     if (q) {
-      conditions.push("(f.numero LIKE ? OR f.client_nom LIKE ?)");
-      params.push(`%${q}%`, `%${q}%`);
+      if (filtres.inclureVendeurDansRecherche) {
+        conditions.push("(f.numero LIKE ? OR f.client_nom LIKE ? OR u.nom LIKE ? OR f.vendeur_nom_manuel LIKE ?)");
+        params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+      } else {
+        conditions.push("(f.numero LIKE ? OR f.client_nom LIKE ?)");
+        params.push(`%${q}%`, `%${q}%`);
+      }
     }
     if (filtres.statutFiltre === "annulee") {
       conditions.push("f.annulee_le IS NOT NULL");

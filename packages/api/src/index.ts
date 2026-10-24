@@ -12,6 +12,8 @@ import { publicLocationsRoute } from "./routes/v1/public/locations.js";
 import { publicSettingsRoute } from "./routes/v1/public/settings.js";
 import { definirRecuperationRoute } from "./routes/v1/app/installation/definir-recuperation.js";
 import { verifierRecuperationRoute } from "./routes/v1/public/installation/verifier-recuperation.js";
+import { authLoginRoute } from "./routes/v1/app/auth/login.js";
+import { validerOperationStockRoute } from "./routes/v1/app/operations/valider.js";
 
 export function createRouter(): Router {
   const router = new Router();
@@ -28,6 +30,8 @@ export function createRouter(): Router {
   router.register(publicSettingsRoute);
   router.register(definirRecuperationRoute);
   router.register(verifierRecuperationRoute);
+  router.register(authLoginRoute);
+  router.register(validerOperationStockRoute);
   return router;
 }
 

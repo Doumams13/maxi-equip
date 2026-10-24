@@ -2,6 +2,7 @@ import { stock as domainStock } from "@maxi-equip/domain";
 import { StockRepository } from "../repositories/stockRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
+import { ValidationStockDistanteService, erreurDepuisEchecValidationDistante } from "./validationStockDistanteService.js";
 
 export class StockValidationError extends Error {
   constructor(message: string) {
@@ -29,13 +30,38 @@ export class StockService {
     private readonly db: import("better-sqlite3-multiple-ciphers").Database,
     private readonly stockRepository: StockRepository,
     private readonly mouvementRepository: MouvementRepository,
-    private readonly boiteEnvoiRepository: BoiteEnvoiRepository
+    private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
+    /**
+     * Correction "travailler en parallèle sur le même stock" (2026-10-22) —
+     * OPTIONNEL pour ne jamais casser un site d'appel existant (tests) qui
+     * construirait ce service sans lui : absent ou non configuré (voir
+     * `estConfiguree()`), le comportement reste 100% local et inchangé.
+     * Présent ET configuré, AUCUNE des trois méthodes ci-dessous ne décide
+     * plus de la disponibilité à partir du stock local (décision
+     * utilisateur explicite) — seul le serveur central tranche.
+     */
+    private readonly validationStockDistanteService?: ValidationStockDistanteService
   ) {}
 
-  enregistrerEntree(produitId: string, emplacementId: string, quantite: number, utilisateurId: string): void {
+  async enregistrerEntree(produitId: string, emplacementId: string, quantite: number, utilisateurId: string): Promise<void> {
+    if (!Number.isFinite(quantite) || quantite <= 0) {
+      throw new domainStock.InvalidQuantityError(`La quantité d'entrée doit être un nombre strictement positif (reçu : ${quantite}).`);
+    }
+
+    let stockApresServeur: { produitId: string; emplacementId: string; quantite: number }[] | null = null;
+    if (this.validationStockDistanteService?.estConfiguree()) {
+      const resultat = await this.validationStockDistanteService.valider([{ produitId, emplacementId, delta: quantite }]);
+      if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
+      stockApresServeur = resultat.stockApres;
+    }
+
     const executer = this.db.transaction(() => {
-      const delta = domainStock.applyEntree(emplacementId, quantite); // lève une erreur domaine si quantité invalide
-      this.stockRepository.applyDelta({ ...delta, produitId });
+      if (stockApresServeur) {
+        for (const s of stockApresServeur) this.stockRepository.setQuantite(s.produitId, s.emplacementId, s.quantite);
+      } else {
+        const delta = domainStock.applyEntree(emplacementId, quantite);
+        this.stockRepository.applyDelta({ ...delta, produitId });
+      }
       const date = new Date().toISOString();
       const mouvementId = this.mouvementRepository.create({
         type: "entree",
@@ -54,11 +80,26 @@ export class StockService {
     executer();
   }
 
-  enregistrerSortie(produitId: string, emplacementId: string, quantite: number, utilisateurId: string): void {
+  async enregistrerSortie(produitId: string, emplacementId: string, quantite: number, utilisateurId: string): Promise<void> {
+    if (!Number.isFinite(quantite) || quantite <= 0) {
+      throw new domainStock.InvalidQuantityError(`La quantité de sortie doit être un nombre strictement positif (reçu : ${quantite}).`);
+    }
+
+    let stockApresServeur: { produitId: string; emplacementId: string; quantite: number }[] | null = null;
+    if (this.validationStockDistanteService?.estConfiguree()) {
+      const resultat = await this.validationStockDistanteService.valider([{ produitId, emplacementId, delta: -quantite }]);
+      if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
+      stockApresServeur = resultat.stockApres;
+    }
+
     const executer = this.db.transaction(() => {
-      const disponible = this.stockRepository.getQuantite(produitId, emplacementId);
-      const delta = domainStock.applySortie(emplacementId, disponible, quantite);
-      this.stockRepository.applyDelta({ ...delta, produitId });
+      if (stockApresServeur) {
+        for (const s of stockApresServeur) this.stockRepository.setQuantite(s.produitId, s.emplacementId, s.quantite);
+      } else {
+        const disponible = this.stockRepository.getQuantite(produitId, emplacementId);
+        const delta = domainStock.applySortie(emplacementId, disponible, quantite);
+        this.stockRepository.applyDelta({ ...delta, produitId });
+      }
       const date = new Date().toISOString();
       const mouvementId = this.mouvementRepository.create({
         type: "sortie",
@@ -77,12 +118,33 @@ export class StockService {
     executer();
   }
 
-  enregistrerTransfert(produitId: string, sourceId: string, destinationId: string, quantite: number, utilisateurId: string): void {
+  async enregistrerTransfert(produitId: string, sourceId: string, destinationId: string, quantite: number, utilisateurId: string): Promise<void> {
+    if (!Number.isFinite(quantite) || quantite <= 0) {
+      throw new domainStock.InvalidQuantityError(`La quantité de transfert doit être un nombre strictement positif (reçu : ${quantite}).`);
+    }
+    if (sourceId === destinationId) {
+      throw new domainStock.InvalidQuantityError("L'emplacement source et l'emplacement destination doivent être différents.");
+    }
+
+    let stockApresServeur: { produitId: string; emplacementId: string; quantite: number }[] | null = null;
+    if (this.validationStockDistanteService?.estConfiguree()) {
+      const resultat = await this.validationStockDistanteService.valider([
+        { produitId, emplacementId: sourceId, delta: -quantite },
+        { produitId, emplacementId: destinationId, delta: quantite },
+      ]);
+      if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
+      stockApresServeur = resultat.stockApres;
+    }
+
     const executer = this.db.transaction(() => {
-      const disponible = this.stockRepository.getQuantite(produitId, sourceId);
-      const [deltaSource, deltaDestination] = domainStock.applyTransfert(sourceId, destinationId, disponible, quantite);
-      this.stockRepository.applyDelta({ ...deltaSource, produitId });
-      this.stockRepository.applyDelta({ ...deltaDestination, produitId });
+      if (stockApresServeur) {
+        for (const s of stockApresServeur) this.stockRepository.setQuantite(s.produitId, s.emplacementId, s.quantite);
+      } else {
+        const disponible = this.stockRepository.getQuantite(produitId, sourceId);
+        const [deltaSource, deltaDestination] = domainStock.applyTransfert(sourceId, destinationId, disponible, quantite);
+        this.stockRepository.applyDelta({ ...deltaSource, produitId });
+        this.stockRepository.applyDelta({ ...deltaDestination, produitId });
+      }
       const date = new Date().toISOString();
       const mouvementId = this.mouvementRepository.create({
         type: "transfert",

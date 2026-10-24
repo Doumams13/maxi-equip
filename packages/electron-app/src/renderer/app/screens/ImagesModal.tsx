@@ -82,7 +82,9 @@ export function ImagesModal({ modeleId, modeleMotif, onClose, onImagesChanged }:
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <Card elevated style={{ width: "min(560px, 92vw)", maxHeight: "80vh", overflowY: "auto", boxSizing: "border-box" }}>
+      {/* Correction "Agrandir l'image de visualisation" (2026-10-21) : 560px/220px
+          rendait la miniature difficile à juger avant publication sur le site. */}
+      <Card elevated style={{ width: "min(760px, 94vw)", maxHeight: "88vh", overflowY: "auto", boxSizing: "border-box" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ margin: 0, fontFamily: defaultTokens.typography.display, fontSize: 17 }}>Images — {modeleMotif}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }} aria-label="Fermer">
@@ -97,7 +99,7 @@ export function ImagesModal({ modeleId, modeleMotif, onClose, onImagesChanged }:
             <div
               style={{
                 width: "100%",
-                height: 220,
+                height: 440,
                 borderRadius: defaultTokens.radius.md,
                 background: defaultTokens.colors.surfaceAlt,
                 display: "flex",

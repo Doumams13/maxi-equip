@@ -7,6 +7,7 @@ import { ProduitRepository } from "../repositories/produitRepository.js";
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 import { PromotionRepository } from "../repositories/promotionRepository.js";
 import { ParametresRepository } from "../repositories/parametresRepository.js";
+import { ValidationStockDistanteService, erreurDepuisEchecValidationDistante } from "./validationStockDistanteService.js";
 
 export class VenteValidationError extends Error {
   constructor(message: string) {
@@ -42,7 +43,13 @@ export interface VenteInput {
   /** Point de vente (SHOP) — sert uniquement à l'enregistrement de la facture, jamais à une vérification de stock (SHOP n'a pas de stock). */
   pointDeVenteId: string;
   clientNom: string;
-  clientTelephone: string;
+  /**
+   * Correction "Rendre le numéro de téléphone facultatif" (2026-10-21) :
+   * `null`/vide désormais accepté (comportement historique : obligatoire).
+   * Quand un numéro EST renseigné, son format reste validé (voir
+   * enregistrerVente) — jamais un numéro invalide accepté silencieusement.
+   */
+  clientTelephone: string | null;
   clientAdresse: string | null;
   vendeurUtilisateurId: string;
   vendeurCompteConnecteNom: string;
@@ -123,15 +130,59 @@ export class VenteService {
      * pour une facture antérieure à cette évolution) — jamais une
      * exception, jamais un comportement dégradé silencieusement différent.
      */
-    private readonly parametresRepository?: ParametresRepository
+    private readonly parametresRepository?: ParametresRepository,
+    /**
+     * Correction "travailler en parallèle sur le même stock" (2026-10-22) —
+     * OPTIONNEL pour ne jamais casser un site d'appel existant (tests) qui
+     * construirait ce service sans lui : absent ou non configuré (voir
+     * `estConfiguree()`), le comportement reste 100% local et inchangé
+     * (stock ET numéro de facture décidés localement, comme avant). Présent
+     * ET configuré, ni le stock ni le numéro de facture ne sont plus
+     * décidés localement — seul le serveur central tranche, dans une seule
+     * transaction (décision utilisateur explicite).
+     */
+    private readonly validationStockDistanteService?: ValidationStockDistanteService
   ) {}
 
-  enregistrerVente(input: VenteInput): VenteResult {
+  async enregistrerVente(input: VenteInput): Promise<VenteResult> {
     if (input.lignes.length === 0) {
       throw new VenteValidationError("Une vente doit contenir au moins une ligne.");
     }
-    if (!input.clientTelephone || input.clientTelephone.trim().length === 0) {
-      throw new VenteValidationError("Le numéro de téléphone du client est obligatoire.");
+    // Correction "Rendre le numéro de téléphone facultatif" (2026-10-21) :
+    // un numéro absent/vide est désormais accepté — seul un numéro
+    // RENSEIGNÉ doit respecter un format valide (même expression que
+    // VentesScreen.tsx/validerTelephone, jamais une seconde règle qui
+    // pourrait diverger).
+    if (input.clientTelephone && input.clientTelephone.trim().length > 0 && !/^[0-9+()\s-]{6,}$/.test(input.clientTelephone.trim())) {
+      throw new VenteValidationError("Le numéro de téléphone du client, s'il est renseigné, doit être valide.");
+    }
+    // Normalisé une seule fois ici — "" et null signifient la même chose
+    // ("aucun numéro"), jamais stockés différemment selon l'appelant.
+    const clientTelephoneNormalise = input.clientTelephone && input.clientTelephone.trim().length > 0 ? input.clientTelephone.trim() : null;
+
+    // Correction "travailler en parallèle sur le même stock" (2026-10-22) —
+    // appel réseau fait AVANT d'ouvrir la transaction locale (synchrone,
+    // incompatible avec un `await` en son sein). Lecture seule : les mêmes
+    // vérifications de forme (produit introuvable...) sont de toute façon
+    // refaites à l'identique dans la transaction ci-dessous, qui reste la
+    // seule source de vérité pour construire réellement la facture.
+    let stockApresServeur: { produitId: string; emplacementId: string; quantite: number }[] | null = null;
+    let numeroServeur: string | undefined;
+    if (this.validationStockDistanteService?.estConfiguree()) {
+      const deltas: { produitId: string; emplacementId: string; delta: number }[] = [];
+      for (const ligne of input.lignes) {
+        const produit = this.produitRepository.findById(ligne.produitId);
+        if (!produit) throw new VenteValidationError(`Produit introuvable (${ligne.produitId}).`);
+        for (const allocation of ligne.allocationsDepots.filter((a) => a.quantite > 0)) {
+          deltas.push({ produitId: produit.id, emplacementId: allocation.emplacementId, delta: -allocation.quantite });
+        }
+      }
+      if (deltas.length > 0) {
+        const resultat = await this.validationStockDistanteService.valider(deltas, { prefix: this.factureRepository.prefixNumeroCourant() });
+        if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
+        stockApresServeur = resultat.stockApres;
+        numeroServeur = resultat.numero;
+      }
     }
 
     const executer = this.db.transaction(() => {
@@ -171,9 +222,18 @@ export class VenteService {
         // dépôt (§6/§7 de la correction : l'utilisateur répartit
         // explicitement, le système ne devine pas).
         for (const allocation of allocationsValides) {
-          const disponible = this.stockRepository.getQuantite(produit.id, allocation.emplacementId);
-          const delta = domainStock.applySortie(allocation.emplacementId, disponible, allocation.quantite);
-          this.stockRepository.applyDelta({ ...delta, produitId: produit.id });
+          // Correction "travailler en parallèle sur le même stock"
+          // (2026-10-22) : quand le serveur central a déjà validé la
+          // demande (stockApresServeur non null), le stock local n'est
+          // JAMAIS revérifié ni déduit ici — il serait potentiellement
+          // périmé (une autre machine a pu vendre entre-temps). Il est
+          // fixé plus bas, une seule fois, aux valeurs exactes renvoyées
+          // par le serveur (voir stockApresServeur plus loin).
+          if (!stockApresServeur) {
+            const disponible = this.stockRepository.getQuantite(produit.id, allocation.emplacementId);
+            const delta = domainStock.applySortie(allocation.emplacementId, disponible, allocation.quantite);
+            this.stockRepository.applyDelta({ ...delta, produitId: produit.id });
+          }
           mouvementsAEnregistrer.push({ produitId: produit.id, emplacementId: allocation.emplacementId, quantite: allocation.quantite, note: null });
         }
 
@@ -265,6 +325,14 @@ export class VenteService {
         lignesReleveInterne.push(...releve);
       }
 
+      // Correction "travailler en parallèle sur le même stock" (2026-10-22) :
+      // une seule écriture, aux valeurs EXACTES renvoyées par le serveur
+      // central (jamais recalculée localement) — fixe aussi, au passage,
+      // un stock local qui aurait pu dériver avant cette vente.
+      if (stockApresServeur) {
+        for (const s of stockApresServeur) this.stockRepository.setQuantite(s.produitId, s.emplacementId, s.quantite);
+      }
+
       const total = domainInvoicing.calculerTotalFacture(lignesFacture);
       try {
         domainInvoicing.validerRemise(input.remise, total);
@@ -290,7 +358,12 @@ export class VenteService {
         vendeurNomManuel: input.vendeurNomManuel,
       });
 
-      const numero = this.factureRepository.nextNumero();
+      // Correction "travail à distance / plusieurs machines en parallèle"
+      // (2026-10-22) : attribué par le serveur central dès qu'il a validé
+      // le stock (même transaction, voir plus haut) — jamais recalculé
+      // localement dans ce cas, pour garantir qu'il est unique entre
+      // toutes les machines, pas seulement sur ce poste.
+      const numero = numeroServeur ?? this.factureRepository.nextNumero();
       const now = new Date().toISOString();
       // Correction Phase Finale, Bloc 6 — capture RÉELLE de l'identité
       // entreprise à l'instant de la vente, jamais relue en direct plus
@@ -315,7 +388,7 @@ export class VenteService {
         // donc plus représenter "le" dépôt utilisé (correction Phase 2).
         emplacementId: input.pointDeVenteId,
         clientNom: input.clientNom,
-        clientTelephone: input.clientTelephone,
+        clientTelephone: clientTelephoneNormalise,
         clientAdresse: input.clientAdresse,
         vendeurUtilisateurId: input.vendeurUtilisateurId,
         vendeurNomManuel: vendeurEffectif.estPrecisionManuelle ? input.vendeurNomManuel : null,
@@ -358,7 +431,7 @@ export class VenteService {
         numero,
         date: now,
         clientNom: input.clientNom,
-        clientTelephone: input.clientTelephone,
+        clientTelephone: clientTelephoneNormalise,
         clientAdresse: input.clientAdresse,
         vendeurUtilisateurId: input.vendeurUtilisateurId,
         modeReglement: input.modeReglement,
@@ -426,9 +499,31 @@ export class VenteService {
    * d'entrée traçable, rattaché à la même facture — visible dans
    * l'Historique, cohérent avec l'exigence de traçabilité (§16).
    */
-  annulerVente(factureId: string, motif: string, annuleePar: string): void {
+  async annulerVente(factureId: string, motif: string, annuleePar: string): Promise<void> {
     if (!motif || motif.trim().length === 0) {
       throw new VenteValidationError("Un motif d'annulation est requis.");
+    }
+
+    // Correction "travailler en parallèle sur le même stock" (2026-10-22) :
+    // une vente validée en ligne a décrémenté le stock CENTRAL — l'annuler
+    // doit donc le restaurer au MÊME endroit, jamais seulement en local
+    // (sinon le stock central reste décrémenté pour toujours après une
+    // annulation, divergence permanente avec le stock réellement
+    // disponible). Lecture seule ici, avant la transaction locale.
+    let stockApresServeur: { produitId: string; emplacementId: string; quantite: number }[] | null = null;
+    if (this.validationStockDistanteService?.estConfiguree()) {
+      const factureAvantTransaction = this.factureRepository.findById(factureId);
+      if (!factureAvantTransaction) throw new VenteValidationError("Facture introuvable.");
+      if (factureAvantTransaction.annuleeLe) throw new VenteValidationError("Cette facture est déjà annulée.");
+      const mouvementsAvantTransaction = this.mouvementRepository.listParFacture(factureId);
+      const deltas = mouvementsAvantTransaction
+        .filter((m) => m.type === "sortie" && m.emplacementId)
+        .map((m) => ({ produitId: m.produitId, emplacementId: m.emplacementId!, delta: m.quantite }));
+      if (deltas.length > 0) {
+        const resultat = await this.validationStockDistanteService.valider(deltas);
+        if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
+        stockApresServeur = resultat.stockApres;
+      }
     }
 
     const executer = this.db.transaction(() => {
@@ -443,10 +538,16 @@ export class VenteService {
       const mouvements = this.mouvementRepository.listParFacture(factureId);
       const now = new Date().toISOString();
 
+      if (stockApresServeur) {
+        for (const s of stockApresServeur) this.stockRepository.setQuantite(s.produitId, s.emplacementId, s.quantite);
+      }
+
       for (const m of mouvements) {
         if (m.type !== "sortie" || !m.emplacementId) continue; // rien à restaurer pour la part externe
-        const delta = domainStock.applyEntree(m.emplacementId, m.quantite);
-        this.stockRepository.applyDelta({ ...delta, produitId: m.produitId });
+        if (!stockApresServeur) {
+          const delta = domainStock.applyEntree(m.emplacementId, m.quantite);
+          this.stockRepository.applyDelta({ ...delta, produitId: m.produitId });
+        }
         this.mouvementRepository.create({
           type: "entree",
           produitId: m.produitId,

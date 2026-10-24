@@ -38,7 +38,11 @@ export type TypeOperationBoiteEnvoi =
   // vers POST /v1/app/images/sync, jamais dans le même lot.
   | "modele"
   | "produit"
-  | "image_produit";
+  | "image_produit"
+  // Correction "travail à distance / plusieurs machines en parallèle"
+  // (2026-10-22) — même mécanisme générique (voir core/compteStore.ts
+  // côté API).
+  | "compte";
 export type StatutBoiteEnvoi = "pending" | "sent" | "confirmed" | "error";
 
 export interface EntreeBoiteEnvoi {
@@ -108,6 +112,18 @@ export class BoiteEnvoiRepository {
   listerEnAttente(): EntreeBoiteEnvoi[] {
     const rows = this.db.prepare("SELECT * FROM boite_envoi WHERE status = 'pending' ORDER BY created_at ASC").all() as EntreeBoiteEnvoiRow[];
     return rows.map(rowToEntree);
+  }
+
+  /**
+   * Vrai si au moins une entrée de ce type existe déjà (quel que soit son
+   * statut) — correction "travail à distance / plusieurs machines en
+   * parallèle" (2026-10-22) : sert UNIQUEMENT à détecter si le rattrapage
+   * ponctuel des comptes déjà existants (voir main/index.ts) a déjà eu
+   * lieu, pour ne jamais le rejouer à chaque démarrage.
+   */
+  existeEntreePourType(entityType: TypeOperationBoiteEnvoi): boolean {
+    const row = this.db.prepare("SELECT 1 FROM boite_envoi WHERE entity_type = ? LIMIT 1").get(entityType);
+    return row !== undefined;
   }
 
   findById(id: string): EntreeBoiteEnvoi | null {

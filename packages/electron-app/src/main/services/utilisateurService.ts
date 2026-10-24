@@ -1,6 +1,7 @@
 import type { auth } from "@maxi-equip/domain";
 import type { Role } from "@maxi-equip/shared-types";
 import type { UtilisateurRepository, UtilisateurPublic } from "../auth/utilisateurRepository.js";
+import type { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 
 /**
  * Politique de mot de passe interne — jamais exposée directement au
@@ -25,8 +26,42 @@ function validerPolitiqueMotDePasse(motDePasse: string): string | null {
 export class UtilisateurService {
   constructor(
     private readonly repository: UtilisateurRepository,
-    private readonly hasher: auth.PasswordHasher
+    private readonly hasher: auth.PasswordHasher,
+    /**
+     * Correction "travail à distance / plusieurs machines en parallèle"
+     * (2026-10-22) — OPTIONNEL pour ne jamais casser un site d'appel
+     * existant (tests) qui construirait ce service sans lui : absent,
+     * aucune mise en file, comportement 100% local inchangé. Présent,
+     * chaque création/modification/changement de mot de passe/
+     * activation/désactivation est mise en file pour remonter vers le
+     * serveur central (comptes centralisés), exactement comme un produit
+     * ou un modèle — jamais besoin d'être en ligne pour AGIR ici, voir
+     * SyncService pour l'envoi réel différé.
+     */
+    private readonly boiteEnvoiRepository?: BoiteEnvoiRepository
   ) {}
+
+  /**
+   * Met en file la version COMPLÈTE actuelle du compte (jamais un delta)
+   * — même principe que `enqueueProduitSync` (metier.ts) : la projection
+   * serveur est un upsert-si-plus-récent sur l'état entier, jamais un
+   * patch partiel.
+   */
+  private enqueuerSyncCompte(id: string, operation: "create" | "update" = "update"): void {
+    if (!this.boiteEnvoiRepository) return;
+    const compte = this.repository.findByIdPourSynchronisation(id);
+    if (!compte) return;
+    this.boiteEnvoiRepository.creer("compte", compte.id, {
+      operation,
+      compteId: compte.id,
+      identifiant: compte.identifiant,
+      hashMotDePasse: compte.passwordHash,
+      nom: compte.nom,
+      role: compte.role,
+      actif: compte.actif,
+      updatedAt: compte.updatedAt,
+    });
+  }
 
   /** Liste tous les utilisateurs (sans hash), triés par nom ASC. */
   listerUtilisateurs(): UtilisateurPublic[] {
@@ -74,6 +109,7 @@ export class UtilisateurService {
       role: input.role,
       passwordHash,
     });
+    this.enqueuerSyncCompte(id, "create");
 
     return { id };
   }
@@ -133,6 +169,7 @@ export class UtilisateurService {
     if (input.identifiant !== undefined) sanitized.identifiant = input.identifiant.trim();
 
     this.repository.update(id, sanitized);
+    this.enqueuerSyncCompte(id);
   }
 
   /**
@@ -158,6 +195,7 @@ export class UtilisateurService {
 
     const hash = await this.hasher.hash(input.motDePasse);
     this.repository.updatePasswordHash(id, hash);
+    this.enqueuerSyncCompte(id);
   }
 
   /**
@@ -185,6 +223,7 @@ export class UtilisateurService {
       }
     }
     this.repository.deactivate(id);
+    this.enqueuerSyncCompte(id);
   }
 
   /**
@@ -196,5 +235,6 @@ export class UtilisateurService {
       throw new Error("Utilisateur introuvable.");
     }
     this.repository.activate(id);
+    this.enqueuerSyncCompte(id);
   }
 }

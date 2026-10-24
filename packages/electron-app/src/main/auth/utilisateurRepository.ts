@@ -165,6 +165,62 @@ export class UtilisateurRepository {
       .run(now, id);
   }
 
+  /**
+   * Hash factice — correction "travail à distance / plusieurs machines en
+   * parallèle" (2026-10-22). Un compte créé par l'Administrateur puis
+   * récupéré ICI pour la première fois via une connexion centrale (voir
+   * `upsertDepuisConnexionCentrale`) n'a jamais eu de mot de passe local
+   * à stocker (l'authentification réelle a eu lieu côté serveur) — mais
+   * la colonne `password_hash` reste NOT NULL. Cette valeur ne PEUT PAS
+   * être vérifiée avec succès par Argon2id (jamais un vrai hash) : si la
+   * synchronisation est un jour désactivée sur ce poste, la connexion
+   * locale échouera proprement pour ce compte plutôt que d'accepter
+   * silencieusement n'importe quel mot de passe.
+   */
+  private static readonly HASH_FACTICE_COMPTE_CENTRAL = "central-sync:aucun-mot-de-passe-local-jamais-verifiable";
+
+  /**
+   * Met à jour le miroir local d'un compte authentifié via le serveur
+   * central (voir LoginCentralService) — jamais le mot de passe, jamais
+   * recalculé localement. Crée la ligne si c'est la première fois que ce
+   * poste voit ce compte (nouvelle machine), ou met à jour nom/
+   * identifiant/rôle si elle existe déjà (ex. modifié par l'Admin sur un
+   * autre poste depuis la dernière connexion ici) — ne touche JAMAIS un
+   * `password_hash` déjà présent (celui du tout premier compte
+   * Administrateur créé localement, par ex., reste utilisable si la
+   * synchronisation est désactivée plus tard).
+   */
+  upsertDepuisConnexionCentrale(compte: { id: string; identifiant: string; nom: string; role: Role }): void {
+    const now = new Date().toISOString();
+    const existe = this.db.prepare("SELECT id FROM utilisateurs WHERE id = ?").get(compte.id) as { id: string } | undefined;
+    if (existe) {
+      this.db
+        .prepare("UPDATE utilisateurs SET identifiant = ?, nom = ?, role = ?, actif = 1, updated_at = ? WHERE id = ?")
+        .run(compte.identifiant, compte.nom, compte.role, now, compte.id);
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO utilisateurs (id, nom, identifiant, password_hash, role, actif, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
+      )
+      .run(compte.id, compte.nom, compte.identifiant, UtilisateurRepository.HASH_FACTICE_COMPTE_CENTRAL, compte.role, now, now);
+  }
+
+  /**
+   * Vue COMPLÈTE (avec le hash) — réservée à la synchronisation du
+   * compte vers le serveur central (correction "travail à distance /
+   * plusieurs machines en parallèle", 2026-10-22, voir
+   * UtilisateurService.enqueuerSyncCompte). JAMAIS exposée au Renderer
+   * (voir `findById`/`list`, qui renvoient `UtilisateurPublic`, sans
+   * hash, pour cet usage).
+   */
+  findByIdPourSynchronisation(id: string): { id: string; identifiant: string; passwordHash: string; nom: string; role: Role; actif: boolean; updatedAt: string } | null {
+    const row = this.db.prepare("SELECT * FROM utilisateurs WHERE id = ?").get(id) as UtilisateurRow | undefined;
+    if (!row) return null;
+    return { id: row.id, identifiant: row.identifiant, passwordHash: row.password_hash, nom: row.nom, role: row.role as Role, actif: row.actif === 1, updatedAt: row.updated_at };
+  }
+
   /** Compte les administrateurs actifs. */
   countAdminActifs(): number {
     const row = this.db

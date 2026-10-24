@@ -15,6 +15,10 @@ import {
   type PromotionRow,
   type IdentiteCataloguePayload,
   type IdentiteRow,
+  type CompteCataloguePayload,
+  type CompteRow,
+  type DemandeValidationStock,
+  type ResultatValidationStock,
 } from "./serverStorage.js";
 
 const { Pool } = pg;
@@ -130,6 +134,39 @@ export class PostgresServerStorage implements ServerStorage {
         hash                       TEXT NOT NULL,
         cle_chiffree_sauvegarde    TEXT,
         updated_at                 TEXT NOT NULL
+      );
+
+      -- Correction "travail à distance / plusieurs machines en parallèle"
+      -- (2026-10-22) — voir serverStorage.ts (CompteCataloguePayload) pour
+      -- le raisonnement complet.
+      CREATE TABLE IF NOT EXISTS comptes_utilisateurs (
+        id                TEXT PRIMARY KEY,
+        identifiant       TEXT NOT NULL,
+        hash_mot_de_passe TEXT NOT NULL,
+        nom               TEXT NOT NULL,
+        role              TEXT NOT NULL,
+        actif             BOOLEAN NOT NULL DEFAULT TRUE,
+        deleted_at        TEXT,
+        updated_at        TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_comptes_identifiant ON comptes_utilisateurs (identifiant) WHERE deleted_at IS NULL;
+
+      -- Stock partagé, autorité unique pour toute opération qui en vérifie
+      -- la disponibilité (voir DemandeValidationStock) — jamais déduit du
+      -- SQLite local d'un poste une fois la synchronisation configurée.
+      CREATE TABLE IF NOT EXISTS stock_central (
+        produit_id     TEXT NOT NULL,
+        emplacement_id TEXT NOT NULL,
+        quantite       INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (produit_id, emplacement_id)
+      );
+
+      -- Compteur de numéro de facture par préfixe (ex. "F-2026-"), attribué
+      -- de façon atomique dans la même transaction que la vérification du
+      -- stock — voir validerEtAppliquerOperationStock.
+      CREATE TABLE IF NOT EXISTS compteurs_facture (
+        prefix  TEXT PRIMARY KEY,
+        dernier INTEGER NOT NULL DEFAULT 0
       );
     `);
 
@@ -457,5 +494,104 @@ export class PostgresServerStorage implements ServerStorage {
     const res = await this.pool.query(`SELECT cle_chiffree_cloud_backup FROM installation_recuperation WHERE id = 'singleton'`);
     const row = res.rows[0] as { cle_chiffree_cloud_backup: string | null } | undefined;
     return row?.cle_chiffree_cloud_backup ?? null;
+  }
+
+  async appliquerOperationCompte(payload: CompteCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const res = await this.pool.query(
+      `INSERT INTO comptes_utilisateurs (id, identifiant, hash_mot_de_passe, nom, role, actif, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO UPDATE SET
+         identifiant = excluded.identifiant,
+         hash_mot_de_passe = excluded.hash_mot_de_passe,
+         nom = excluded.nom,
+         role = excluded.role,
+         actif = excluded.actif,
+         deleted_at = excluded.deleted_at,
+         updated_at = excluded.updated_at
+       WHERE excluded.updated_at >= comptes_utilisateurs.updated_at`,
+      [payload.compteId, payload.identifiant, payload.hashMotDePasse, payload.nom, payload.role, payload.actif, deletedAt, payload.updatedAt]
+    );
+    return { applique: (res.rowCount ?? 0) > 0 };
+  }
+
+  async trouverCompteParIdentifiant(identifiant: string): Promise<CompteRow | null> {
+    const res = await this.pool.query(
+      `SELECT id, identifiant, hash_mot_de_passe as "hashMotDePasse", nom, role, actif
+       FROM comptes_utilisateurs WHERE identifiant = $1 AND deleted_at IS NULL`,
+      [identifiant]
+    );
+    const row = res.rows[0] as CompteRow | undefined;
+    return row ?? null;
+  }
+
+  async validerEtAppliquerOperationStock(demande: DemandeValidationStock): Promise<ResultatValidationStock> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Idiome Postgres "verrouiller-ou-créer" en une seule requête : la
+      // ligne est créée à 0 si absente, sinon mise à jour avec sa PROPRE
+      // valeur (no-op fonctionnel) — dans les deux cas elle est verrouillée
+      // (FOR UPDATE implicite d'un UPDATE/INSERT) jusqu'au COMMIT/ROLLBACK,
+      // ce qui sérialise naturellement deux transactions concurrentes sur
+      // le même (produit_id, emplacement_id) sans file d'attente maison.
+      const etats: { produitId: string; emplacementId: string; delta: number; actuel: number }[] = [];
+      for (const d of demande.deltas) {
+        const res = await client.query(
+          `INSERT INTO stock_central (produit_id, emplacement_id, quantite)
+           VALUES ($1, $2, 0)
+           ON CONFLICT (produit_id, emplacement_id) DO UPDATE SET quantite = stock_central.quantite
+           RETURNING quantite`,
+          [d.produitId, d.emplacementId]
+        );
+        const actuel = (res.rows[0] as { quantite: number }).quantite;
+        etats.push({ ...d, actuel });
+      }
+
+      const insuffisants = etats.filter((e) => e.actuel + e.delta < 0);
+      if (insuffisants.length > 0) {
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          raison: "stock_insuffisant",
+          details: insuffisants.map((e) => ({ produitId: e.produitId, emplacementId: e.emplacementId, disponible: e.actuel, demande: -e.delta })),
+        };
+      }
+
+      const stockApres: { produitId: string; emplacementId: string; quantite: number }[] = [];
+      for (const e of etats) {
+        const quantite = e.actuel + e.delta;
+        await client.query(`UPDATE stock_central SET quantite = $1 WHERE produit_id = $2 AND emplacement_id = $3`, [
+          quantite,
+          e.produitId,
+          e.emplacementId,
+        ]);
+        stockApres.push({ produitId: e.produitId, emplacementId: e.emplacementId, quantite });
+      }
+
+      let numero: string | undefined;
+      if (demande.demandeNumeroFacture) {
+        const prefix = demande.demandeNumeroFacture.prefix;
+        const res = await client.query(
+          `INSERT INTO compteurs_facture (prefix, dernier)
+           VALUES ($1, 0)
+           ON CONFLICT (prefix) DO UPDATE SET dernier = compteurs_facture.dernier
+           RETURNING dernier`,
+          [prefix]
+        );
+        const prochain = (res.rows[0] as { dernier: number }).dernier + 1;
+        await client.query(`UPDATE compteurs_facture SET dernier = $1 WHERE prefix = $2`, [prochain, prefix]);
+        numero = `${prefix}${String(prochain).padStart(4, "0")}`;
+      }
+
+      await client.query("COMMIT");
+      return { success: true, numero, stockApres };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }

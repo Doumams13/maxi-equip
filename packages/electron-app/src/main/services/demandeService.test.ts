@@ -35,13 +35,13 @@ function ouvrirBaseDeTest(): Database.Database {
   return db;
 }
 
-describe("DemandeService — Correction workflow réel (base SQLite réelle)", () => {
+describe("DemandeService — Correction workflow réel (base SQLite réelle)", async () => {
   let db: Database.Database;
   let produitId: string;
   let depotId: string;
   let shopId: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     db = ouvrirBaseDeTest();
     db.prepare(
       "INSERT INTO utilisateurs (id, identifiant, nom, role, password_hash, actif, created_at, updated_at) VALUES ('u1','test','Testeur','administrateur','x',1,?,?)"
@@ -68,10 +68,10 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     const mouvementRepository = new MouvementRepository(db);
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
     const stockService = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository);
-    stockService.enregistrerEntree(produitId, depotId, 50, "u1");
+    await stockService.enregistrerEntree(produitId, depotId, 50, "u1");
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     db.close();
     if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
   });
@@ -93,7 +93,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     return new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository);
   }
 
-  it("TEST 1 — nouvelle demande reçue : statut Nouvelle, notification créée, entrée de suivi initiale", () => {
+  it("TEST 1 — nouvelle demande reçue : statut Nouvelle, notification créée, entrée de suivi initiale", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "Jean Client",
@@ -111,7 +111,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(suivi[0]!.statut).toBe("nouvelle");
   });
 
-  it("TEST 3 — changement de statut nouvelle -> à contacter, réellement enregistré", () => {
+  it("TEST 3 — changement de statut nouvelle -> à contacter, réellement enregistré", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "A Contacter",
@@ -125,7 +125,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(relu.statut).toBe("a_contacter");
   });
 
-  it("TEST 4 — commentaire de suivi facultatif sauvegardé, historique correct", () => {
+  it("TEST 4 — commentaire de suivi facultatif sauvegardé, historique correct", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "Avec Commentaire",
@@ -141,7 +141,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(suivi).toHaveLength(2);
   });
 
-  it("le commentaire de suivi reste facultatif — un changement de statut sans commentaire fonctionne normalement", () => {
+  it("le commentaire de suivi reste facultatif — un changement de statut sans commentaire fonctionne normalement", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "Sans Commentaire",
@@ -154,7 +154,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(service.listerSuivi(demande.id)[0]!.commentaire).toBeNull();
   });
 
-  it("TEST 5 — à contacter -> en traitement, avec commentaire, historique complet et ordonné", () => {
+  it("TEST 5 — à contacter -> en traitement, avec commentaire, historique complet et ordonné", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "Progression Complete",
@@ -172,7 +172,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(suivi[0]!.commentaire).toBe("Client contacté. Vérification des produits.");
   });
 
-  it("marquerSuivi refuse un statut hors suivi (confirmee/refusee/annulee gardent leurs propres méthodes)", () => {
+  it("marquerSuivi refuse un statut hors suivi (confirmee/refusee/annulee gardent leurs propres méthodes)", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "Statut Invalide",
@@ -183,7 +183,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(() => service.marquerSuivi(demande.id, "confirmee")).toThrow(DemandeValidationError);
   });
 
-  it("TEST 10 + Partie 18/19 — compteur : nouvelle/à contacter/en cours comptées, traitée/refusée/annulée jamais comptées", () => {
+  it("TEST 10 + Partie 18/19 — compteur : nouvelle/à contacter/en cours comptées, traitée/refusée/annulée jamais comptées", async () => {
     const service = construireService();
     const avant = service.compterActives();
 
@@ -209,7 +209,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(service.compterActives()).toBe(avant + 1);
   });
 
-  it("TEST 9 — refus avec motif obligatoire, historique correct", () => {
+  it("TEST 9 — refus avec motif obligatoire, historique correct", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "A Refuser",
@@ -224,7 +224,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(service.listerSuivi(demande.id)[0]!.statut).toBe("refusee");
   });
 
-  it("annulation — distincte du refus, aucun motif requis", () => {
+  it("annulation — distincte du refus, aucun motif requis", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "A Annuler",
@@ -237,7 +237,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(annulee.refusMotif).toBeNull();
   });
 
-  it("TEST 6/7/8/9 (Partie 23) + Partie 18 — SCÉNARIO BOUT-EN-BOUT COMPLET : suivi -> Traiter -> vraie vente (VenteService réel) -> liaison -> Traitée", () => {
+  it("TEST 6/7/8/9 (Partie 23) + Partie 18 — SCÉNARIO BOUT-EN-BOUT COMPLET : suivi -> Traiter -> vraie vente (VenteService réel) -> liaison -> Traitée", async () => {
     const service = construireService();
     const venteService = creerVenteReelle();
     const stockRepository = new StockRepository(db);
@@ -262,7 +262,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
 
     const stockAvant = stockRepository.getQuantite(produitId, depotId);
 
-    const resultatVente = venteService.enregistrerVente({
+    const resultatVente = await venteService.enregistrerVente({
       pointDeVenteId: shopId,
       clientNom: donneesPourVente.clientNom,
       clientTelephone: donneesPourVente.clientTelephone,
@@ -295,7 +295,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(service.listerToutes().find((d) => d.id === demande.id)!.statut).toBe("confirmee");
   });
 
-  it("marquerTraitee refuse une demande déjà traitée, ou refusée/annulée — jamais une double liaison", () => {
+  it("marquerTraitee refuse une demande déjà traitée, ou refusée/annulée — jamais une double liaison", async () => {
     const service = construireService();
     const venteService = creerVenteReelle();
     const demande = service.creerDepuisReception({
@@ -304,7 +304,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
       clientAdresse: "Libreville",
       lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
     });
-    const resultat = venteService.enregistrerVente({
+    const resultat = await venteService.enregistrerVente({
       pointDeVenteId: shopId,
       clientNom: demande.clientNom,
       clientTelephone: demande.clientTelephone,
@@ -331,7 +331,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(() => service.marquerTraitee(demandeAnnulee.id, resultat.factureId)).toThrow(DemandeValidationError);
   });
 
-  it("purge : une demande non confirmée vieille de plus de 7 jours est supprimée définitivement, une confirmée (traitée) jamais", () => {
+  it("purge : une demande non confirmée vieille de plus de 7 jours est supprimée définitivement, une confirmée (traitée) jamais", async () => {
     const service = construireService();
     const venteService = creerVenteReelle();
 
@@ -350,7 +350,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
       clientAdresse: "Libreville",
       lignes: [{ produitId, motif: "Carreau Demande Test", taille: "60x60", quantite: 1, prixIndicatif: 12000 }],
     });
-    const resultat = venteService.enregistrerVente({
+    const resultat = await venteService.enregistrerVente({
       pointDeVenteId: shopId,
       clientNom: traiteeAncienne.clientNom,
       clientTelephone: traiteeAncienne.clientTelephone,
@@ -374,7 +374,7 @@ describe("DemandeService — Correction workflow réel (base SQLite réelle)", (
     expect(service.obtenir(traiteeAncienne.id)!.statut).toBe("confirmee");
   });
 
-  it("Correction 'Intégration Site Phase 5' — une demande avec un produit_id EXTERNE (jamais dans le catalogue local) est réellement acceptée, plus de contrainte de clé étrangère bloquante", () => {
+  it("Correction 'Intégration Site Phase 5' — une demande avec un produit_id EXTERNE (jamais dans le catalogue local) est réellement acceptée, plus de contrainte de clé étrangère bloquante", async () => {
     const service = construireService();
     const demande = service.creerDepuisReception({
       clientNom: "Client Site Vitrine",

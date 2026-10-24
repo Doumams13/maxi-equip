@@ -15,6 +15,17 @@ import { getConfigurationSync } from "./syncConfig.js";
  *   9. Libération verrou (toujours, même en cas d'erreur — try/finally).
  */
 
+/**
+ * Correction "synchronisation bloquée après plusieurs tâches" (2026-10-12) —
+ * sans timeout, une requête `fetch` qui ne reçoit jamais de réponse (connexion
+ * qui reste ouverte sans répondre) ne résout ni ne rejette jamais sa promesse.
+ * Le `finally` qui libère `synchronisationEnCours` n'est alors jamais atteint,
+ * et toute tentative suivante échoue avec "Une synchronisation est déjà en
+ * cours" jusqu'au redémarrage complet de l'application.
+ */
+const DELAI_MAX_REQUETE_MS = 20_000;
+const DELAI_MAX_REQUETE_IMAGE_MS = 45_000;
+
 export interface ResultatSynchronisation {
   success: boolean;
   push?: { envoyees: number; confirmees: number };
@@ -133,6 +144,7 @@ export class SyncService {
         body: JSON.stringify({
           operations: aEnvoyer.map((e) => ({ entityType: e.entityType, entityId: e.entityId, payload: JSON.parse(e.payloadJson) })),
         }),
+        signal: AbortSignal.timeout(DELAI_MAX_REQUETE_MS),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
@@ -194,6 +206,7 @@ export class SyncService {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
           body: entree.payloadJson,
+          signal: AbortSignal.timeout(DELAI_MAX_REQUETE_IMAGE_MS),
         });
         if (!reponse.ok) {
           const texte = await reponse.text().catch(() => "");
@@ -219,7 +232,10 @@ export class SyncService {
     do {
       let reponse: Response;
       try {
-        reponse = await fetch(`${apiUrl}/v1/sync/pull?since=${curseur}`, { headers: { Authorization: `Bearer ${jwt}` } });
+        reponse = await fetch(`${apiUrl}/v1/sync/pull?since=${curseur}`, {
+          headers: { Authorization: `Bearer ${jwt}` },
+          signal: AbortSignal.timeout(DELAI_MAX_REQUETE_MS),
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
         return { success: false, etape: "pull", message: `Impossible de contacter le serveur pour le PULL : ${message}` };

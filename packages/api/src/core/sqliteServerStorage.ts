@@ -15,6 +15,10 @@ import {
   type PromotionRow,
   type IdentiteCataloguePayload,
   type IdentiteRow,
+  type CompteCataloguePayload,
+  type CompteRow,
+  type DemandeValidationStock,
+  type ResultatValidationStock,
 } from "./serverStorage.js";
 
 /**
@@ -109,6 +113,39 @@ export class SqliteServerStorage implements ServerStorage {
         cle_chiffree_sauvegarde   TEXT,
         cle_chiffree_cloud_backup TEXT,
         updated_at                TEXT NOT NULL
+      );
+
+      -- Correction "travail à distance / plusieurs machines en parallèle"
+      -- (2026-10-22) — voir serverStorage.ts (CompteCataloguePayload) pour
+      -- le raisonnement complet.
+      CREATE TABLE IF NOT EXISTS comptes_utilisateurs (
+        id                TEXT PRIMARY KEY,
+        identifiant       TEXT NOT NULL,
+        hash_mot_de_passe TEXT NOT NULL,
+        nom               TEXT NOT NULL,
+        role              TEXT NOT NULL,
+        actif             INTEGER NOT NULL DEFAULT 1,
+        deleted_at        TEXT,
+        updated_at        TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_comptes_identifiant ON comptes_utilisateurs (identifiant) WHERE deleted_at IS NULL;
+
+      -- Stock partagé, autorité unique pour toute opération qui en vérifie
+      -- la disponibilité (voir DemandeValidationStock) — jamais déduit du
+      -- SQLite local d'un poste une fois la synchronisation configurée.
+      CREATE TABLE IF NOT EXISTS stock_central (
+        produit_id     TEXT NOT NULL,
+        emplacement_id TEXT NOT NULL,
+        quantite       INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (produit_id, emplacement_id)
+      );
+
+      -- Compteur de numéro de facture par préfixe (ex. "F-2026-"), attribué
+      -- de façon atomique dans la même transaction que la vérification du
+      -- stock — voir validerEtAppliquerOperationStock.
+      CREATE TABLE IF NOT EXISTS compteurs_facture (
+        prefix  TEXT PRIMARY KEY,
+        dernier INTEGER NOT NULL DEFAULT 0
       );
     `);
 
@@ -452,5 +489,91 @@ export class SqliteServerStorage implements ServerStorage {
       | { cle_chiffree_cloud_backup: string | null }
       | undefined;
     return row?.cle_chiffree_cloud_backup ?? null;
+  }
+
+  async appliquerOperationCompte(payload: CompteCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const resultat = this.db
+      .prepare(
+        `INSERT INTO comptes_utilisateurs (id, identifiant, hash_mot_de_passe, nom, role, actif, deleted_at, updated_at)
+         VALUES (@id, @identifiant, @hashMotDePasse, @nom, @role, @actif, @deletedAt, @updatedAt)
+         ON CONFLICT(id) DO UPDATE SET
+           identifiant = excluded.identifiant,
+           hash_mot_de_passe = excluded.hash_mot_de_passe,
+           nom = excluded.nom,
+           role = excluded.role,
+           actif = excluded.actif,
+           deleted_at = excluded.deleted_at,
+           updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= comptes_utilisateurs.updated_at`
+      )
+      .run({
+        id: payload.compteId,
+        identifiant: payload.identifiant,
+        hashMotDePasse: payload.hashMotDePasse,
+        nom: payload.nom,
+        role: payload.role,
+        actif: payload.actif ? 1 : 0,
+        deletedAt,
+        updatedAt: payload.updatedAt,
+      });
+
+    return { applique: resultat.changes > 0 };
+  }
+
+  async trouverCompteParIdentifiant(identifiant: string): Promise<CompteRow | null> {
+    const row = this.db
+      .prepare(
+        "SELECT id, identifiant, hash_mot_de_passe as hashMotDePasse, nom, role, actif FROM comptes_utilisateurs WHERE identifiant = ? AND deleted_at IS NULL"
+      )
+      .get(identifiant) as { id: string; identifiant: string; hashMotDePasse: string; nom: string; role: string; actif: number } | undefined;
+    if (!row) return null;
+    return { id: row.id, identifiant: row.identifiant, hashMotDePasse: row.hashMotDePasse, nom: row.nom, role: row.role, actif: row.actif === 1 };
+  }
+
+  async validerEtAppliquerOperationStock(demande: DemandeValidationStock): Promise<ResultatValidationStock> {
+    const db = this.db;
+    const executer = db.transaction((): ResultatValidationStock => {
+      const lecture = db.prepare("SELECT quantite FROM stock_central WHERE produit_id = ? AND emplacement_id = ?");
+      const etats = demande.deltas.map((d) => {
+        const row = lecture.get(d.produitId, d.emplacementId) as { quantite: number } | undefined;
+        return { ...d, actuel: row?.quantite ?? 0 };
+      });
+
+      const insuffisants = etats.filter((e) => e.actuel + e.delta < 0);
+      if (insuffisants.length > 0) {
+        return {
+          success: false,
+          raison: "stock_insuffisant",
+          details: insuffisants.map((e) => ({ produitId: e.produitId, emplacementId: e.emplacementId, disponible: e.actuel, demande: -e.delta })),
+        };
+      }
+
+      const upsert = db.prepare(
+        `INSERT INTO stock_central (produit_id, emplacement_id, quantite) VALUES (@produitId, @emplacementId, @quantite)
+         ON CONFLICT(produit_id, emplacement_id) DO UPDATE SET quantite = excluded.quantite`
+      );
+      const stockApres = etats.map((e) => {
+        const quantite = e.actuel + e.delta;
+        upsert.run({ produitId: e.produitId, emplacementId: e.emplacementId, quantite });
+        return { produitId: e.produitId, emplacementId: e.emplacementId, quantite };
+      });
+
+      let numero: string | undefined;
+      if (demande.demandeNumeroFacture) {
+        const prefix = demande.demandeNumeroFacture.prefix;
+        const ligne = db.prepare("SELECT dernier FROM compteurs_facture WHERE prefix = ?").get(prefix) as { dernier: number } | undefined;
+        const prochain = (ligne?.dernier ?? 0) + 1;
+        db.prepare(
+          `INSERT INTO compteurs_facture (prefix, dernier) VALUES (?, ?)
+           ON CONFLICT(prefix) DO UPDATE SET dernier = excluded.dernier`
+        ).run(prefix, prochain);
+        numero = `${prefix}${String(prochain).padStart(4, "0")}`;
+      }
+
+      return { success: true, numero, stockApres };
+    });
+
+    return executer();
   }
 }

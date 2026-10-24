@@ -75,3 +75,66 @@ describe("ProduitRepository — carreauxParCarton, base réelle", () => {
     expect(repository.listByModele(modeleId)[0]?.carreauxParCarton).toBe(12);
   });
 });
+
+/**
+ * Correction "Dashboard cliquable" (2026-10-21) — `listSousSeuilDepots`
+ * doit renvoyer `modeleId`, seul identifiant permettant au Dashboard de
+ * mettre en surbrillance le bon modèle sur l'écran Carreaux (la liste y
+ * est groupée par modèle, pas par variante) — base réelle, jamais mockée.
+ */
+describe("ProduitRepository.listSousSeuilDepots — modeleId (base réelle)", () => {
+  let db: Database.Database;
+  let repository: ProduitRepository;
+  const DEPOT_ID = "depot-akebe-test";
+
+  beforeEach(() => {
+    db = ouvrirBaseDeTest();
+    repository = new ProduitRepository(db);
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO emplacements (id, nom, type, ville, est_point_de_vente, created_at, updated_at) VALUES (?, 'Akébé', 'depot', 'Libreville', 0, ?, ?)"
+    ).run(DEPOT_ID, maintenant, maintenant);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  afterAll(() => {
+    if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
+  });
+
+  it("renvoie le modeleId d'une variante sous seuil, pour la navigation cliquable du Dashboard", () => {
+    const modeleId = "modele-sous-seuil-1";
+    const maintenant = new Date().toISOString();
+    db.prepare("INSERT INTO modeles_produit (id, motif, type, created_at, updated_at) VALUES (?, 'Marbre', 'Faïence', ?, ?)").run(
+      modeleId, maintenant, maintenant
+    );
+    const produitId = repository.create({
+      modeleId, motif: "Marbre", type: "Faïence", taille: "60x60", tailleTri: 60,
+      reference: "MB-6060", prix: 8000, seuilAlerte: 10,
+    });
+    db.prepare("INSERT INTO stocks (id, produit_id, emplacement_id, quantite, created_at, updated_at) VALUES ('s1', ?, ?, 2, ?, ?)").run(
+      produitId, DEPOT_ID, maintenant, maintenant
+    );
+
+    const resultats = repository.listSousSeuilDepots([DEPOT_ID]);
+    expect(resultats).toHaveLength(1);
+    expect(resultats[0]!.modeleId).toBe(modeleId);
+  });
+
+  it("renvoie modeleId=null pour une variante antérieure à la migration multi-format (jamais reconstruit)", () => {
+    const maintenant = new Date().toISOString();
+    const produitId = repository.create({
+      modeleId: null, motif: "Ancien produit", type: "Faïence", taille: "30x30", tailleTri: 30,
+      reference: "AP-3030", prix: 4000, seuilAlerte: 10,
+    });
+    db.prepare("INSERT INTO stocks (id, produit_id, emplacement_id, quantite, created_at, updated_at) VALUES ('s2', ?, ?, 1, ?, ?)").run(
+      produitId, DEPOT_ID, maintenant, maintenant
+    );
+
+    const resultats = repository.listSousSeuilDepots([DEPOT_ID]);
+    expect(resultats).toHaveLength(1);
+    expect(resultats[0]!.modeleId).toBeNull();
+  });
+});

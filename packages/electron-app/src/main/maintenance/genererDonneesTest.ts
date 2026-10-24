@@ -63,7 +63,7 @@ function dateEtalee(indice: number, total: number): string {
   return new Date(maintenant - sixMoisMs + decalage).toISOString();
 }
 
-export function executerGenerationDonneesTest(db: Database.Database): ResultatGeneration {
+export async function executerGenerationDonneesTest(db: Database.Database): Promise<ResultatGeneration> {
   const produitRepository = new ProduitRepository(db);
   const stockRepository = new StockRepository(db);
   const mouvementRepository = new MouvementRepository(db);
@@ -100,7 +100,7 @@ export function executerGenerationDonneesTest(db: Database.Database): ResultatGe
     const produitId = choisir(produitIds, i);
     const depot = choisir(depots, i + 1);
     const quantite = 20 + (i % 15) * 5;
-    stockService.enregistrerEntree(produitId, depot.id, quantite, vendeur.id);
+    await stockService.enregistrerEntree(produitId, depot.id, quantite, vendeur.id);
     db.prepare("UPDATE mouvements SET date = ? WHERE id = (SELECT id FROM mouvements ORDER BY rowid DESC LIMIT 1)").run(dateEtalee(i, NB_ENTREES + 300));
     entreesCreees++;
   }
@@ -115,7 +115,7 @@ export function executerGenerationDonneesTest(db: Database.Database): ResultatGe
     const disponible = stockRepository.getQuantite(produitId, source.id);
     const quantite = Math.min(5 + (i % 10), Math.max(1, Math.floor(disponible / 4)));
     if (quantite <= 0) continue;
-    stockService.enregistrerTransfert(produitId, source.id, destination.id, quantite, vendeur.id);
+    await stockService.enregistrerTransfert(produitId, source.id, destination.id, quantite, vendeur.id);
     db.prepare("UPDATE mouvements SET date = ? WHERE id = (SELECT id FROM mouvements ORDER BY rowid DESC LIMIT 1) AND emplacement_source_id IS NOT NULL").run(
       dateEtalee(i + NB_ENTREES, NB_ENTREES + 300)
     );
@@ -153,7 +153,7 @@ export function executerGenerationDonneesTest(db: Database.Database): ResultatGe
     const quantiteFinale = Math.max(quantiteAllouee, quantiteAllouee < quantiteVente && fournisseurExterne ? quantiteVente : quantiteAllouee || 1);
 
     try {
-      const resultat = venteService.enregistrerVente({
+      const resultat = await venteService.enregistrerVente({
         pointDeVenteId: shop.id,
         clientNom: `${choisir(PRENOMS_CLIENTS, i)} ${choisir(NOMS_CLIENTS, i + 3)}`,
         clientTelephone: `077${String(100000 + i).padStart(6, "0")}`,
@@ -190,7 +190,7 @@ export function executerGenerationDonneesTest(db: Database.Database): ResultatGe
   const motifs = ["Erreur de saisie", "Client s'est rétracté", "Produit indisponible finalement", "Double saisie"];
   for (let i = 0; i < facturesCreeesIds.length; i += 6) {
     try {
-      venteService.annulerVente(facturesCreeesIds[i]!, choisir(motifs, i), vendeur.id);
+      await venteService.annulerVente(facturesCreeesIds[i]!, choisir(motifs, i), vendeur.id);
       facturesAnnulees++;
     } catch {
       // Ignore si déjà annulée ou introuvable.

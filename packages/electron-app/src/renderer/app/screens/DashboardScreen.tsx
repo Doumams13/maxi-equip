@@ -18,10 +18,14 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { MOUVEMENT_LABELS } from "../mouvementLabels.js";
 import type { EvenementHistorique } from "../../../preload/index.js";
 import type { CibleOperation } from "../AppRoot.js";
+import type { ScreenId } from "../Shell.js";
 
 interface Summary {
   stockTousDepots: number;
   caTotal: number;
+  /** Correction "voir le revenu journalier et mensuel" (2026-10-21). */
+  caJour: number;
+  caMois: number;
   produitsSousSeuilGlobal: number;
   totalFactures: number;
   totalProduits: number;
@@ -31,12 +35,13 @@ interface Summary {
   serieEntreesSorties: { jour: string; entrees: number; sorties: number }[];
   stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
   topProduitsVendus: { label: string; quantite: number }[];
-  produitsSousSeuilListe: { id: string; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
+  produitsSousSeuilListe: { id: string; modeleId: string | null; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
   activiteRecente: EvenementHistorique[];
   stockDepots: number;
   stockParEmplacementPourGerant: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
   mesVentesAujourdhui: number;
   monChiffreAffaires: number;
+  monChiffreAffairesMois: number;
   mesFacturesAujourdhuiCount: number;
   mesEntrees: number;
   mesSorties: number;
@@ -47,11 +52,14 @@ function KpiCard({
   label,
   value,
   tone,
+  onClick,
 }: {
   icon: typeof Boxes;
   label: string;
   value: string | number;
   tone: "accent" | "warning" | "info" | "success" | "danger" | "externe";
+  /** Correction "Dashboard cliquable" (2026-10-21) — absent = carte non cliquable (comportement historique, inchangé). */
+  onClick?: () => void;
 }) {
   const map = {
     accent: [defaultTokens.colors.accent, defaultTokens.colors.accentSoft],
@@ -63,7 +71,10 @@ function KpiCard({
   } as const;
   const [color, bg] = map[tone];
   return (
-    <Card style={{ flex: 1, display: "flex", alignItems: "center", gap: 14, minWidth: 200 }}>
+    <Card
+      onClick={onClick}
+      style={{ flex: 1, display: "flex", alignItems: "center", gap: 14, minWidth: 200, cursor: onClick ? "pointer" : undefined }}
+    >
       <div style={{ width: 42, height: 42, borderRadius: defaultTokens.radius.md, background: bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         <Icon size={20} color={color} />
       </div>
@@ -209,15 +220,85 @@ function LigneActivite({ m, userId, onNaviguer }: { m: EvenementHistorique; user
   );
 }
 
+/**
+ * Correction "liste des alertes incomplète" (2026-10-22) — factorisée pour
+ * être affichée à l'identique sur les tableaux de bord Administrateur ET
+ * Gérant/Vendeur (absente de ce dernier jusqu'ici). Le backend ne tronque
+ * plus la liste (voir metier.ts, dashboard:summary) : c'est cette zone à
+ * hauteur fixe + défilement qui absorbe désormais une liste potentiellement
+ * longue, plutôt qu'un nombre arbitraire d'éléments coupés.
+ */
+function ListeAlertesStock({
+  liste,
+  onNaviguer,
+}: {
+  liste: Summary["produitsSousSeuilListe"];
+  onNaviguer: (c: CibleOperation) => void;
+}) {
+  if (liste.length === 0) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "20px 0", color: defaultTokens.colors.success }}>
+        <CheckCircle2 size={22} />
+        <span style={{ fontSize: 13 }}>Tout est en ordre</span>
+      </div>
+    );
+  }
+  return (
+    <div style={{ maxHeight: 280, overflowY: "auto" }}>
+      {liste.map((p) => (
+        // Correction "Dashboard cliquable" (2026-10-21) : renvoie vers la
+        // fiche du carreau concerné — uniquement possible si modeleId est
+        // connu (absent pour une variante antérieure à la migration
+        // multi-format, voir produitRepository.listSousSeuilDepots).
+        <button
+          key={p.id}
+          type="button"
+          onClick={() => p.modeleId && onNaviguer({ type: "produit", id: p.modeleId })}
+          disabled={!p.modeleId}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "9px 0",
+            width: "100%",
+            borderBottom: `1px solid ${defaultTokens.colors.borderSoft}`,
+            background: "none",
+            border: "none",
+            borderBottomStyle: "solid",
+            textAlign: "left",
+            cursor: p.modeleId ? "pointer" : "default",
+            font: "inherit",
+          }}
+        >
+          <div style={{ width: 26, height: 26, borderRadius: 6, background: defaultTokens.colors.surfaceAlt, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <ImageOff size={13} color={defaultTokens.colors.textFaint} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: defaultTokens.colors.text }}>
+              {p.motif} — {p.taille}
+            </div>
+            <div style={{ fontSize: 11.5, color: defaultTokens.colors.textSoft }}>{p.type}</div>
+          </div>
+          <div style={{ fontFamily: defaultTokens.typography.mono, fontSize: 13, fontWeight: 600, color: p.stock <= 0 ? defaultTokens.colors.danger : defaultTokens.colors.warning }}>
+            {p.stock} ct.
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function DashboardAdmin({
   summary,
   userId,
   onNaviguer,
+  onNaviguerVersEcran,
   nomMagasin,
 }: {
   summary: Summary;
   userId: string;
   onNaviguer: (c: CibleOperation) => void;
+  onNaviguerVersEcran: (ecran: ScreenId) => void;
   nomMagasin: string;
 }) {
   return (
@@ -228,10 +309,46 @@ function DashboardAdmin({
       <p style={{ marginTop: 0, marginBottom: 20, color: defaultTokens.colors.textSoft, fontSize: 13.5 }}>Vue globale de l'entreprise {nomMagasin}</p>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 16 }}>
-        <KpiCard icon={Boxes} label="Stock total (Akébé + Akanda)" value={summary.stockTousDepots.toLocaleString("fr-FR")} tone="accent" />
-        <KpiCard icon={DollarSign} label="Chiffre d'affaires total" value={`${summary.caTotal.toLocaleString("fr-FR")} FCFA`} tone="success" />
+        <KpiCard
+          icon={Boxes}
+          label="Stock total (Akébé + Akanda)"
+          value={summary.stockTousDepots.toLocaleString("fr-FR")}
+          tone="accent"
+          onClick={() => onNaviguerVersEcran("stock")}
+        />
+        <KpiCard
+          icon={DollarSign}
+          label="Chiffre d'affaires total"
+          value={`${summary.caTotal.toLocaleString("fr-FR")} FCFA`}
+          tone="success"
+          onClick={() => onNaviguerVersEcran("factures")}
+        />
         <KpiCard icon={AlertTriangle} label="Alertes de stock (global)" value={summary.produitsSousSeuilGlobal} tone="warning" />
-        <KpiCard icon={Receipt} label="Factures émises" value={summary.totalFactures} tone="info" />
+        <KpiCard
+          icon={Receipt}
+          label="Factures émises"
+          value={summary.totalFactures}
+          tone="info"
+          onClick={() => onNaviguerVersEcran("factures")}
+        />
+      </div>
+
+      {/* Correction "voir le revenu journalier et mensuel" (2026-10-21). */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 16 }}>
+        <KpiCard
+          icon={DollarSign}
+          label="Chiffre d'affaires du jour"
+          value={`${summary.caJour.toLocaleString("fr-FR")} FCFA`}
+          tone="success"
+          onClick={() => onNaviguerVersEcran("factures")}
+        />
+        <KpiCard
+          icon={DollarSign}
+          label="Chiffre d'affaires du mois"
+          value={`${summary.caMois.toLocaleString("fr-FR")} FCFA`}
+          tone="success"
+          onClick={() => onNaviguerVersEcran("factures")}
+        />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 16 }}>
@@ -287,29 +404,7 @@ function DashboardAdmin({
 
         <Card style={{ flex: 1, minWidth: 340 }}>
           <TitreBloc>Produits en stock faible (global)</TitreBloc>
-          {summary.produitsSousSeuilListe.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "20px 0", color: defaultTokens.colors.success }}>
-              <CheckCircle2 size={22} />
-              <span style={{ fontSize: 13 }}>Tout est en ordre</span>
-            </div>
-          ) : (
-            summary.produitsSousSeuilListe.map((p) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: `1px solid ${defaultTokens.colors.borderSoft}` }}>
-                <div style={{ width: 26, height: 26, borderRadius: 6, background: defaultTokens.colors.surfaceAlt, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <ImageOff size={13} color={defaultTokens.colors.textFaint} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: defaultTokens.colors.text }}>
-                    {p.motif} — {p.taille}
-                  </div>
-                  <div style={{ fontSize: 11.5, color: defaultTokens.colors.textSoft }}>{p.type}</div>
-                </div>
-                <div style={{ fontFamily: defaultTokens.typography.mono, fontSize: 13, fontWeight: 600, color: p.stock <= 0 ? defaultTokens.colors.danger : defaultTokens.colors.warning }}>
-                  {p.stock} ct.
-                </div>
-              </div>
-            ))
-          )}
+          <ListeAlertesStock liste={summary.produitsSousSeuilListe} onNaviguer={onNaviguer} />
         </Card>
       </div>
 
@@ -358,10 +453,19 @@ function DashboardVendeur({
       <TitreBloc>Mon activité personnelle</TitreBloc>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 20 }}>
         <KpiCard icon={DollarSign} label="Mes ventes aujourd'hui" value={`${summary.mesVentesAujourdhui.toLocaleString("fr-FR")} FCFA`} tone="success" />
+        <KpiCard icon={DollarSign} label="Mon chiffre d'affaires (ce mois-ci)" value={`${summary.monChiffreAffairesMois.toLocaleString("fr-FR")} FCFA`} tone="success" />
         <KpiCard icon={Receipt} label="Mon chiffre d'affaires (total)" value={`${summary.monChiffreAffaires.toLocaleString("fr-FR")} FCFA`} tone="info" />
         <KpiCard icon={ArrowDownToLine} label="Mes entrées enregistrées" value={summary.mesEntrees.toLocaleString("fr-FR")} tone="accent" />
         <KpiCard icon={ArrowUpFromLine} label="Mes sorties enregistrées" value={summary.mesSorties.toLocaleString("fr-FR")} tone="warning" />
       </div>
+
+      {/* Correction "liste des alertes incomplète" (2026-10-22) — absente
+          jusqu'ici du tableau de bord Gérant/Vendeur, alors que la donnée
+          était déjà transmise par le backend. */}
+      <TitreBloc>Produits en stock faible (global)</TitreBloc>
+      <Card style={{ marginBottom: 20 }}>
+        <ListeAlertesStock liste={summary.produitsSousSeuilListe} onNaviguer={onNaviguer} />
+      </Card>
 
       <TitreBloc>Activité récente de l'entreprise</TitreBloc>
       <Card>
@@ -391,9 +495,11 @@ function DashboardVendeur({
 export interface DashboardScreenProps {
   session: { userId: string; nom: string; role: string };
   onNaviguerVersOperation: (cible: CibleOperation) => void;
+  /** Correction "Dashboard cliquable" (2026-10-21) — simple changement d'écran, sans cible précise à mettre en surbrillance (ex. une carte CA/Stock agrégée). */
+  onNaviguerVersEcran: (ecran: ScreenId) => void;
 }
 
-export function DashboardScreen({ session, onNaviguerVersOperation }: DashboardScreenProps) {
+export function DashboardScreen({ session, onNaviguerVersOperation, onNaviguerVersEcran }: DashboardScreenProps) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Correction "Finaliser Paramètres" §3/§4 : plus de "MAXI EQUIP" codé
@@ -427,7 +533,13 @@ export function DashboardScreen({ session, onNaviguerVersOperation }: DashboardS
   if (!summary) return null;
 
   return session.role === "administrateur" ? (
-    <DashboardAdmin summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} nomMagasin={nomMagasin} />
+    <DashboardAdmin
+      summary={summary}
+      userId={session.userId}
+      onNaviguer={onNaviguerVersOperation}
+      onNaviguerVersEcran={onNaviguerVersEcran}
+      nomMagasin={nomMagasin}
+    />
   ) : (
     <DashboardVendeur nom={session.nom} summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} nomMagasin={nomMagasin} />
   );

@@ -180,7 +180,7 @@ export function dessinerPiedDePage(doc: PDFKit.PDFDocument, identite: IdentiteEn
   doc.text("Société à responsabilité limitée, Siège Social : Libreville", MARGE_GAUCHE, 774.3, { width: largeur, align: "center" });
   doc.text(`BP : 22103, Tél : ${telephonesAffiches}, N° de Compte Bancaire : 90000489234-90`, MARGE_GAUCHE, 784.6, { width: largeur, align: "center" });
   doc.text("N° RCCM : GA-LBV-01-2025-B13-00187, NIF : 2025 0100 6503 M", MARGE_GAUCHE, 794.9, { width: largeur, align: "center" });
-  doc.text("E-mail : bempatra@gmail.com", MARGE_GAUCHE, 805.2, { width: largeur, align: "center" });
+  doc.text("E-mail : contact@maxi-equip.com", MARGE_GAUCHE, 805.2, { width: largeur, align: "center" });
 }
 
 /**
@@ -253,13 +253,20 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   // (530.5pt, bords 45.5 → 576.0 — cf. MARGE_DROITE), en conservant les
   // largeurs déjà vérifiées visuellement pour TAILLE et QTÉ (58pt) qui
   // avaient causé un retour à la ligne avant correction.
+  // Correction "PRIX/M² sur deux lignes" (2026-10-22, retour utilisateur
+  // visuel) : une valeur comme "15 000 FCFA" ne tenait pas sur une seule
+  // ligne dans les 52pt disponibles (62pt de colonne - 10pt de marge
+  // interne). Élargie à 72pt, en reprenant 6pt à DÉSIGNATION (texte fixe
+  // "Cartons", jamais contraint) et 4pt à M²/CTN (valeurs courtes type
+  // "0.72") — largeur totale du tableau INCHANGÉE (530.5pt), seules les
+  // positions x des colonnes suivantes se décalent en conséquence.
   const colonnes = [
     { x: 45.5, largeur: 60, titre: "QUANTITÉ" },
-    { x: 105.5, largeur: 78, titre: "DÉSIGNATION" },
-    { x: 183.5, largeur: 70, titre: "RÉFÉRENCE" },
-    { x: 253.5, largeur: 58, titre: "TAILLE" },
-    { x: 311.5, largeur: 62, titre: "PRIX/M²" },
-    { x: 373.5, largeur: 44, titre: "M²/CTN" },
+    { x: 105.5, largeur: 72, titre: "DÉSIGNATION" },
+    { x: 177.5, largeur: 70, titre: "RÉFÉRENCE" },
+    { x: 247.5, largeur: 58, titre: "TAILLE" },
+    { x: 305.5, largeur: 72, titre: "PRIX/M²" },
+    { x: 377.5, largeur: 40, titre: "M²/CTN" },
     { x: 417.5, largeur: 68, titre: "PRIX/CTN" },
     { x: 485.5, largeur: 90.5, titre: "TOTAL" },
   ];

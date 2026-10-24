@@ -36,7 +36,7 @@ function ouvrirBaseDeTest(): Database.Database {
   return db;
 }
 
-describe("Facture — instantané d'identité entreprise (Bloc 6, base réelle)", () => {
+describe("Facture — instantané d'identité entreprise (Bloc 6, base réelle)", async () => {
   let db: Database.Database;
   let produitId: string;
   let shopId: string;
@@ -44,7 +44,7 @@ describe("Facture — instantané d'identité entreprise (Bloc 6, base réelle)"
   let parametresRepository: ParametresRepository;
   let venteService: VenteService;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     db = ouvrirBaseDeTest();
     db.prepare(
       "INSERT INTO utilisateurs (id, identifiant, nom, role, password_hash, actif, created_at, updated_at) VALUES ('u1','test','Testeur','administrateur','x',1,?,?)"
@@ -73,7 +73,7 @@ describe("Facture — instantané d'identité entreprise (Bloc 6, base réelle)"
     venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository, undefined, parametresRepository);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     db.close();
     if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
   });
@@ -81,12 +81,12 @@ describe("Facture — instantané d'identité entreprise (Bloc 6, base réelle)"
   const ENTREPRISE_A = { nom: "MAXI EQUIP A", adresse: "Adresse A", quartier: "Quartier A", telephones: ["077000001"], whatsapp: "", email: "", nomAdministrateur: "Admin A", nomGerant: null, updatedAt: "" };
   const ENTREPRISE_B = { nom: "MAXI EQUIP B — Nouveau Nom", adresse: "Adresse B toute différente", quartier: "Quartier B", telephones: ["077999999"], whatsapp: "", email: "", nomAdministrateur: "Admin B", nomGerant: "Gérant B", updatedAt: "" };
 
-  it("scénario complet obligatoire : facture A conserve A après passage à B ; nouvelle facture utilise B", () => {
+  it("scénario complet obligatoire : facture A conserve A après passage à B ; nouvelle facture utilise B", async () => {
     // 1. Créer entreprise A.
     parametresRepository.setIdentite(ENTREPRISE_A);
 
     // 2/3. Créer une vente -> une facture est générée, capturant l'identité A à cet instant.
-    const venteA = venteService.enregistrerVente({
+    const venteA = await venteService.enregistrerVente({
       pointDeVenteId: shopId,
       clientNom: "Client A",
       clientTelephone: "077111111",
@@ -112,7 +112,7 @@ describe("Facture — instantané d'identité entreprise (Bloc 6, base réelle)"
     expect(factureARelue?.identiteSnapshot?.nom).not.toBe("MAXI EQUIP B — Nouveau Nom");
 
     // Une NOUVELLE vente, après le passage à B, doit capturer B.
-    const venteB = venteService.enregistrerVente({
+    const venteB = await venteService.enregistrerVente({
       pointDeVenteId: shopId,
       clientNom: "Client B",
       clientTelephone: "077222222",
@@ -132,14 +132,14 @@ describe("Facture — instantané d'identité entreprise (Bloc 6, base réelle)"
     expect(factureAFinale?.identiteSnapshot?.nom).toBe("MAXI EQUIP A");
   });
 
-  it("une vente créée SANS ParametresRepository injecté (rétrocompatibilité) : identiteSnapshot est null, jamais une exception", () => {
+  it("une vente créée SANS ParametresRepository injecté (rétrocompatibilité) : identiteSnapshot est null, jamais une exception", async () => {
     const stockRepository = new StockRepository(db);
     const mouvementRepository = new MouvementRepository(db);
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
     const produitRepository = new ProduitRepository(db);
     const serviceSansParametres = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository);
 
-    const vente = serviceSansParametres.enregistrerVente({
+    const vente = await serviceSansParametres.enregistrerVente({
       pointDeVenteId: shopId,
       clientNom: "Client Sans Identite",
       clientTelephone: "077333333",
@@ -156,7 +156,7 @@ describe("Facture — instantané d'identité entreprise (Bloc 6, base réelle)"
     expect(facture?.identiteSnapshot).toBeNull();
   });
 
-  it("une facture antérieure à la migration (identite_snapshot_json NULL en base) : lue sans erreur, identiteSnapshot vaut null", () => {
+  it("une facture antérieure à la migration (identite_snapshot_json NULL en base) : lue sans erreur, identiteSnapshot vaut null", async () => {
     // Simule directement une ancienne ligne en base, jamais via le service (qui capture toujours désormais).
     db.prepare(
       `INSERT INTO factures (id, numero, date, emplacement_id, client_nom, vendeur_utilisateur_id, total, statut_livraison, created_at, updated_at)

@@ -10,6 +10,7 @@ import { Argon2idPasswordHasher } from "./auth/argon2Hasher.js";
 import { UtilisateurRepository } from "./auth/utilisateurRepository.js";
 import { SessionManager } from "./auth/sessionManager.js";
 import { AuthService } from "./auth/authService.js";
+import { LoginCentralService } from "./auth/loginCentralService.js";
 import { registerSetupIpcHandlers } from "./ipc/setup.js";
 import { EmplacementRepository, bootstrapDefaultEmplacements } from "./repositories/emplacementRepository.js";
 import { ProduitRepository } from "./repositories/produitRepository.js";
@@ -37,6 +38,7 @@ import { registerDemandeIpcHandlers } from "./ipc/demandes.js";
 import { injecterDemandeTest } from "./maintenance/injecterDemandeTest.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
+import { ValidationStockDistanteService } from "./services/validationStockDistanteService.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
 import { ImageProduitRepository } from "./repositories/imageProduitRepository.js";
 import { ImageService } from "./services/imageService.js";
@@ -58,6 +60,21 @@ import { registerPromotionsIpcHandlers } from "./ipc/promotions.js";
 // En développement, electron-vite fournit l'URL du serveur Vite ; en
 // production, le renderer est chargé depuis les fichiers empaquetés.
 const RENDERER_DEV_SERVER_URL = process.env["ELECTRON_RENDERER_URL"];
+
+// Isolation dev/empaqueté (2026-10-22, retour utilisateur réel : une
+// installation de test et un `npm run dev` sur LA MÊME machine
+// partageaient exactement le même dossier de données — base SQLite, clé
+// de chiffrement, sync-config.enc, PDF générés). Cause : `app.getName()`
+// retombe sur le champ "name" du package.json embarqué
+// ("@maxi-equip/electron-app"), identique en dev et une fois empaqueté —
+// "productName": "MAXI EQUIP" ne vit que sous la clé "build" du même
+// fichier, une config electron-builder (temps de packaging/installeur),
+// jamais lue par Electron lui-même à l'exécution. `app.setName()` DOIT
+// être appelé ici, avant tout accès à `app.getPath("userData")` (le tout
+// premier a lieu dans `app.whenReady()` ci-dessous) — jamais après.
+if (!app.isPackaged) {
+  app.setName("MAXI EQUIP (Dev)");
+}
 
 /**
  * Taille INITIALE par défaut de la fenêtre — pas une taille verrouillée.
@@ -233,7 +250,7 @@ app.whenReady().then(async () => {
           console.log("\nSIMULATION UNIQUEMENT — aucune donnée supprimée. Relancer avec --confirmer pour supprimer réellement.");
         }
       } else if (mode === "generer-donnees-test") {
-        const resultat = executerGenerationDonneesTest(db);
+        const resultat = await executerGenerationDonneesTest(db);
         // eslint-disable-next-line no-console
         console.log(JSON.stringify(resultat, null, 2));
       } else if (mode === "injecter-demande-test") {
@@ -286,14 +303,41 @@ app.whenReady().then(async () => {
     const utilisateurRepository = new UtilisateurRepository(db);
     const hasher = new Argon2idPasswordHasher();
     const sessionManager = new SessionManager();
-    const authService = new AuthService(utilisateurRepository, hasher, sessionManager);
+    const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
+    const validationStockDistanteService = new ValidationStockDistanteService();
+    const loginCentralService = new LoginCentralService();
+    const authService = new AuthService(utilisateurRepository, hasher, sessionManager, loginCentralService);
 
     registerAuthIpcHandlers(authService);
 
     // Gestion des utilisateurs (Phase N) — réservé aux administrateurs,
     // vérifié côté Main à chaque appel IPC (§13 : jamais uniquement l'UI).
-    const utilisateurService = new UtilisateurService(utilisateurRepository, hasher);
+    const utilisateurService = new UtilisateurService(utilisateurRepository, hasher, boiteEnvoiRepository);
     registerUtilisateursIpcHandlers(utilisateurService, sessionManager);
+
+    // Correction "travail à distance / plusieurs machines en parallèle"
+    // (2026-10-22) — rattrapage PONCTUEL : les comptes déjà créés
+    // localement AVANT cette correction n'ont jamais été mis en file vers
+    // le serveur central (le mécanisme n'existait pas encore). Rejoué
+    // UNE SEULE FOIS, jamais à chaque démarrage (voir
+    // `existeEntreePourType`) — sans ça, ils resteraient invisibles sur
+    // tout autre poste indéfiniment.
+    if (!boiteEnvoiRepository.existeEntreePourType("compte")) {
+      for (const u of utilisateurRepository.list()) {
+        const compte = utilisateurRepository.findByIdPourSynchronisation(u.id);
+        if (!compte) continue;
+        boiteEnvoiRepository.creer("compte", compte.id, {
+          operation: "create",
+          compteId: compte.id,
+          identifiant: compte.identifiant,
+          hashMotDePasse: compte.passwordHash,
+          nom: compte.nom,
+          role: compte.role,
+          actif: compte.actif,
+          updatedAt: compte.updatedAt,
+        });
+      }
+    }
 
     // Configuration initiale (Phase 6C) — remplace l'ancien bootstrap à
     // mot de passe généré aléatoirement (abandonné). Plus aucun compte
@@ -314,15 +358,24 @@ app.whenReady().then(async () => {
     const mouvementRepository = new MouvementRepository(db);
     const factureRepository = new FactureRepository(db);
     const parametresRepository = new ParametresRepository(db);
-    const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
     const syncRepository = new SyncRepository(db);
     const modeleRepository = new ModeleRepository(db);
     const promotionRepository = new PromotionRepository(db);
     const promotionService = new PromotionService(db, promotionRepository, boiteEnvoiRepository);
     registerPromotionsIpcHandlers(promotionService, sessionManager);
 
-    const stockService = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository);
-    const venteService = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository, promotionRepository, parametresRepository);
+    const stockService = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository, validationStockDistanteService);
+    const venteService = new VenteService(
+      db,
+      produitRepository,
+      stockRepository,
+      mouvementRepository,
+      factureRepository,
+      boiteEnvoiRepository,
+      promotionRepository,
+      parametresRepository,
+      validationStockDistanteService
+    );
 
     // Demandes du site (Phase 4.1) : instanciés AVANT SyncService pour
     // que celui-ci puisse recevoir le callback d'application réelle des

@@ -41,11 +41,11 @@ function creerServiceAvecFauxDepots() {
   return { service, mouvementsCrees, applyDelta: stockRepository.applyDelta };
 }
 
-describe("VenteService — correctif : traçabilité d'une vente entièrement externe", () => {
-  it("crée un mouvement de sortie même quand AUCUN dépôt n'est utilisé (0% interne, 100% externe)", () => {
+describe("VenteService — correctif : traçabilité d'une vente entièrement externe", async () => {
+  it("crée un mouvement de sortie même quand AUCUN dépôt n'est utilisé (0% interne, 100% externe)", async () => {
     const { service, mouvementsCrees, applyDelta } = creerServiceAvecFauxDepots();
 
-    const resultat = service.enregistrerVente({
+    const resultat = await service.enregistrerVente({
       pointDeVenteId: "shop",
       clientNom: "Client Test",
       clientTelephone: "077000000",
@@ -81,10 +81,10 @@ describe("VenteService — correctif : traçabilité d'une vente entièrement ex
     expect(applyDelta).not.toHaveBeenCalled();
   });
 
-  it("crée un mouvement par dépôt ET un mouvement pour la part externe lorsque la vente est mixte", () => {
+  it("crée un mouvement par dépôt ET un mouvement pour la part externe lorsque la vente est mixte", async () => {
     const { service, mouvementsCrees } = creerServiceAvecFauxDepots();
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop",
       clientNom: "Client Test",
       clientTelephone: "077000000",
@@ -113,10 +113,10 @@ describe("VenteService — correctif : traçabilité d'une vente entièrement ex
     expect(types).toContain(null);
   });
 
-  it("ne crée toujours qu'un seul mouvement quand la vente est entièrement interne (pas de régression)", () => {
+  it("ne crée toujours qu'un seul mouvement quand la vente est entièrement interne (pas de régression)", async () => {
     const { service, mouvementsCrees } = creerServiceAvecFauxDepots();
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop",
       clientNom: "Client Test",
       clientTelephone: "077000000",
@@ -142,8 +142,8 @@ describe("VenteService — correctif : traçabilité d'une vente entièrement ex
   });
 });
 
-describe("VenteService — annulation d'une facture (restauration du stock)", () => {
-  it("restaure le stock UNIQUEMENT pour la part prélevée sur un dépôt, jamais pour la part externe", () => {
+describe("VenteService — annulation d'une facture (restauration du stock)", async () => {
+  it("restaure le stock UNIQUEMENT pour la part prélevée sur un dépôt, jamais pour la part externe", async () => {
     const mouvementsCrees: unknown[] = [];
     const applyDelta = vi.fn();
     const produitRepository = { findById: () => ({ id: "p1", motif: "Marbre", taille: "60 × 60 cm" }) };
@@ -168,7 +168,7 @@ describe("VenteService — annulation d'une facture (restauration du stock)", ()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = new VenteService(fauxDb as any, produitRepository as any, stockRepository as any, mouvementRepository as any, factureRepository as any, boiteEnvoiRepository as any);
 
-    service.annulerVente("f1", "Erreur de saisie du client", "user-admin");
+    await service.annulerVente("f1", "Erreur de saisie du client", "user-admin");
 
     // Un seul mouvement de restauration créé — celui d'Akébé, jamais pour la part externe.
     expect(mouvementsCrees).toHaveLength(1);
@@ -177,20 +177,20 @@ describe("VenteService — annulation d'une facture (restauration du stock)", ()
     expect(factureRepository.annuler).toHaveBeenCalledWith("f1", "Erreur de saisie du client", "user-admin");
   });
 
-  it("refuse d'annuler sans motif", () => {
+  it("refuse d'annuler sans motif", async () => {
     const factureRepository = { findById: () => ({ id: "f1", annuleeLe: null }), annuler: vi.fn() };
     const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any, {} as any);
-    expect(() => service.annulerVente("f1", "", "user-admin")).toThrow();
+    await expect(service.annulerVente("f1", "", "user-admin")).rejects.toThrow();
   });
 
-  it("refuse d'annuler une facture déjà annulée", () => {
+  it("refuse d'annuler une facture déjà annulée", async () => {
     const factureRepository = { findById: () => ({ id: "f1", annuleeLe: "2026-01-01T00:00:00Z" }), annuler: vi.fn() };
     const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any, {} as any);
-    expect(() => service.annulerVente("f1", "Motif", "user-admin")).toThrow();
+    await expect(service.annulerVente("f1", "Motif", "user-admin")).rejects.toThrow();
   });
 });
 
@@ -247,11 +247,11 @@ function creerService(opts: {
 }
 
 // §18-A : Vente simple
-describe("§18-A — Vente simple", () => {
-  it("enregistre une vente avec produit, quantité, prix et calcule le total correct", () => {
+describe("§18-A — Vente simple", async () => {
+  it("enregistre une vente avec produit, quantité, prix et calcule le total correct", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 50 } } });
 
-    const result = service.enregistrerVente({
+    const result = await service.enregistrerVente({
       pointDeVenteId: "shop",
       clientNom: "Dupont",
       clientTelephone: "077001122",
@@ -272,24 +272,22 @@ describe("§18-A — Vente simple", () => {
     expect(facture.total).toBe(45000);
   });
 
-  it("refuse une vente sans ligne", () => {
+  it("refuse une vente sans ligne", async () => {
     const { service } = creerService();
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: null, remise: 0, lignes: [],
-      })
-    ).toThrow(VenteValidationError);
+      })).rejects.toThrow(VenteValidationError);
   });
 
-  it("snapshote la surface du carton (m²) sur la ligne de facture quand le produit a carreauxParCarton/dimensions renseignés (2026-10-08)", () => {
+  it("snapshote la surface du carton (m²) sur la ligne de facture quand le produit a carreauxParCarton/dimensions renseignés (2026-10-08)", async () => {
     const { service, factureCreeAvec } = creerService({
       stock: { p1: { akebe: 50 } },
       produits: [{ id: "p1", prix: 8000, motif: "Marbre Blanc", taille: "60×60", largeur: 60, hauteur: 60, carreauxParCarton: 4 }],
     });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop",
       clientNom: "Dupont",
       clientTelephone: "077001122",
@@ -307,10 +305,10 @@ describe("§18-A — Vente simple", () => {
     expect(facture.lignes[0]!.surfaceCartonM2).toBeCloseTo(1.44, 6);
   });
 
-  it("surfaceCartonM2 reste null quand carreauxParCarton n'est pas renseigné pour le produit (catalogue pas encore migré)", () => {
+  it("surfaceCartonM2 reste null quand carreauxParCarton n'est pas renseigné pour le produit (catalogue pas encore migré)", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 50 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop",
       clientNom: "Dupont",
       clientTelephone: "077001122",
@@ -327,22 +325,44 @@ describe("§18-A — Vente simple", () => {
     expect(facture.lignes[0]!.surfaceCartonM2).toBeNull();
   });
 
-  it("refuse une vente sans numéro de téléphone client", () => {
+  // RÉGRESSION bug réel (correction "Rendre le numéro de téléphone
+  // facultatif", 2026-10-21) : accepte désormais une vente SANS numéro de
+  // téléphone (vide ou null) — comportement historique : refusée.
+  it("accepte une vente sans numéro de téléphone client (vide)", async () => {
+    const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 10 } } });
+    await service.enregistrerVente({
+      pointDeVenteId: "shop", clientNom: "X", clientTelephone: "",
+      clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
+      vendeurNomManuel: null, modeReglement: null, remise: 0,
+      lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
+    });
+    expect((factureCreeAvec[0] as { clientTelephone: string | null }).clientTelephone).toBeNull();
+  });
+
+  it("accepte une vente sans numéro de téléphone client (null)", async () => {
     const { service } = creerService({ stock: { p1: { akebe: 10 } } });
-    expect(() =>
-      service.enregistrerVente({
-        pointDeVenteId: "shop", clientNom: "X", clientTelephone: "",
+    await service.enregistrerVente({
+        pointDeVenteId: "shop", clientNom: "X", clientTelephone: null,
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: null, remise: 0,
-        lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [] }],
-      })
-    ).toThrow(VenteValidationError);
+        lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
+      });
+  });
+
+  it("refuse un numéro de téléphone RENSEIGNÉ mais invalide (jamais accepté silencieusement)", async () => {
+    const { service } = creerService({ stock: { p1: { akebe: 10 } } });
+    await expect(service.enregistrerVente({
+        pointDeVenteId: "shop", clientNom: "X", clientTelephone: "abc",
+        clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
+        vendeurNomManuel: null, modeReglement: null, remise: 0,
+        lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
+      })).rejects.toThrow(VenteValidationError);
   });
 });
 
 // §18-B : Plusieurs variantes du même modèle
-describe("§18-B — Plusieurs variantes du même modèle", () => {
-  it("applique le prix propre à chaque variante et traite les stocks indépendamment", () => {
+describe("§18-B — Plusieurs variantes du même modèle", async () => {
+  it("applique le prix propre à chaque variante et traite les stocks indépendamment", async () => {
     const { service, mouvementsCrees, deltaAppliques } = creerService({
       produits: [
         { id: "v1", prix: 12000, motif: "Marbre Blanc", taille: "30×60" },
@@ -351,7 +371,7 @@ describe("§18-B — Plusieurs variantes du même modèle", () => {
       stock: { v1: { akebe: 20 }, v2: { akebe: 15 } },
     });
 
-    const result = service.enregistrerVente({
+    const result = await service.enregistrerVente({
       pointDeVenteId: "shop",
       clientNom: "Client",
       clientTelephone: "077000000",
@@ -385,7 +405,7 @@ describe("§18-B — Plusieurs variantes du même modèle", () => {
     expect(deltaV2.delta).toBe(-3);
   });
 
-  it("refuse la vente si le stock de l'une des variantes est insuffisant", () => {
+  it("refuse la vente si le stock de l'une des variantes est insuffisant", async () => {
     const { service } = creerService({
       produits: [
         { id: "v1", prix: 12000, motif: "M", taille: "30×60" },
@@ -394,8 +414,7 @@ describe("§18-B — Plusieurs variantes du même modèle", () => {
       stock: { v1: { akebe: 3 }, v2: { akebe: 1 } }, // v2 ne peut fournir que 1
     });
 
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: null, remise: 0,
@@ -403,18 +422,17 @@ describe("§18-B — Plusieurs variantes du même modèle", () => {
           { produitId: "v1", quantite: 2, prixUnitaire: 12000, allocationsDepots: [{ emplacementId: "akebe", quantite: 2 }] },
           { produitId: "v2", quantite: 5, prixUnitaire: 18000, allocationsDepots: [{ emplacementId: "akebe", quantite: 5 }] },
         ],
-      })
-    ).toThrow();
+      })).rejects.toThrow();
   });
 });
 
 // §18-C : Promotion
-describe("§18-C — Promotion", () => {
+describe("§18-C — Promotion", async () => {
   const futur = new Date(Date.now() + 86400000).toISOString();
   const passe = new Date(Date.now() - 86400000).toISOString();
   const tresAncien = new Date(Date.now() - 2 * 86400000).toISOString();
 
-  it("enregistre la promotion active sur la ligne de facture au moment de la validation", () => {
+  it("enregistre la promotion active sur la ligne de facture au moment de la validation", async () => {
     const { service, factureCreeAvec } = creerService({
       stock: { p1: { akebe: 50 } },
       promotions: [{
@@ -423,7 +441,7 @@ describe("§18-C — Promotion", () => {
       }],
     });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Client", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -437,7 +455,7 @@ describe("§18-C — Promotion", () => {
     expect(ligne.prixUnitaireNormal).toBe(15000); // prix catalogue conservé
   });
 
-  it("n'enregistre aucune promotion si la promotion est expirée au moment de la validation", () => {
+  it("n'enregistre aucune promotion si la promotion est expirée au moment de la validation", async () => {
     const { service, factureCreeAvec } = creerService({
       stock: { p1: { akebe: 50 } },
       promotions: [{
@@ -446,7 +464,7 @@ describe("§18-C — Promotion", () => {
       }],
     });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Client", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -457,7 +475,7 @@ describe("§18-C — Promotion", () => {
     expect(facture.lignes[0]!.promotionId).toBeNull();
   });
 
-  it("une promotion globale s'applique même sans ciblage explicite du produit", () => {
+  it("une promotion globale s'applique même sans ciblage explicite du produit", async () => {
     const { service, factureCreeAvec } = creerService({
       stock: { p1: { akebe: 50 } },
       promotions: [{
@@ -466,7 +484,7 @@ describe("§18-C — Promotion", () => {
       }],
     });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Client", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -477,7 +495,7 @@ describe("§18-C — Promotion", () => {
     expect(facture.lignes[0]!.promotionId).toBe("promo-global");
   });
 
-  it("préserve le prixUnitaireNormal au prix catalogue, jamais au prix saisi manuellement", () => {
+  it("préserve le prixUnitaireNormal au prix catalogue, jamais au prix saisi manuellement", async () => {
     const { service, factureCreeAvec } = creerService({
       stock: { p1: { akebe: 50 } },
       promotions: [{
@@ -487,7 +505,7 @@ describe("§18-C — Promotion", () => {
     });
 
     // L'utilisateur saisit un prix manuel différent du prix promo
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Client", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -503,11 +521,11 @@ describe("§18-C — Promotion", () => {
 });
 
 // §18-D : Prix manuel
-describe("§18-D — Prix unitaire manuel", () => {
-  it("enregistre le prix saisi manuellement, pas le prix catalogue", () => {
+describe("§18-D — Prix unitaire manuel", async () => {
+  it("enregistre le prix saisi manuellement, pas le prix catalogue", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 10 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -519,25 +537,23 @@ describe("§18-D — Prix unitaire manuel", () => {
     expect(facture.total).toBe(20000);
   });
 
-  it("refuse un prix unitaire nul ou négatif", () => {
+  it("refuse un prix unitaire nul ou négatif", async () => {
     const { service } = creerService({ stock: { p1: { akebe: 10 } } });
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: null, remise: 0,
         lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 0, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
-      })
-    ).toThrow(VenteValidationError);
+      })).rejects.toThrow(VenteValidationError);
   });
 });
 
 // §18-E : Stock
-describe("§18-E — Stock", () => {
-  it("déduit exactement la quantité allouée du dépôt concerné", () => {
+describe("§18-E — Stock", async () => {
+  it("déduit exactement la quantité allouée du dépôt concerné", async () => {
     const { service, deltaAppliques } = creerService({ stock: { p1: { akebe: 30 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -548,22 +564,20 @@ describe("§18-E — Stock", () => {
     expect(deltaAppliques[0]).toMatchObject({ produitId: "p1", emplacementId: "akebe", delta: -10 });
   });
 
-  it("refuse la vente si le stock est insuffisant dans le dépôt demandé", () => {
+  it("refuse la vente si le stock est insuffisant dans le dépôt demandé", async () => {
     const { service } = creerService({ stock: { p1: { akebe: 5 } } });
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: null, remise: 0,
         lignes: [{ produitId: "p1", quantite: 10, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 10 }] }],
-      })
-    ).toThrow();
+      })).rejects.toThrow();
   });
 
-  it("crée bien un mouvement de type 'sortie' pour chaque allocation de dépôt", () => {
+  it("crée bien un mouvement de type 'sortie' pour chaque allocation de dépôt", async () => {
     const { service, mouvementsCrees } = creerService({ stock: { p1: { akebe: 20 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -575,11 +589,11 @@ describe("§18-E — Stock", () => {
 });
 
 // §18-F : Sourcing externe
-describe("§18-F — Sourcing externe", () => {
-  it("part entièrement externe : aucun delta de stock, un mouvement emplacementId:null créé", () => {
+describe("§18-F — Sourcing externe", async () => {
+  it("part entièrement externe : aucun delta de stock, un mouvement emplacementId:null créé", async () => {
     const { service, deltaAppliques, mouvementsCrees } = creerService();
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -591,10 +605,10 @@ describe("§18-F — Sourcing externe", () => {
     expect(mouvementsCrees[0]).toMatchObject({ emplacementId: null, quantite: 5 });
   });
 
-  it("part mixte : le delta ne porte que sur la quantité interne, jamais sur la part externe", () => {
+  it("part mixte : le delta ne porte que sur la quantité interne, jamais sur la part externe", async () => {
     const { service, deltaAppliques, mouvementsCrees } = creerService({ stock: { p1: { akebe: 20 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -609,26 +623,24 @@ describe("§18-F — Sourcing externe", () => {
     expect(mouvementsCrees).toHaveLength(2);
   });
 
-  it("refuse si la part externe est non couverte mais fournisseur absent", () => {
+  it("refuse si la part externe est non couverte mais fournisseur absent", async () => {
     const { service } = creerService({ stock: { p1: { akebe: 5 } } });
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: null, remise: 0,
         // quantite=10, allocation=5 → 5 externe sans fournisseur
         lignes: [{ produitId: "p1", quantite: 10, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 5 }] }],
-      })
-    ).toThrow(VenteValidationError);
+      })).rejects.toThrow(VenteValidationError);
   });
 });
 
 // §18-G : Facture
-describe("§18-G — Facture", () => {
-  it("crée la facture avec le numéro, le client, le vendeur et le total corrects", () => {
+describe("§18-G — Facture", async () => {
+  it("crée la facture avec le numéro, le client, le vendeur et le total corrects", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 10 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Marie Dupont", clientTelephone: "077001122",
       clientAdresse: "Libreville", vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "Jean",
       vendeurNomManuel: null, modeReglement: "Virement", remise: 0,
@@ -643,10 +655,10 @@ describe("§18-G — Facture", () => {
     expect(f.total).toBe(30000);
   });
 
-  it("un vendeur manuel est utilisé si renseigné, sinon le compte connecté", () => {
+  it("un vendeur manuel est utilisé si renseigné, sinon le compte connecté", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 10 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "Admin",
       vendeurNomManuel: "Pauline", modeReglement: null, remise: 0,
@@ -659,8 +671,8 @@ describe("§18-G — Facture", () => {
 });
 
 // §18-I : Transaction atomique
-describe("§18-I — Transaction atomique", () => {
-  it("une erreur à mi-transaction (stock insuffisant sur le second dépôt) n'enregistre aucune facture ni mouvement", () => {
+describe("§18-I — Transaction atomique", async () => {
+  it("une erreur à mi-transaction (stock insuffisant sur le second dépôt) n'enregistre aucune facture ni mouvement", async () => {
     // Utilise le vrai mécanisme de transaction via un wrapper synchrone : si fn() lève, rien n'est persisté.
     const mouvementsCrees: unknown[] = [];
     const deltaAppliques: unknown[] = [];
@@ -692,8 +704,7 @@ describe("§18-I — Transaction atomique", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = new VenteService(fauxDb as any, produitRepository as any, stockRepository as any, mouvementRepository as any, factureRepository as any, boiteEnvoiRepository as any);
 
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: null, remise: 0,
@@ -704,8 +715,7 @@ describe("§18-I — Transaction atomique", () => {
             { emplacementId: "akanda", quantite: 5 }, // 5 demandés, 1 disponible → erreur
           ],
         }],
-      })
-    ).toThrow();
+      })).rejects.toThrow();
 
     // Aucune facture ne doit avoir été enregistrée (l'exception se produit avant la création)
     expect(factureCreeAvec).toHaveLength(0);
@@ -713,11 +723,11 @@ describe("§18-I — Transaction atomique", () => {
 });
 
 // §18-J : Offline-first / boîte d'envoi
-describe("§18-J — Offline-first (boîte d'envoi)", () => {
-  it("ajoute une entrée dans la boîte d'envoi après chaque vente réussie", () => {
+describe("§18-J — Offline-first (boîte d'envoi)", async () => {
+  it("ajoute une entrée dans la boîte d'envoi après chaque vente réussie", async () => {
     const { service, boiteEnvoiCree } = creerService({ stock: { p1: { akebe: 10 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "X", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -728,7 +738,7 @@ describe("§18-J — Offline-first (boîte d'envoi)", () => {
     expect(boiteEnvoiCree[0]).toEqual(expect.arrayContaining(["vente"]));
   });
 
-  it("ajoute une entrée 'annulation' dans la boîte d'envoi après chaque annulation réussie", () => {
+  it("ajoute une entrée 'annulation' dans la boîte d'envoi après chaque annulation réussie", async () => {
     const boiteEnvoiCree: unknown[] = [];
     const factureRepository = {
       findById: () => ({ id: "f1", numero: "FAC-TEST", annuleeLe: null }),
@@ -739,16 +749,16 @@ describe("§18-J — Offline-first (boîte d'envoi)", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = new VenteService(fauxDb as any, {} as any, {} as any, { listParFacture: () => [] } as any, factureRepository as any, boiteEnvoiRepository as any);
 
-    service.annulerVente("f1", "Erreur", "u1");
+    await service.annulerVente("f1", "Erreur", "u1");
 
     expect(boiteEnvoiCree).toHaveLength(1);
     expect(boiteEnvoiCree[0]).toEqual(expect.arrayContaining(["annulation"]));
   });
 
-  it("la boîte d'envoi contient le numéro de facture et le total dans son payload", () => {
+  it("la boîte d'envoi contient le numéro de facture et le total dans son payload", async () => {
     const { service, boiteEnvoiCree } = creerService({ stock: { p1: { akebe: 10 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Y", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -762,11 +772,11 @@ describe("§18-J — Offline-first (boîte d'envoi)", () => {
   });
 });
 
-describe("Remise / Négociation", () => {
-  it("cas du cahier des charges : 13 × 15 000 avec remise 2 000 → total 195 000 stocké, remise 2 000 stockée", () => {
+describe("Remise / Négociation", async () => {
+  it("cas du cahier des charges : 13 × 15 000 avec remise 2 000 → total 195 000 stocké, remise 2 000 stockée", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 20 } } });
 
-    const resultat = service.enregistrerVente({
+    const resultat = await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 2000,
@@ -780,10 +790,10 @@ describe("Remise / Négociation", () => {
     expect(input.remise).toBe(2000);
   });
 
-  it("une remise de 0 est acceptée et stockée normalement", () => {
+  it("une remise de 0 est acceptée et stockée normalement", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 5 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
@@ -794,24 +804,22 @@ describe("Remise / Négociation", () => {
     expect(input.remise).toBe(0);
   });
 
-  it("rejette une remise supérieure au total — AUCUNE facture créée", () => {
+  it("rejette une remise supérieure au total — AUCUNE facture créée", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 5 } } });
 
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: "Espèces", remise: 999999,
         lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
-      })
-    ).toThrow(VenteValidationError);
+      })).rejects.toThrow(VenteValidationError);
     expect(factureCreeAvec).toHaveLength(0);
   });
 
-  it("accepte une remise strictement égale au total", () => {
+  it("accepte une remise strictement égale au total", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 5 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 15000,
@@ -823,26 +831,24 @@ describe("Remise / Négociation", () => {
     expect(input.total).toBe(15000);
   });
 
-  it("rejette une remise négative", () => {
+  it("rejette une remise négative", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 5 } } });
 
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: "Espèces", remise: -100,
         lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
-      })
-    ).toThrow(VenteValidationError);
+      })).rejects.toThrow(VenteValidationError);
     expect(factureCreeAvec).toHaveLength(0);
   });
 });
 
-describe("Réservation / Acompte", () => {
-  it("statutPaiement omis : la vente est stockée 'payee' avec montantPaye = total net", () => {
+describe("Réservation / Acompte", async () => {
+  it("statutPaiement omis : la vente est stockée 'payee' avec montantPaye = total net", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 5 } } });
 
-    service.enregistrerVente({
+    await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 1000,
@@ -854,10 +860,10 @@ describe("Réservation / Acompte", () => {
     expect(input.montantPaye).toBe(14000); // 15000 - 1000 de remise
   });
 
-  it("une réservation explicite avec un acompte valide est stockée telle quelle", () => {
+  it("une réservation explicite avec un acompte valide est stockée telle quelle", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 13 } } });
 
-    const resultat = service.enregistrerVente({
+    const resultat = await service.enregistrerVente({
       pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
       clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
       vendeurNomManuel: null, modeReglement: "Espèces", remise: 2000,
@@ -872,38 +878,34 @@ describe("Réservation / Acompte", () => {
     expect(input.remise).toBe(2000);
   });
 
-  it("rejette une réservation dont l'acompte est supérieur ou égal au total net — aucune facture créée", () => {
+  it("rejette une réservation dont l'acompte est supérieur ou égal au total net — aucune facture créée", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 1 } } });
 
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
         statutPaiement: "reservation", montantPaye: 15000,
         lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
-      })
-    ).toThrow(VenteValidationError);
+      })).rejects.toThrow(VenteValidationError);
     expect(factureCreeAvec).toHaveLength(0);
   });
 
-  it("rejette une réservation avec un acompte nul ou négatif — aucune facture créée", () => {
+  it("rejette une réservation avec un acompte nul ou négatif — aucune facture créée", async () => {
     const { service, factureCreeAvec } = creerService({ stock: { p1: { akebe: 1 } } });
 
-    expect(() =>
-      service.enregistrerVente({
+    await expect(service.enregistrerVente({
         pointDeVenteId: "shop", clientNom: "Z", clientTelephone: "077000000",
         clientAdresse: null, vendeurUtilisateurId: "u1", vendeurCompteConnecteNom: "A",
         vendeurNomManuel: null, modeReglement: "Espèces", remise: 0,
         statutPaiement: "reservation", montantPaye: 0,
         lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
-      })
-    ).toThrow(VenteValidationError);
+      })).rejects.toThrow(VenteValidationError);
     expect(factureCreeAvec).toHaveLength(0);
   });
 });
 
-describe("changerStatutFacture — menu de statut (Réservation / Payée non livrée / Payée livrée)", () => {
+describe("changerStatutFacture — menu de statut (Réservation / Payée non livrée / Payée livrée)", async () => {
   function creerServiceAvecFacture(facture: { id: string; total: number; remise: number; statutPaiement: "reservation" | "payee"; annuleeLe: string | null }) {
     const changerStatutAppels: unknown[] = [];
     const factureRepository = {
@@ -916,7 +918,7 @@ describe("changerStatutFacture — menu de statut (Réservation / Payée non liv
     return { service, changerStatutAppels };
   }
 
-  it("encaisse automatiquement le solde en passant une réservation à 'Payée — Non livrée'", () => {
+  it("encaisse automatiquement le solde en passant une réservation à 'Payée — Non livrée'", async () => {
     const { service, changerStatutAppels } = creerServiceAvecFacture({ id: "f1", total: 195000, remise: 2000, statutPaiement: "reservation", annuleeLe: null });
 
     service.changerStatutFacture("f1", "payee_non_livree");
@@ -924,7 +926,7 @@ describe("changerStatutFacture — menu de statut (Réservation / Payée non liv
     expect(changerStatutAppels).toEqual([{ id: "f1", statut: { statutPaiement: "payee", montantPaye: 193000, statutLivraison: "en_attente" } }]);
   });
 
-  it("passe directement une réservation à 'Payée — Livrée' (encaisse le solde ET marque livrée en un seul geste)", () => {
+  it("passe directement une réservation à 'Payée — Livrée' (encaisse le solde ET marque livrée en un seul geste)", async () => {
     const { service, changerStatutAppels } = creerServiceAvecFacture({ id: "f1", total: 195000, remise: 0, statutPaiement: "reservation", annuleeLe: null });
 
     service.changerStatutFacture("f1", "payee_livree");
@@ -932,7 +934,7 @@ describe("changerStatutFacture — menu de statut (Réservation / Payée non liv
     expect(changerStatutAppels).toEqual([{ id: "f1", statut: { statutPaiement: "payee", montantPaye: 195000, statutLivraison: "livree" } }]);
   });
 
-  it("autorise librement l'aller-retour entre 'Payée — Non livrée' et 'Payée — Livrée' (aucun verrou terminus)", () => {
+  it("autorise librement l'aller-retour entre 'Payée — Non livrée' et 'Payée — Livrée' (aucun verrou terminus)", async () => {
     const { service, changerStatutAppels } = creerServiceAvecFacture({ id: "f1", total: 100000, remise: 0, statutPaiement: "payee", annuleeLe: null });
 
     service.changerStatutFacture("f1", "payee_livree");
@@ -944,21 +946,21 @@ describe("changerStatutFacture — menu de statut (Réservation / Payée non liv
     ]);
   });
 
-  it("refuse de repasser une facture déjà payée en 'Réservation' — aucun mécanisme pour rendre l'argent déjà reçu", () => {
+  it("refuse de repasser une facture déjà payée en 'Réservation' — aucun mécanisme pour rendre l'argent déjà reçu", async () => {
     const { service, changerStatutAppels } = creerServiceAvecFacture({ id: "f1", total: 100000, remise: 0, statutPaiement: "payee", annuleeLe: null });
 
     expect(() => service.changerStatutFacture("f1", "reservation")).toThrow(VenteValidationError);
     expect(changerStatutAppels).toHaveLength(0);
   });
 
-  it("refuse de changer le statut d'une facture annulée", () => {
+  it("refuse de changer le statut d'une facture annulée", async () => {
     const { service, changerStatutAppels } = creerServiceAvecFacture({ id: "f1", total: 100000, remise: 0, statutPaiement: "payee", annuleeLe: "2026-01-01T00:00:00Z" });
 
     expect(() => service.changerStatutFacture("f1", "payee_livree")).toThrow(VenteValidationError);
     expect(changerStatutAppels).toHaveLength(0);
   });
 
-  it("refuse de changer le statut d'une facture introuvable", () => {
+  it("refuse de changer le statut d'une facture introuvable", async () => {
     const { service, changerStatutAppels } = creerServiceAvecFacture({ id: "f1", total: 100000, remise: 0, statutPaiement: "payee", annuleeLe: null });
 
     expect(() => service.changerStatutFacture("introuvable", "payee_livree")).toThrow(VenteValidationError);

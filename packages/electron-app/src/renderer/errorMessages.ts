@@ -31,8 +31,29 @@ const UNEXPECTED_ERROR: UserFacingMessage = {
   message: "Une erreur inattendue s'est produite. Veuillez réessayer.",
 };
 
+/**
+ * Correction "travail à distance / plusieurs machines en parallèle"
+ * (2026-10-22) — ces deux motifs viennent de la connexion EN LIGNE
+ * (voir authService.ts/loginEnLigne) : contrairement aux trois motifs
+ * historiques ci-dessous, ils ne doivent PAS afficher le message
+ * générique (ce n'est ni un identifiant ni un mot de passe incorrect) —
+ * le message précis vient du serveur (ex. délai d'attente réel).
+ */
+function messageConnexionCentrale(reason: string, message: string | undefined): UserFacingMessage | null {
+  if (reason === "CONNEXION_REQUISE") {
+    return { title: "Connexion internet requise", message: message ?? "Ce poste nécessite une connexion internet pour se connecter." };
+  }
+  if (reason === "TROP_DE_TENTATIVES") {
+    return { title: "Trop de tentatives", message: message ?? "Trop de tentatives de connexion — réessayez plus tard." };
+  }
+  return null;
+}
+
 /** Traduit un motif d'échec d'authentification connu (retour normal du domaine, pas une exception). */
-export function mapAuthFailureReason(reason: string): UserFacingMessage {
+export function mapAuthFailureReason(reason: string, message?: string): UserFacingMessage {
+  const central = messageConnexionCentrale(reason, message);
+  if (central) return central;
+
   switch (reason) {
     case "USER_NOT_FOUND":
     case "WRONG_PASSWORD":

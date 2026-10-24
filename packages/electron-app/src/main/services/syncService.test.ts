@@ -384,4 +384,45 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
       expect(boiteEnvoiRepository.compterParStatut()).toMatchObject({ confirmed: 1, error: 1 });
     });
   });
+
+  describe("definirImageService — rattrapage des images manquantes (correction 'photos absentes sur poste restauré/secondaire')", () => {
+    function reponsePullVide() {
+      return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+    }
+
+    it("appelle synchroniserImagesManquantes APRÈS un PULL réussi, avec l'apiUrl/jwt de configuration", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const synchroniserImagesManquantes = vi.fn(async () => ({ telechargees: 0 }));
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirImageService({ synchroniserImagesManquantes } as never);
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat.success).toBe(true);
+      expect(synchroniserImagesManquantes).toHaveBeenCalledTimes(1);
+      expect(synchroniserImagesManquantes).toHaveBeenCalledWith("http://localhost:9999", "jeton-de-test");
+    });
+
+    it("un échec du rattrapage d'images ne fait jamais échouer la synchronisation (déjà réussie à ce stade)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const synchroniserImagesManquantes = vi.fn(async () => {
+        throw new Error("panne réseau sur le rattrapage d'images");
+      });
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirImageService({ synchroniserImagesManquantes } as never);
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+
+    it("sans ImageService défini : synchronisation inchangée (rétrocompatibilité)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+  });
 });

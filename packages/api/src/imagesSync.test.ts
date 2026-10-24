@@ -158,4 +158,35 @@ describe("Images catalogue — POST /v1/app/images/sync + GET /v1/public/images"
     });
     expect(res.status).toBe(401);
   });
+
+  it("GET /v1/app/images/list sans JWT : 401", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req({ method: "GET", path: "/v1/app/images/list", headers: {} }));
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /v1/app/images/list : renvoie l'image, même pour un modèle jamais déclaré actif (correction 'photos absentes sur poste restauré/secondaire')", async () => {
+    const router = createRouter();
+    await router.dispatch(
+      imageReq({ operation: "create", imageId: IMAGE_1, modeleId: MODELE_1, kind: "produit", ordre: 0, estPrincipale: true, contentBase64: PNG_1PX_BASE64, contentType: "image/png", updatedAt: "2026-01-01T00:00:00.000Z" })
+    );
+    const res = await router.dispatch(req({ method: "GET", path: "/v1/app/images/list", headers: { authorization: `Bearer ${tokenValide()}` } }));
+    expect(res.status).toBe(200);
+    const corps = res.body as { images: { id: string; modeleId: string; estPrincipale: boolean; url: string | null }[] };
+    expect(corps.images).toHaveLength(1);
+    expect(corps.images[0]!.id).toBe(IMAGE_1);
+    expect(corps.images[0]!.modeleId).toBe(MODELE_1);
+    expect(corps.images[0]!.url).toContain("/v1/public/images?file=");
+  });
+
+  it("GET /v1/app/images/list : une image supprimée n'apparaît plus", async () => {
+    const router = createRouter();
+    await router.dispatch(
+      imageReq({ operation: "create", imageId: IMAGE_1, modeleId: MODELE_1, kind: "produit", ordre: 0, estPrincipale: true, contentBase64: PNG_1PX_BASE64, contentType: "image/png", updatedAt: "2026-01-01T00:00:00.000Z" })
+    );
+    await router.dispatch(imageReq({ operation: "delete", imageId: IMAGE_1, modeleId: MODELE_1, kind: "produit", ordre: 0, estPrincipale: false, updatedAt: "2026-01-02T00:00:00.000Z" }));
+    const res = await router.dispatch(req({ method: "GET", path: "/v1/app/images/list", headers: { authorization: `Bearer ${tokenValide()}` } }));
+    const corps = res.body as { images: unknown[] };
+    expect(corps.images).toHaveLength(0);
+  });
 });

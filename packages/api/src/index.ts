@@ -5,6 +5,7 @@ import { pushRoute } from "./routes/v1/app/sync/push.js";
 import { pullRoute } from "./routes/v1/app/sync/pull.js";
 import { publicSubmitRequestRoute } from "./routes/v1/public/requests.js";
 import { imagesSyncRoute } from "./routes/v1/app/images/sync.js";
+import { imagesListRoute } from "./routes/v1/app/images/list.js";
 import { publicImageRoute } from "./routes/v1/public/images.js";
 import { publicCatalogModelsRoute } from "./routes/v1/public/catalog.js";
 import { publicPromotionsRoute } from "./routes/v1/public/promotions.js";
@@ -23,6 +24,7 @@ export function createRouter(): Router {
   router.register(pullRoute);
   router.register(publicSubmitRequestRoute);
   router.register(imagesSyncRoute);
+  router.register(imagesListRoute);
   router.register(publicImageRoute);
   router.register(publicCatalogModelsRoute);
   router.register(publicPromotionsRoute);

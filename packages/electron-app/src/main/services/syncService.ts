@@ -1,6 +1,7 @@
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 import { SyncRepository } from "../repositories/syncRepository.js";
 import { getConfigurationSync } from "./syncConfig.js";
+import type { ImageService } from "./imageService.js";
 
 /**
  * Moteur de synchronisation — Phase 3.7. Indépendant de l'interface
@@ -49,6 +50,21 @@ export class SyncService {
   // appels IPC concurrents, jamais seulement une convention côté écran.
   private synchronisationEnCours = false;
 
+  /**
+   * Correction "photos de carreaux absentes sur poste restauré/secondaire"
+   * (2026-10-24) — réglé via un SETTER plutôt qu'un paramètre de
+   * constructeur : `ImageService` a besoin de la fenêtre principale
+   * (`BrowserWindow`), construite APRÈS `SyncService` dans `main/index.ts`
+   * (ordre inchangé, jamais réorganisé pour ce seul besoin). Optionnel —
+   * un `SyncService` sans image défini (ex. tests existants) synchronise
+   * exactement comme avant, simplement sans rattrapage d'images.
+   */
+  private imageService?: ImageService;
+
+  definirImageService(imageService: ImageService): void {
+    this.imageService = imageService;
+  }
+
   constructor(
     private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
     private readonly syncRepository: SyncRepository,
@@ -83,6 +99,16 @@ export class SyncService {
 
       const resultatPull = await this.effectuerPull(config.apiUrl, config.jwt);
       if (!resultatPull.success) return resultatPull;
+
+      if (this.imageService) {
+        try {
+          await this.imageService.synchroniserImagesManquantes(config.apiUrl, config.jwt);
+        } catch (err) {
+          // Jamais faire échouer la synchronisation métier (déjà réussie à ce stade) pour un rattrapage de photos — retenté au prochain cycle.
+          // eslint-disable-next-line no-console
+          console.error("[sync] rattrapage des images manquantes impossible :", err instanceof Error ? err.message : err);
+        }
+      }
 
       return { success: true, push: resultatPush.push, pull: resultatPull.pull };
     } finally {

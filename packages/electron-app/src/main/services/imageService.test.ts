@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -36,6 +36,7 @@ function makeRepo(overrides: Partial<Record<string, unknown>> = {}) {
     setPrincipale: vi.fn(),
     findById: vi.fn(() => null),
     remove: vi.fn(),
+    creerDepuisServeur: vi.fn(() => true),
     ...overrides,
   } as unknown as ImageProduitRepositoryLike;
 }
@@ -108,5 +109,110 @@ describe("ImageService — synchronisation catalogue", () => {
     });
     const service = new ImageService(repo, FENETRE_FACTICE);
     expect(() => service.remove("image-1")).not.toThrow();
+  });
+});
+
+describe("ImageService — synchroniserImagesManquantes (correction 'photos absentes sur poste restauré/secondaire')", () => {
+  beforeEach(() => {
+    tempUserData = mkdtempSync(join(tmpdir(), "maxi-equip-image-pull-test-"));
+  });
+  afterEach(() => {
+    rmSync(tempUserData, { recursive: true, force: true });
+    vi.unstubAllGlobals();
+  });
+
+  const URL_IMAGE_1 = "https://api.example.com/v1/public/images?file=img-1-abcd1234.jpg";
+
+  function reponseListe(images: unknown[]) {
+    return new Response(JSON.stringify({ images }), { status: 200 });
+  }
+  function reponseBinaire(octets: string) {
+    return new Response(Buffer.from(octets), { status: 200 });
+  }
+
+  it("liste vide : aucun téléchargement, résultat à zéro", async () => {
+    const fetchSimule = vi.fn(async () => reponseListe([]));
+    vi.stubGlobal("fetch", fetchSimule);
+    const repo = makeRepo();
+    const service = new ImageService(repo, FENETRE_FACTICE);
+
+    const resultat = await service.synchroniserImagesManquantes("https://api.example.com", "jwt-test");
+
+    expect(resultat).toEqual({ telechargees: 0 });
+    expect(fetchSimule).toHaveBeenCalledTimes(1);
+  });
+
+  it("ligne locale déjà connue mais FICHIER manquant (cas restauration) : retélécharge sous le MÊME cheminLocal, ne recrée pas la ligne", async () => {
+    const fetchSimule = vi.fn(async (url: string) => {
+      if (url.includes("/v1/app/images/list")) return reponseListe([{ id: "img-1", modeleId: "modele-1", ordre: 0, estPrincipale: true, url: URL_IMAGE_1 }]);
+      return reponseBinaire("octets-image");
+    });
+    vi.stubGlobal("fetch", fetchSimule);
+    const repo = makeRepo({
+      findById: vi.fn(() => ({ id: "img-1", modeleId: "modele-1", kind: "produit", cheminLocal: "deja-existant.jpg", urlCloud: null, ordre: 0, estPrincipale: true, syncStatus: "confirmed", createdAt: "x", updatedAt: "x" })),
+    });
+    const service = new ImageService(repo, FENETRE_FACTICE);
+
+    const resultat = await service.synchroniserImagesManquantes("https://api.example.com", "jwt-test");
+
+    expect(resultat).toEqual({ telechargees: 1 });
+    expect((repo as unknown as { creerDepuisServeur: ReturnType<typeof vi.fn> }).creerDepuisServeur).not.toHaveBeenCalled();
+    expect(existsSync(join(tempUserData, "images-produits", "deja-existant.jpg"))).toBe(true);
+  });
+
+  it("fichier déjà présent localement : aucun téléchargement réseau de l'image (seul l'appel de liste a lieu)", async () => {
+    const fetchSimule = vi.fn(async (url: string) => {
+      if (url.includes("/v1/app/images/list")) return reponseListe([{ id: "img-1", modeleId: "modele-1", ordre: 0, estPrincipale: true, url: URL_IMAGE_1 }]);
+      throw new Error("ne devrait jamais être appelé — fichier déjà présent");
+    });
+    const repo = makeRepo({
+      findById: vi.fn(() => ({ id: "img-1", modeleId: "modele-1", kind: "produit", cheminLocal: "present.jpg", urlCloud: null, ordre: 0, estPrincipale: true, syncStatus: "confirmed", createdAt: "x", updatedAt: "x" })),
+    });
+    const service = new ImageService(repo, FENETRE_FACTICE);
+    writeFileSync(join(tempUserData, "images-produits", "present.jpg"), "deja-la");
+    vi.stubGlobal("fetch", fetchSimule);
+
+    const resultat = await service.synchroniserImagesManquantes("https://api.example.com", "jwt-test");
+
+    expect(resultat).toEqual({ telechargees: 0 });
+    expect(fetchSimule).toHaveBeenCalledTimes(1);
+  });
+
+  it("image totalement inconnue localement (vrai deuxième poste) : télécharge et crée la ligne avec un nom déterministe <id><extension>", async () => {
+    const fetchSimule = vi.fn(async (url: string) => {
+      if (url.includes("/v1/app/images/list")) return reponseListe([{ id: "img-nouveau", modeleId: "modele-2", ordre: 1, estPrincipale: false, url: URL_IMAGE_1 }]);
+      return reponseBinaire("octets-image");
+    });
+    vi.stubGlobal("fetch", fetchSimule);
+    const repo = makeRepo({ findById: vi.fn(() => null) });
+    const service = new ImageService(repo, FENETRE_FACTICE);
+
+    const resultat = await service.synchroniserImagesManquantes("https://api.example.com", "jwt-test");
+
+    expect(resultat).toEqual({ telechargees: 1 });
+    expect((repo as unknown as { creerDepuisServeur: ReturnType<typeof vi.fn> }).creerDepuisServeur).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "img-nouveau", modeleId: "modele-2", cheminLocal: "img-nouveau.jpg", ordre: 1, estPrincipale: false })
+    );
+    expect(existsSync(join(tempUserData, "images-produits", "img-nouveau.jpg"))).toBe(true);
+  });
+
+  it("image sans URL (jamais téléversée côté serveur) : ignorée, aucun appel réseau supplémentaire", async () => {
+    const fetchSimule = vi.fn(async () => reponseListe([{ id: "img-sans-url", modeleId: "modele-1", ordre: 0, estPrincipale: false, url: null }]));
+    vi.stubGlobal("fetch", fetchSimule);
+    const repo = makeRepo();
+    const service = new ImageService(repo, FENETRE_FACTICE);
+
+    const resultat = await service.synchroniserImagesManquantes("https://api.example.com", "jwt-test");
+
+    expect(resultat).toEqual({ telechargees: 0 });
+    expect(fetchSimule).toHaveBeenCalledTimes(1);
+  });
+
+  it("réponse de liste en échec (HTTP non ok) : jamais une exception, résultat à zéro", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("erreur", { status: 500 })));
+    const repo = makeRepo();
+    const service = new ImageService(repo, FENETRE_FACTICE);
+
+    await expect(service.synchroniserImagesManquantes("https://api.example.com", "jwt-test")).resolves.toEqual({ telechargees: 0 });
   });
 });

@@ -90,6 +90,39 @@ export class ImageProduitRepository {
     transaction();
   }
 
+  /**
+   * Correction "photos de carreaux absentes sur poste restauré/secondaire"
+   * (2026-10-24) — insère une ligne reçue du serveur (voir
+   * `ImageService.synchroniserImagesManquantes`), en conservant l'`id`
+   * EXACT de l'image d'origine (jamais un nouvel UUID local, qui casserait
+   * la correspondance avec ce même serveur lors d'un futur rattrapage).
+   *
+   * Renvoie `false` sans rien modifier si l'insertion échoue (typiquement :
+   * le modèle référencé n'a pas encore été reçu localement par PULL —
+   * contrainte FK sur `modele_id`) — jamais bloquant, une nouvelle
+   * tentative aura lieu au prochain cycle de synchronisation automatique.
+   */
+  creerDepuisServeur(input: { id: string; modeleId: string; cheminLocal: string; urlCloud: string | null; ordre: number; estPrincipale: boolean }): boolean {
+    const now = new Date().toISOString();
+    try {
+      const transaction = this.db.transaction(() => {
+        if (input.estPrincipale) {
+          this.db.prepare("UPDATE images_produit SET est_principale = 0, updated_at = ? WHERE modele_id = ?").run(now, input.modeleId);
+        }
+        this.db
+          .prepare(
+            `INSERT INTO images_produit (id, modele_id, kind, chemin_local, url_cloud, ordre, est_principale, sync_status, created_at, updated_at)
+             VALUES (?, ?, 'produit', ?, ?, ?, ?, 'confirmed', ?, ?)`
+          )
+          .run(input.id, input.modeleId, input.cheminLocal, input.urlCloud, input.ordre, input.estPrincipale ? 1 : 0, now, now);
+      });
+      transaction();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   findById(imageId: string): ImageProduit | null {
     const row = this.db.prepare("SELECT * FROM images_produit WHERE id = ?").get(imageId) as ImageRow | undefined;
     return row ? rowToImage(row) : null;

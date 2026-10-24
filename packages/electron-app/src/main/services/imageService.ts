@@ -10,6 +10,22 @@ const ACCEPTED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
 const MIME_BY_EXT: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
 
 /**
+ * Délais réseau pour `synchroniserImagesManquantes` — mêmes valeurs que
+ * `syncService.ts` pour la cohérence (liste JSON légère vs. téléchargement
+ * d'un fichier réel).
+ */
+const DELAI_MAX_REQUETE_LISTE_IMAGES_MS = 20_000;
+const DELAI_MAX_REQUETE_TELECHARGEMENT_IMAGE_MS = 45_000;
+
+interface ImageServeur {
+  id: string;
+  modeleId: string;
+  ordre: number;
+  estPrincipale: boolean;
+  url: string | null;
+}
+
+/**
  * Correction "photos lentes à charger sur le site" (2026-10-10) : les
  * photos ajoutées depuis un téléphone/appareil photo font souvent
  * plusieurs Mo alors qu'elles ne sont jamais affichées aussi grand sur le
@@ -295,6 +311,110 @@ export class ImageService {
     // changé) : le serveur rétrograde lui-même les autres images du
     // modèle (voir catalogStore.upsertImageMeta).
     this.enqueueImageSync({ imageId, modeleId, fileName: null, ordre: image.ordre, estPrincipale: true, operation: "update" });
+  }
+
+  /** Extension déduite du paramètre `?file=...ext` de l'URL publique serveur — `.jpg` par défaut si absent/illisible (jamais bloquant). */
+  private extensionDepuisUrl(url: string): string {
+    try {
+      const fichier = new URL(url).searchParams.get("file");
+      if (fichier) {
+        const ext = extname(fichier).toLowerCase();
+        if (ACCEPTED_EXTENSIONS.includes(ext)) return ext;
+      }
+    } catch {
+      // URL illisible — repli ci-dessous.
+    }
+    return ".jpg";
+  }
+
+  /**
+   * Correction "photos de carreaux absentes sur poste restauré/secondaire"
+   * (2026-10-24) — jusqu'ici les photos ne circulaient QUE dans le sens
+   * poste → serveur (voir `enqueueImageSync`) : une sauvegarde cloud ne
+   * contient que `database.sqlite`, jamais les fichiers de
+   * `images-produits/`, et un deuxième poste synchronisé ne les recevait
+   * jamais non plus (le type `image_produit` est explicitement exclu du
+   * journal générique dans `syncService.ts`).
+   *
+   * Appelée à chaque cycle de synchronisation automatique (voir
+   * `SyncService.executerSynchronisation`) : interroge
+   * `GET /v1/app/images/list` (TOUTES les images connues du serveur, pas
+   * seulement celles de produits actifs), puis télécharge uniquement les
+   * fichiers absents localement — jamais un fichier déjà présent, jamais
+   * bloquant pour le reste de la synchronisation (chaque image est
+   * indépendante, une erreur réseau sur l'une n'empêche jamais les autres).
+   *
+   * Pour une ligne `images_produit` déjà connue localement (restauration :
+   * la ligne existe, seul le FICHIER manque), réutilise son `cheminLocal`
+   * existant — jamais un nouveau nom, qui romprait la correspondance déjà
+   * en base. Pour une image totalement inconnue ici (vrai deuxième poste),
+   * construit un nom déterministe `<imageId><extension>` : si le modèle
+   * référencé n'a pas encore été reçu localement par PULL, l'insertion de
+   * la ligne échoue proprement (voir `creerDepuisServeur`) mais le fichier
+   * reste écrit sous ce même nom déterministe — le prochain cycle le
+   * retrouvera sans retélécharger et pourra alors créer la ligne.
+   */
+  async synchroniserImagesManquantes(apiUrl: string, jwt: string): Promise<{ telechargees: number }> {
+    let reponse: Response;
+    try {
+      reponse = await fetch(`${apiUrl}/v1/app/images/list`, {
+        headers: { Authorization: `Bearer ${jwt}` },
+        signal: AbortSignal.timeout(DELAI_MAX_REQUETE_LISTE_IMAGES_MS),
+      });
+    } catch {
+      return { telechargees: 0 };
+    }
+    if (!reponse.ok) return { telechargees: 0 };
+
+    let corps: { images: ImageServeur[] };
+    try {
+      corps = (await reponse.json()) as { images: ImageServeur[] };
+      if (!Array.isArray(corps.images)) return { telechargees: 0 };
+    } catch {
+      return { telechargees: 0 };
+    }
+
+    let telechargees = 0;
+    for (const img of corps.images) {
+      if (!img.url) continue;
+
+      const existante = this.repository.findById(img.id);
+      const cheminLocal = existante ? existante.cheminLocal : `${img.id}${this.extensionDepuisUrl(img.url)}`;
+      const cheminComplet = join(this.storageDir, cheminLocal);
+
+      if (existsSync(cheminComplet)) {
+        // Fichier déjà présent — seule la ligne locale peut encore manquer
+        // (modèle reçu depuis le cycle précédent) : tentative sans
+        // retéléchargement réseau.
+        if (!existante) {
+          this.repository.creerDepuisServeur({ id: img.id, modeleId: img.modeleId, cheminLocal, urlCloud: img.url, ordre: img.ordre, estPrincipale: img.estPrincipale });
+        }
+        continue;
+      }
+
+      let octets: Buffer;
+      try {
+        const repImage = await fetch(img.url, { signal: AbortSignal.timeout(DELAI_MAX_REQUETE_TELECHARGEMENT_IMAGE_MS) });
+        if (!repImage.ok) continue;
+        octets = Buffer.from(await repImage.arrayBuffer());
+      } catch {
+        continue;
+      }
+
+      try {
+        writeFileSync(cheminComplet, octets);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[images] écriture impossible lors du rattrapage :", cheminComplet, err);
+        continue;
+      }
+
+      if (!existante) {
+        this.repository.creerDepuisServeur({ id: img.id, modeleId: img.modeleId, cheminLocal, urlCloud: img.url, ordre: img.ordre, estPrincipale: img.estPrincipale });
+      }
+      telechargees += 1;
+    }
+    return { telechargees };
   }
 
   remove(imageId: string): void {

@@ -405,6 +405,8 @@ app.whenReady().then(async () => {
 
     const imageProduitRepository = new ImageProduitRepository(db);
     const imageService = new ImageService(imageProduitRepository, mainWindow, boiteEnvoiRepository);
+    // Correction "photos de carreaux absentes sur poste restauré/secondaire" (2026-10-24) — voir syncService.ts.
+    syncService.definirImageService(imageService);
 
     bootstrapDefaultEmplacements(emplacementRepository);
     registerMetierIpcHandlers(

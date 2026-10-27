@@ -180,6 +180,75 @@ export class MouvementRepository {
   }
 
   /**
+   * Insère une entrée/sortie/transfert reçu d'un autre poste —
+   * correction "visibilité croisée Factures/Historique entre postes"
+   * (2026-10-27), Phase 4. Conserve l'`id` EXACT d'origine, idempotent
+   * (`SELECT` avant `INSERT`, jamais un doublon). `factureId` toujours
+   * `NULL` ici : une vente reçue n'insère JAMAIS de mouvement (voir
+   * FactureRepository.creerDepuisServeur — l'événement "vente" de
+   * l'Historique se lit directement depuis `factures`, pas depuis
+   * `mouvements`), donc un mouvement reçu par CE chemin est par
+   * construction toujours manuel (entree/sortie/transfert), jamais lié
+   * à une facture.
+   *
+   * Ne recalcule JAMAIS `stocks` à partir de ce mouvement — les
+   * quantités restent exclusivement pilotées par le rattrapage
+   * `stock_central` déjà en place (StockRepository.appliquerValeursAbsolues),
+   * double-compter sinon.
+   *
+   * Renvoie `false` sans rien écrire si l'insertion échoue (clé
+   * étrangère `produit_id` pas encore résolvable localement, voir
+   * CatalogueSyncService) — jamais bloquant, retenté au prochain cycle.
+   */
+  creerDepuisServeur(mouvement: {
+    id: string;
+    type: "entree" | "sortie" | "transfert";
+    produitId: string;
+    emplacementId: string | null;
+    emplacementSourceId: string | null;
+    emplacementDestinationId: string | null;
+    quantite: number;
+    date: string;
+    utilisateurId: string | null;
+  }): boolean {
+    const existe = this.db.prepare("SELECT id FROM mouvements WHERE id = ?").get(mouvement.id) as { id: string } | undefined;
+    if (existe) return true;
+
+    try {
+      domainStock.assertCoherentMouvement({
+        type: mouvement.type,
+        emplacementId: mouvement.emplacementId,
+        emplacementSourceId: mouvement.emplacementSourceId,
+        emplacementDestinationId: mouvement.emplacementDestinationId,
+      });
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT INTO mouvements
+           (id, type, produit_id, emplacement_id, emplacement_source_id, emplacement_destination_id, quantite, date, facture_id, utilisateur_id, note, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)`
+        )
+        .run(
+          mouvement.id,
+          mouvement.type,
+          mouvement.produitId,
+          mouvement.emplacementId,
+          mouvement.emplacementSourceId,
+          mouvement.emplacementDestinationId,
+          mouvement.quantite,
+          mouvement.date,
+          mouvement.utilisateurId,
+          now,
+          now
+        );
+      return true;
+    } catch {
+      // Violation de clé étrangère (produit pas encore résolvable localement) — jamais bloquant, retenté au prochain cycle.
+      return false;
+    }
+  }
+
+  /**
    * Somme des quantités pour un type de mouvement — globale si utilisateurId
    * omis, personnelle sinon (§9/§13 de la correction : le filtrage doit
    * être réel, pas visuel).

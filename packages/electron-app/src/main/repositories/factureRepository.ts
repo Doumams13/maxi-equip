@@ -335,6 +335,140 @@ export class FactureRepository {
   }
 
   /**
+   * Insère une facture reçue d'un autre poste — correction "visibilité
+   * croisée Factures/Historique entre postes" (2026-10-27), Phase 4.
+   * Conserve l'`id` EXACT d'origine (jamais un nouvel UUID local, même
+   * principe que les autres `creerDepuisServeur` de ce projet) : c'est
+   * cet id qui permet à une annulation reçue plus tard de retrouver la
+   * bonne facture. Idempotent par construction (`SELECT` avant
+   * `INSERT`) — un écho de sa propre machine d'origine, ou un second
+   * passage du balayage de rattrapage, ne crée jamais de doublon.
+   *
+   * `statutLivraison` n'est volontairement PAS reçu ici (absent du
+   * payload "vente", voir venteService.ts) : une facture reçue démarre
+   * toujours "en_attente", comme une facture créée localement — un
+   * changement de statut de livraison ultérieur sur son poste d'origine
+   * ne se propage pas (limite connue, hors périmètre de cette
+   * correction, qui porte sur la VISIBILITÉ des factures/mouvements,
+   * pas sur la réplication complète de tous leurs changements d'état).
+   *
+   * Les lignes n'ont pas d'id stable à conserver (`LigneFacture` n'en
+   * expose aucun, voir shared-types/facture.ts) — regénérées localement,
+   * exactement comme `create()` ci-dessus le fait déjà.
+   *
+   * Renvoie `false` sans rien écrire si l'insertion échoue (typiquement
+   * une clé étrangère pas encore résolvable localement —
+   * `emplacement_id`/`vendeur_utilisateur_id`, voir
+   * EmplacementSyncService/CompteSyncService) : jamais bloquant, une
+   * nouvelle tentative aura lieu au prochain cycle de synchronisation
+   * (voir SyncRepository.listerNonAppliquees).
+   */
+  creerDepuisServeur(facture: {
+    id: string;
+    numero: string;
+    date: string;
+    emplacementId: string;
+    clientNom: string;
+    clientTelephone: string | null;
+    clientAdresse: string | null;
+    vendeurUtilisateurId: string;
+    vendeurNomManuel: string | null;
+    modeReglement: string | null;
+    lignes: LigneFacture[];
+    total: number;
+    remise: number;
+    statutPaiement: "reservation" | "payee";
+    montantPaye: number;
+    identiteSnapshot: IdentiteEntrepriseSnapshot | null;
+  }): boolean {
+    const existe = this.db.prepare("SELECT id FROM factures WHERE id = ?").get(facture.id) as { id: string } | undefined;
+    if (existe) return true;
+
+    try {
+      const executer = this.db.transaction(() => {
+        const now = new Date().toISOString();
+        this.db
+          .prepare(
+            `INSERT INTO factures
+             (id, numero, date, emplacement_id, client_nom, client_telephone, client_adresse, vendeur_utilisateur_id, vendeur_nom_manuel, mode_reglement, total, remise, statut_paiement, montant_paye, statut_livraison, identite_snapshot_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?, ?)`
+          )
+          .run(
+            facture.id,
+            facture.numero,
+            facture.date,
+            facture.emplacementId,
+            facture.clientNom,
+            facture.clientTelephone,
+            facture.clientAdresse,
+            facture.vendeurUtilisateurId,
+            facture.vendeurNomManuel,
+            facture.modeReglement,
+            facture.total,
+            facture.remise,
+            facture.statutPaiement,
+            facture.montantPaye,
+            facture.identiteSnapshot ? JSON.stringify(facture.identiteSnapshot) : null,
+            now,
+            now
+          );
+
+        const insertLigne = this.db.prepare(
+          `INSERT INTO lignes_facture
+             (id, facture_id, produit_id, motif, reference, taille, quantite, prix_unitaire,
+              prix_unitaire_normal, promotion_id, promotion_libelle, promotion_type, promotion_valeur, surface_carton_m2)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        for (const ligne of facture.lignes) {
+          insertLigne.run(
+            randomUUID(), facture.id, ligne.produitId, ligne.motif, ligne.reference, ligne.taille, ligne.quantite, ligne.prixUnitaire,
+            ligne.prixUnitaireNormal ?? null, ligne.promotionId ?? null, ligne.promotionLibelle ?? null,
+            ligne.promotionType ?? null, ligne.promotionValeur ?? null, ligne.surfaceCartonM2 ?? null
+          );
+        }
+      });
+      executer();
+      return true;
+    } catch {
+      // Violation de clé étrangère (emplacement/vendeur pas encore
+      // résolvable localement) — jamais bloquant, retenté au prochain cycle.
+      return false;
+    }
+  }
+
+  /**
+   * Applique une annulation reçue d'un autre poste — correction
+   * "visibilité croisée Factures/Historique entre postes" (2026-10-27),
+   * Phase 4. Utilise le timestamp D'ORIGINE (`annuleeLe`, transmis dans
+   * le payload), JAMAIS "maintenant" (contrairement à `annuler()`
+   * ci-dessus, appelé uniquement pour une annulation réalisée SUR ce
+   * poste). Idempotent et jamais bloquant :
+   * - la facture correspondante n'existe pas encore localement (reçue
+   *   avant que sa "vente" d'origine ait pu s'appliquer, ou jamais
+   *   reçue) → ne fait rien, DOIT être retenté au prochain cycle ;
+   * - déjà annulée (écho de sa propre machine d'origine — qui a annulé
+   *   via `annuler()` ci-dessus, pas ce chemin — ou second passage du
+   *   balayage de rattrapage) → ne fait rien, mais c'est un succès : il
+   *   n'y a plus rien à faire, jamais besoin de retenter.
+   *
+   * Distingue donc DEUX `false` différents pour l'appelant : `applique:
+   * false` (rien à faire, ne JAMAIS retenter — déjà dans l'état visé)
+   * vs `applique: true` avec `effectuee: false` serait trompeur, d'où
+   * la forme `{ traitee: boolean }` ci-dessous — `traitee: false`
+   * signifie EXCLUSIVEMENT "pas encore prêt, retenter" (voir
+   * SyncRepository.listerNonAppliquees).
+   */
+  appliquerAnnulationDepuisServeur(annulation: { factureId: string; motif: string; annuleePar: string; annuleeLe: string }): { traitee: boolean } {
+    const facture = this.db.prepare("SELECT annulee_le FROM factures WHERE id = ?").get(annulation.factureId) as { annulee_le: string | null } | undefined;
+    if (!facture) return { traitee: false };
+    if (facture.annulee_le) return { traitee: true };
+    this.db
+      .prepare("UPDATE factures SET annulee_le = ?, annulee_par = ?, motif_annulation = ?, updated_at = ? WHERE id = ?")
+      .run(annulation.annuleeLe, annulation.annuleePar, annulation.motif, annulation.annuleeLe, annulation.factureId);
+    return { traitee: true };
+  }
+
+  /**
    * Change le statut (paiement + livraison) d'une facture — correction
    * "Réservation / Acompte". Remplace l'ancienne `marquerLivree()`, trop
    * étroite pour couvrir les 3 statuts affichés ("Réservation" / "Payée —

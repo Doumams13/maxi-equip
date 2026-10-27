@@ -16,6 +16,7 @@ import { EmplacementRepository, bootstrapDefaultEmplacements } from "./repositor
 import { EmplacementSyncService } from "./services/emplacementSyncService.js";
 import { CompteSyncService } from "./services/compteSyncService.js";
 import { CatalogueSyncService } from "./services/catalogueSyncService.js";
+import { SyncApplicationService } from "./services/syncApplicationService.js";
 import { ProduitRepository } from "./repositories/produitRepository.js";
 import { StockRepository } from "./repositories/stockRepository.js";
 import { MouvementRepository } from "./repositories/mouvementRepository.js";
@@ -420,6 +421,8 @@ app.whenReady().then(async () => {
     syncService.definirRattrapageComptes(utilisateurRepository, new CompteSyncService());
     // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 2 — voir syncService.ts.
     syncService.definirRattrapageCatalogue(modeleRepository, produitRepository, new CatalogueSyncService());
+    // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 4 — voir syncService.ts.
+    syncService.definirApplicationOperationsMetier(new SyncApplicationService(factureRepository, mouvementRepository));
 
     bootstrapDefaultEmplacements(emplacementRepository);
 

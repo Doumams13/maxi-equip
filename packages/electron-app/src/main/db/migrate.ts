@@ -87,6 +87,7 @@ export function runMigrations(db: Database.Database): void {
   addActifColumnToEmplacementsIfMissing(db);
   addResponsablesColumnsIfMissing(db);
   createSyncTablesIfMissing(db);
+  ajouterColonneAppliqueSyncRecuSiAbsente(db);
   addUtilisateurIdToMouvementsIfMissing(db);
   migrateFacturesPourAnnulationEtLivraison(db);
   seedParametresEntrepriseSiAbsent(db);
@@ -537,9 +538,48 @@ function createSyncTablesIfMissing(db: Database.Database): void {
       entity_type TEXT NOT NULL,
       entity_id TEXT NOT NULL,
       payload_json TEXT NOT NULL,
-      recu_le TEXT NOT NULL
+      recu_le TEXT NOT NULL,
+      -- Correction "visibilité croisée Factures/Historique entre
+      -- postes" (2026-10-27), Phase 4 — voir
+      -- ajouterColonneAppliqueSyncRecuSiAbsente ci-dessous pour le
+      -- raisonnement complet.
+      applique INTEGER NOT NULL DEFAULT 0
     );
   `);
+}
+
+/**
+ * Correction "visibilité croisée Factures/Historique entre postes"
+ * (2026-10-27), Phase 4 — ajoute la colonne `applique` sur une base
+ * créée avant cette évolution (`CREATE TABLE IF NOT EXISTS` ci-dessus
+ * ne touche jamais une table déjà existante).
+ *
+ * Le curseur `/v1/sync/pull` avance de façon strictement croissante :
+ * une opération déjà renvoyée une fois ne l'est plus jamais (voir
+ * pull.ts côté API). Jusqu'ici ce n'était pas un problème : seul le
+ * type "demande" était réellement appliqué aux données métier, et sa
+ * clé étrangère produit_id est délibérément NON contrainte (une
+ * demande vient d'une source externe, voir
+ * retirerContrainteProduitIdLignesDemandeSiPresente). Les nouveaux
+ * types appliqués en Phase 4 (vente/annulation/entree/sortie/
+ * transfert) référencent eux de VRAIES clés étrangères
+ * (emplacement_id, vendeur_utilisateur_id, produit_id...) qui peuvent
+ * ne pas encore être résolvables localement au moment du PULL (dépôt/
+ * compte/produit pas encore rattrapé par un autre cycle, voir
+ * EmplacementSyncService/CompteSyncService/CatalogueSyncService) — sans
+ * ce suivi, une telle opération échouerait silencieusement UNE FOIS et
+ * ne serait plus jamais retentée, le curseur ayant déjà avancé au-delà
+ * d'elle. `applique = 0` par défaut, mis à 1 uniquement après une
+ * application réussie — un balayage dédié (voir
+ * SyncRepository.listerNonAppliquees) retente à chaque cycle de
+ * synchronisation tout ce qui reste à 0, jusqu'à ce que ses dépendances
+ * soient enfin connues localement.
+ */
+function ajouterColonneAppliqueSyncRecuSiAbsente(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(sync_recu)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "applique")) {
+    db.exec("ALTER TABLE sync_recu ADD COLUMN applique INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 /**

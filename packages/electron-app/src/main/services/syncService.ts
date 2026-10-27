@@ -27,6 +27,15 @@ import type { ImageService } from "./imageService.js";
 const DELAI_MAX_REQUETE_MS = 20_000;
 const DELAI_MAX_REQUETE_IMAGE_MS = 45_000;
 
+/**
+ * Correction "visibilité croisée Factures/Historique entre postes"
+ * (2026-10-27), Phase 4 — les 5 types réellement appliqués aux données
+ * métier (voir SyncApplicationService), partagés entre le traitement
+ * "à chaud" (PULL) et le balayage de rattrapage ci-dessous.
+ */
+type TypeOperationMetier = "vente" | "annulation" | "entree" | "sortie" | "transfert";
+const ENTITY_TYPES_METIER: ReadonlySet<string> = new Set<TypeOperationMetier>(["vente", "annulation", "entree", "sortie", "transfert"]);
+
 export interface ResultatSynchronisation {
   success: boolean;
   push?: { envoyees: number; confirmees: number };
@@ -226,6 +235,19 @@ export class SyncService {
     this.rattrapageCatalogue = { modeleRepository, produitRepository, catalogueSyncService };
   }
 
+  /**
+   * Correction "visibilité croisée Factures/Historique entre postes"
+   * (2026-10-27), Phase 4 — même raisonnement que les rattrapages
+   * ci-dessus (optionnel, type structurel minimal). Utilisé à la fois
+   * dans `effectuerPull` (ci-dessous) et dans le balayage de rattrapage
+   * (voir `executerSynchronisation`).
+   */
+  private applicationOperationsMetier?: { appliquer(entityType: TypeOperationMetier, payload: unknown): boolean };
+
+  definirApplicationOperationsMetier(applicationOperationsMetier: { appliquer(entityType: TypeOperationMetier, payload: unknown): boolean }): void {
+    this.applicationOperationsMetier = applicationOperationsMetier;
+  }
+
   constructor(
     private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
     private readonly syncRepository: SyncRepository,
@@ -321,6 +343,36 @@ export class SyncService {
           // Même principe que le rattrapage d'images ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
           // eslint-disable-next-line no-console
           console.error("[sync] rattrapage du stock partagé impossible :", err instanceof Error ? err.message : err);
+        }
+      }
+
+      // Correction "visibilité croisée Factures/Historique entre
+      // postes" (2026-10-27), Phase 4 — balayage de rattrapage. Le
+      // curseur `/v1/sync/pull` avance de façon strictement croissante
+      // (une opération déjà renvoyée une fois ne l'est plus jamais, voir
+      // pull.ts côté API) : une opération qui a échoué dans la boucle
+      // `effectuerPull` ci-dessus (dépôt/compte/produit pas encore
+      // connu localement À CE MOMENT-LÀ) ne serait donc plus jamais
+      // retentée sans ce balayage, le curseur ayant déjà avancé.
+      // Exécuté APRÈS les rattrapages dépôts/comptes/catalogue/stock
+      // ci-dessus — leurs données, fraîchement reçues DANS CE MÊME
+      // CYCLE, donnent à cette tentative les meilleures chances de
+      // réussir maintenant.
+      if (this.applicationOperationsMetier) {
+        try {
+          const operations = this.syncRepository.listerNonAppliquees(["vente", "annulation", "entree", "sortie", "transfert"]);
+          for (const operation of operations) {
+            try {
+              const traitee = this.applicationOperationsMetier.appliquer(operation.entityType as TypeOperationMetier, operation.payload);
+              if (traitee) this.syncRepository.marquerApplique(operation.curseurServeur);
+            } catch {
+              // Volontairement silencieux — retenté au prochain cycle.
+            }
+          }
+        } catch (err) {
+          // Même principe que les rattrapages ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
+          // eslint-disable-next-line no-console
+          console.error("[sync] balayage de rattrapage des opérations métier impossible :", err instanceof Error ? err.message : err);
         }
       }
 
@@ -516,6 +568,29 @@ export class SyncService {
               this.traiterDemandeRecue(operation.payload, operation.entityId);
             } catch {
               // Volontairement silencieux ici — la donnée reste disponible dans sync_recu, jamais perdue.
+            }
+          }
+        }
+
+        // Correction "visibilité croisée Factures/Historique entre
+        // postes" (2026-10-27), Phase 4 — mêmes 5 types pour lesquels
+        // `operations_synchronisees` existait déjà côté serveur (voir
+        // serverStorage.ts), mais jamais appliqués aux données métier
+        // jusqu'ici (seulement journalisés dans `sync_recu`, comme
+        // "demande" l'était avant la Phase 4 de cette correction).
+        // Chaque opération marquée "appliquée" (voir
+        // SyncRepository.marquerApplique) uniquement en cas de succès —
+        // sinon elle reste disponible pour le balayage de rattrapage
+        // (voir executerSynchronisation), le curseur ayant déjà avancé
+        // au-delà d'elle.
+        if (this.applicationOperationsMetier) {
+          for (const operation of corps.operations) {
+            if (!ENTITY_TYPES_METIER.has(operation.entityType)) continue;
+            try {
+              const traitee = this.applicationOperationsMetier.appliquer(operation.entityType as TypeOperationMetier, operation.payload);
+              if (traitee) this.syncRepository.marquerApplique(operation.curseur);
+            } catch {
+              // Volontairement silencieux — retenté au prochain cycle (balayage de rattrapage).
             }
           }
         }

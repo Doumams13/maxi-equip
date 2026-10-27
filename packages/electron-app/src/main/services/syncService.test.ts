@@ -671,3 +671,104 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
     });
   });
 });
+
+describe("Phase 4 (2026-10-27) — application réelle des opérations métier reçues (vente/annulation/entrée/sortie/transfert)", () => {
+  function reponsePush() {
+    return new Response(JSON.stringify({ results: [] }), { status: 200 });
+  }
+  function fetchAvecPull(operations: { curseur: number; entityType: string; entityId: string; payload: unknown }[]) {
+    return vi.fn(async (url: string) => {
+      if (url.includes("/sync/push")) return reponsePush();
+      return new Response(JSON.stringify({ operations: operations.map((o) => ({ ...o, recuLe: "" })), cursor: operations.at(-1)?.curseur ?? 0 }), { status: 200 });
+    });
+  }
+
+  it("une opération fraîchement reçue est transmise à appliquer() ET marquée appliquée en cas de succès — jamais retentée ensuite", async () => {
+    vi.stubGlobal("fetch", fetchAvecPull([{ curseur: 7, entityType: "vente", entityId: "f1", payload: { factureId: "f1" } }]));
+    const appels: { entityType: string; payload: unknown }[] = [];
+    const applicationOperationsMetier = { appliquer: (entityType: "vente" | "annulation" | "entree" | "sortie" | "transfert", payload: unknown) => { appels.push({ entityType, payload }); return true; } };
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+    service.definirApplicationOperationsMetier(applicationOperationsMetier);
+
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(true);
+    expect(appels).toEqual([{ entityType: "vente", payload: { factureId: "f1" } }]);
+    expect(syncRepository.listerNonAppliquees(["vente"])).toEqual([]);
+  });
+
+  it("un échec d'application (appliquer renvoie false) laisse l'opération NON marquée appliquée — reste disponible pour le balayage de rattrapage", async () => {
+    vi.stubGlobal("fetch", fetchAvecPull([{ curseur: 8, entityType: "entree", entityId: "m1", payload: {} }]));
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+    service.definirApplicationOperationsMetier({ appliquer: () => false });
+
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(true);
+    expect(syncRepository.listerNonAppliquees(["entree"])).toHaveLength(1);
+  });
+
+  it("une exception levée par appliquer() n'interrompt jamais la synchronisation — opération non marquée, retentable", async () => {
+    vi.stubGlobal("fetch", fetchAvecPull([{ curseur: 9, entityType: "sortie", entityId: "m1", payload: {} }]));
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+    service.definirApplicationOperationsMetier({
+      appliquer: () => {
+        throw new Error("échec volontaire");
+      },
+    });
+
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(true);
+    expect(syncRepository.listerNonAppliquees(["sortie"])).toHaveLength(1);
+  });
+
+  it("'demande' n'est JAMAIS transmis à appliquer() — reste exclusivement traité par traiterDemandeRecue", async () => {
+    vi.stubGlobal("fetch", fetchAvecPull([{ curseur: 1, entityType: "demande", entityId: "d1", payload: {} }]));
+    const appels: unknown[] = [];
+    const service = new SyncService(boiteEnvoiRepository, syncRepository, () => {});
+    service.definirApplicationOperationsMetier({ appliquer: (t, p) => { appels.push({ t, p }); return true; } });
+
+    await service.executerSynchronisation();
+
+    expect(appels).toEqual([]);
+  });
+
+  it("balayage de rattrapage : une opération restée NON appliquée d'un cycle précédent est retentée, MÊME sans rien de nouveau au PULL", async () => {
+    // Simule le résidu d'un cycle précédent : reçue, journalisée, jamais appliquée (ex. dépôt pas encore connu à l'époque).
+    syncRepository.enregistrerOperationsRecues([{ entityType: "vente", entityId: "f2", payload: { factureId: "f2" }, curseurServeur: 3 }]);
+    vi.stubGlobal("fetch", fetchAvecPull([])); // rien de nouveau ce cycle-ci
+    const appels: unknown[] = [];
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+    service.definirApplicationOperationsMetier({ appliquer: (_t, p) => { appels.push(p); return true; } });
+
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(true);
+    expect(appels).toEqual([{ factureId: "f2" }]);
+    expect(syncRepository.listerNonAppliquees(["vente"])).toEqual([]);
+  });
+
+  it("balayage de rattrapage : une opération qui échoue à nouveau reste non appliquée, jamais une boucle infinie dans le même cycle", async () => {
+    syncRepository.enregistrerOperationsRecues([{ entityType: "entree", entityId: "m2", payload: {}, curseurServeur: 4 }]);
+    vi.stubGlobal("fetch", fetchAvecPull([]));
+    const appliquer = vi.fn(() => false);
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+    service.definirApplicationOperationsMetier({ appliquer });
+
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(true);
+    expect(appliquer).toHaveBeenCalledTimes(1); // une seule tentative ce cycle-ci, jamais une boucle
+    expect(syncRepository.listerNonAppliquees(["entree"])).toHaveLength(1);
+  });
+
+  it("sans applicationOperationsMetier défini : synchronisation inchangée (rétrocompatibilité), rien n'est marqué appliqué", async () => {
+    vi.stubGlobal("fetch", fetchAvecPull([{ curseur: 7, entityType: "vente", entityId: "f1", payload: {} }]));
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(true);
+  });
+});

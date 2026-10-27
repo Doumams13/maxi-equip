@@ -546,6 +546,42 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
       expect(resultats.filter((r) => !r.success)).toHaveLength(5);
     });
   });
+
+  describe("Amorçage ponctuel du stock central (réel PostgreSQL) — correction 'pc annexe ne peut pas vendre malgré le stock réel' (2026-10-27)", () => {
+    const PRODUIT = uuidDeterministe("801");
+    const DEPOT = uuidDeterministe("802");
+
+    it("fixe une quantité ABSOLUE sur un produit jamais vu (jamais un delta — crée directement à la bonne valeur)", async () => {
+      const resultat = await storage.initialiserStockCentral([{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 29 }]);
+      expect(resultat).toEqual({ lignesAppliquees: 1 });
+
+      const vente = await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: PRODUIT, emplacementId: DEPOT, delta: -16 }] });
+      expect(vente).toMatchObject({ success: true, stockApres: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 13 }] });
+    });
+
+    it("appelée une seconde fois : REMPLACE la quantité précédente, jamais cumulée avec elle", async () => {
+      await storage.initialiserStockCentral([{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 100 }]);
+      await storage.initialiserStockCentral([{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 13 }]);
+
+      const vente = await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: PRODUIT, emplacementId: DEPOT, delta: -20 }] });
+      expect(vente).toMatchObject({ success: false, raison: "stock_insuffisant", details: [{ produitId: PRODUIT, emplacementId: DEPOT, disponible: 13, demande: 20 }] });
+    });
+
+    it("plusieurs lignes dans un seul appel, toutes appliquées dans la MÊME transaction", async () => {
+      const produitA = uuidDeterministe("803");
+      const produitB = uuidDeterministe("804");
+      const resultat = await storage.initialiserStockCentral([
+        { produitId: produitA, emplacementId: DEPOT, quantite: 7 },
+        { produitId: produitB, emplacementId: DEPOT, quantite: 0 },
+      ]);
+      expect(resultat).toEqual({ lignesAppliquees: 2 });
+
+      const venteA = await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: produitA, emplacementId: DEPOT, delta: -7 }] });
+      expect(venteA.success).toBe(true);
+      const venteB = await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: produitB, emplacementId: DEPOT, delta: -1 }] });
+      expect(venteB).toMatchObject({ success: false, raison: "stock_insuffisant" });
+    });
+  });
 });
 
 describe("PostgresServerStorage — sélection automatique du backend (storeServeur.ts)", () => {

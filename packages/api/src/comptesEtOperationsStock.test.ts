@@ -192,3 +192,78 @@ describe("Validation atomique du stock partagé — route /app/operations/valide
     expect(res.status).toBe(401);
   });
 });
+
+describe("Amorçage ponctuel du stock central — route /app/operations/initialiser-stock (correction 'pc annexe ne peut pas vendre malgré le stock réel')", () => {
+  beforeEach(() => {
+    process.env["JWT_SIGNING_SECRET"] = SECRET_TEST;
+    process.env["MAXI_EQUIP_ENV"] = "test";
+    initialiserStockageServeur(":memory:");
+  });
+  afterEach(() => {
+    delete process.env["JWT_SIGNING_SECRET"];
+    delete process.env["MAXI_EQUIP_ENV"];
+    fermerStockageServeur();
+  });
+
+  const PRODUIT = "55555555-5555-4555-8555-555555555555";
+  const DEPOT = "66666666-6666-4666-8666-666666666666";
+
+  function initialiserStock(body: unknown) {
+    return { method: "POST" as const, path: "/v1/app/operations/initialiser-stock", headers: { authorization: `Bearer ${tokenInstallation()}` }, body };
+  }
+
+  it("fixe une quantité ABSOLUE — une vente dans cette limite réussit ensuite", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req(initialiserStock({ lignes: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 29 }] })));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ lignesAppliquees: 1 });
+
+    const vente = await router.dispatch(req(validerStock({ deltas: [{ produitId: PRODUIT, emplacementId: DEPOT, delta: -16 }] })));
+    expect(vente.body).toMatchObject({ success: true, stockApres: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 13 }] });
+  });
+
+  it("appelée une seconde fois : REMPLACE la quantité précédente (absolue, jamais cumulée)", async () => {
+    const router = createRouter();
+    await router.dispatch(req(initialiserStock({ lignes: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 29 }] })));
+    await router.dispatch(req(initialiserStock({ lignes: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 5 }] })));
+
+    const vente = await router.dispatch(req(validerStock({ deltas: [{ produitId: PRODUIT, emplacementId: DEPOT, delta: -6 }] })));
+    expect(vente.body).toMatchObject({ success: false, raison: "stock_insuffisant", details: [{ disponible: 5, demande: 6 }] });
+  });
+
+  it("plusieurs lignes en une seule requête, toutes appliquées", async () => {
+    const router = createRouter();
+    const DEPOT_2 = "77777777-7777-4777-8777-777777777777";
+    const res = await router.dispatch(
+      req(
+        initialiserStock({
+          lignes: [
+            { produitId: PRODUIT, emplacementId: DEPOT, quantite: 29 },
+            { produitId: PRODUIT, emplacementId: DEPOT_2, quantite: 4 },
+          ],
+        })
+      )
+    );
+    expect(res.body).toMatchObject({ lignesAppliquees: 2 });
+  });
+
+  it("corps invalide (lignes manquant) → 400", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req(initialiserStock({})));
+    expect(res.status).toBe(400);
+  });
+
+  it("quantité négative rejetée", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req(initialiserStock({ lignes: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: -1 }] })));
+    expect(res.status).toBe(400);
+  });
+
+  it("sans jeton d'installation → 401", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(
+      req({ method: "POST", path: "/v1/app/operations/initialiser-stock", headers: {}, body: { lignes: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 1 }] } })
+    );
+    expect(res.status).toBe(401);
+  });
+});

@@ -49,6 +49,10 @@ export function erreurDepuisEchecValidationDistante(resultat: Extract<ResultatVa
   return new ConnexionRequiseError(resultat.message);
 }
 
+export type ResultatInitialisationStock =
+  | { success: true; lignesAppliquees: number }
+  | { success: false; message: string };
+
 export class ValidationStockDistanteService {
   /** Vrai dès que la synchronisation (URL + jeton) est configurée sur ce poste — jamais basé sur un état réseau instantané (qui ne se sait qu'en tentant réellement l'appel). */
   estConfiguree(): boolean {
@@ -88,6 +92,51 @@ export class ValidationStockDistanteService {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
       return { success: false, raison: "hors_ligne", message: `Connexion internet requise pour cette opération : ${message}` };
+    } finally {
+      clearTimeout(delai);
+    }
+  }
+
+  /**
+   * Amorçage ponctuel de `stock_central` — correction "pc annexe ne peut
+   * pas vendre malgré le stock réel" (2026-10-27). `stock_central` part
+   * toujours de 0 et n'est alimentée QUE par des opérations déjà validées
+   * en ligne : un poste qui vendait encore uniquement en local avant
+   * d'activer la validation distante n'y a jamais rien inscrit, donc son
+   * stock réel — pourtant bien réel — y est invisible pour tout autre
+   * poste qui, lui, valide déjà en ligne.
+   *
+   * Fixe une quantité ABSOLUE pour chaque ligne (jamais un delta,
+   * contrairement à `valider()` ci-dessus) — destinée à être appelée UNE
+   * SEULE FOIS, depuis le poste qui détient le vrai stock à jour (voir
+   * `StockRepository.listTout()`). Un appel ultérieur REMPLACE la
+   * quantité précédente, jamais ne la cumule.
+   */
+  async initialiserStockCentral(lignes: { produitId: string; emplacementId: string; quantite: number }[]): Promise<ResultatInitialisationStock> {
+    const { apiUrl, jwt } = getConfigurationSync();
+    if (!jwt) {
+      return { success: false, message: "Synchronisation non configurée sur ce poste." };
+    }
+
+    const controller = new AbortController();
+    const delai = setTimeout(() => controller.abort(), DELAI_MAX_REQUETE_MS);
+    try {
+      const reponse = await fetch(`${apiUrl}/v1/app/operations/initialiser-stock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ lignes }),
+        signal: controller.signal,
+      });
+
+      if (!reponse.ok) {
+        return { success: false, message: `Le serveur a refusé la demande (HTTP ${reponse.status}).` };
+      }
+
+      const corps = (await reponse.json()) as { lignesAppliquees: number };
+      return { success: true, lignesAppliquees: corps.lignesAppliquees };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
+      return { success: false, message: `Connexion internet requise pour cette opération : ${message}` };
     } finally {
       clearTimeout(delai);
     }

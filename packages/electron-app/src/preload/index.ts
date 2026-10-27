@@ -436,6 +436,13 @@ const maxiEquipApi = {
     nomAdministrateur: string | null;
     nomGerant: string | null;
   }): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("parametres:setIdentite", identite),
+  /**
+   * Amorçage ponctuel de `stock_central` — correction "pc annexe ne peut
+   * pas vendre malgré le stock réel" (2026-10-27). Réservé à
+   * l'Administrateur (vérifié côté Main, jamais seulement masqué ici).
+   */
+  initialiserStockCentral: (): Promise<{ success: boolean; lignesAppliquees?: number; message?: string }> =>
+    ipcRenderer.invoke("stock:initialiserCentral"),
   renommerEmplacement: (id: string, nouveauNom: string): Promise<{ success: boolean; message?: string }> =>
     ipcRenderer.invoke("emplacements:renommer", id, nouveauNom),
   creerDepot: (nom: string): Promise<{ success: boolean; id?: string; message?: string }> => ipcRenderer.invoke("emplacements:creerDepot", nom),

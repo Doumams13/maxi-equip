@@ -170,6 +170,9 @@ export function ParametresScreen() {
   const [stockBloquant, setStockBloquant] = useState<{ nom: string; lignes: { motif: string; taille: string; quantite: number }[] } | null>(null);
   const [actionEnCours, setActionEnCours] = useState<string | null>(null);
 
+  const [confirmationInitStock, setConfirmationInitStock] = useState(false);
+  const [initialisationStockEnCours, setInitialisationStockEnCours] = useState(false);
+
   async function chargerTout() {
     const [identite, emplacements] = await Promise.all([window.maxiEquip.getIdentiteEntreprise(), window.maxiEquip.listEmplacements()]);
     setNomMagasin(identite.nom);
@@ -228,6 +231,28 @@ export function ParametresScreen() {
     } finally {
       setSaving(false);
       setDemandeMotDePasse(false);
+    }
+  }
+
+  /**
+   * Amorçage ponctuel de `stock_central` — correction "pc annexe ne peut
+   * pas vendre malgré le stock réel" (2026-10-27). À exécuter UNE SEULE
+   * FOIS, depuis le poste qui détient le vrai stock à jour (voir
+   * ValidationStockDistanteService.initialiserStockCentral) — un appel
+   * ultérieur REMPLACE la quantité précédente, jamais ne la cumule.
+   */
+  async function handleInitialiserStockCentral() {
+    setInitialisationStockEnCours(true);
+    try {
+      const resultat = await window.maxiEquip.initialiserStockCentral();
+      if (resultat.success) {
+        showSuccess("Stock partagé initialisé", `${resultat.lignesAppliquees} ligne(s) de stock envoyée(s) au serveur central.`);
+      } else {
+        showError("Initialisation impossible", resultat.message ?? "Une erreur inattendue s'est produite.");
+      }
+    } finally {
+      setInitialisationStockEnCours(false);
+      setConfirmationInitStock(false);
     }
   }
 
@@ -609,6 +634,48 @@ export function ParametresScreen() {
           onAnnuler={() => setDemandeMotDePasse(false)}
           onConfirme={() => void handleEnregistrerIdentite()}
         />
+      )}
+
+      {/* --- Amorçage du stock partagé multi-postes — correction "pc annexe ne peut pas vendre malgré le stock réel" (2026-10-27) --- */}
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <RotateCcw size={16} color={defaultTokens.colors.accent} />
+          <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, margin: 0 }}>Stock partagé entre postes</h2>
+        </div>
+        <p style={{ margin: "0 0 18px", fontSize: 12.5, color: defaultTokens.colors.textSoft, lineHeight: 1.5 }}>
+          Les autres postes (PC annexes) vérifient le stock disponible auprès du serveur avant chaque vente. Si ce poste n'a lui-même jamais vendu en
+          ligne auparavant, le serveur ne connaît pas encore le vrai stock — les autres postes peuvent alors refuser des ventes pourtant possibles.
+        </p>
+        <p style={{ margin: "0 0 18px", fontSize: 12, color: defaultTokens.colors.textFaint, lineHeight: 1.5 }}>
+          Exécutez cette action <strong>une seule fois</strong>, depuis le poste qui détient le vrai stock à jour — elle envoie l'intégralité du
+          stock local de ce poste au serveur, en remplacement de ce qu'il connaît déjà.
+        </p>
+        <Button variant="secondary" onClick={() => setConfirmationInitStock(true)}>
+          <RotateCcw size={15} />
+          Initialiser le stock partagé à partir de ce poste
+        </Button>
+      </Card>
+
+      {confirmationInitStock && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 250 }}>
+          <Card elevated style={{ width: "min(460px, 92vw)", boxSizing: "border-box" }}>
+            <h2 style={{ margin: "0 0 10px", fontFamily: defaultTokens.typography.display, fontSize: 16, color: defaultTokens.colors.warning }}>
+              Initialiser le stock partagé ?
+            </h2>
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: defaultTokens.colors.textSoft, lineHeight: 1.5 }}>
+              Le stock local de <strong>ce poste</strong> va remplacer ce que le serveur connaît actuellement pour chaque produit/dépôt. N'effectuez
+              cette action que depuis le poste qui détient le vrai stock à jour (normalement le PC Shop) — jamais depuis un poste secondaire.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button variant="secondary" onClick={() => setConfirmationInitStock(false)} disabled={initialisationStockEnCours} style={{ flex: 1 }}>
+                Annuler
+              </Button>
+              <Button variant="danger" onClick={() => void handleInitialiserStockCentral()} loading={initialisationStockEnCours} style={{ flex: 1 }}>
+                Initialiser
+              </Button>
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   );

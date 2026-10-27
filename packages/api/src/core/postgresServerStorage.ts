@@ -19,6 +19,7 @@ import {
   type CompteRow,
   type DemandeValidationStock,
   type ResultatValidationStock,
+  type LigneInitialisationStock,
 } from "./serverStorage.js";
 
 const { Pool } = pg;
@@ -381,6 +382,28 @@ export class PostgresServerStorage implements ServerStorage {
   async findImageFilename(imageId: string): Promise<string | null> {
     const res = await this.pool.query("SELECT filename FROM catalogue_images WHERE id = $1", [imageId]);
     return (res.rows[0] as { filename: string | null } | undefined)?.filename ?? null;
+  }
+
+  async initialiserStockCentral(lignes: LigneInitialisationStock[]): Promise<{ lignesAppliquees: number }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const l of lignes) {
+        await client.query(
+          `INSERT INTO stock_central (produit_id, emplacement_id, quantite)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (produit_id, emplacement_id) DO UPDATE SET quantite = EXCLUDED.quantite`,
+          [l.produitId, l.emplacementId, l.quantite]
+        );
+      }
+      await client.query("COMMIT");
+      return { lignesAppliquees: lignes.length };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async listerModelesActifs(): Promise<ModeleRow[]> {

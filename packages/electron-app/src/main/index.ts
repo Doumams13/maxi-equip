@@ -39,6 +39,7 @@ import { injecterDemandeTest } from "./maintenance/injecterDemandeTest.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { ValidationStockDistanteService } from "./services/validationStockDistanteService.js";
+import { registerInitialisationStockCentralIpcHandlers } from "./ipc/initialisationStockCentral.js";
 import { registerMetierIpcHandlers } from "./ipc/metier.js";
 import { ImageProduitRepository } from "./repositories/imageProduitRepository.js";
 import { ImageService } from "./services/imageService.js";
@@ -376,6 +377,7 @@ app.whenReady().then(async () => {
       parametresRepository,
       validationStockDistanteService
     );
+    registerInitialisationStockCentralIpcHandlers(stockRepository, validationStockDistanteService, sessionManager);
 
     // Demandes du site (Phase 4.1) : instanciés AVANT SyncService pour
     // que celui-ci puisse recevoir le callback d'application réelle des

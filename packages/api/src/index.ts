@@ -15,6 +15,7 @@ import { definirRecuperationRoute } from "./routes/v1/app/installation/definir-r
 import { verifierRecuperationRoute } from "./routes/v1/public/installation/verifier-recuperation.js";
 import { authLoginRoute } from "./routes/v1/app/auth/login.js";
 import { validerOperationStockRoute } from "./routes/v1/app/operations/valider.js";
+import { initialiserStockRoute } from "./routes/v1/app/operations/initialiser-stock.js";
 
 export function createRouter(): Router {
   const router = new Router();
@@ -34,6 +35,7 @@ export function createRouter(): Router {
   router.register(verifierRecuperationRoute);
   router.register(authLoginRoute);
   router.register(validerOperationStockRoute);
+  router.register(initialiserStockRoute);
   return router;
 }
 

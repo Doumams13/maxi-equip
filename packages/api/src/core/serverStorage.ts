@@ -208,6 +208,24 @@ export type ResultatValidationStock =
       details: { produitId: string; emplacementId: string; disponible: number; demande: number }[];
     };
 
+/**
+ * Amorçage ponctuel de `stock_central` — correction "pc annexe ne peut
+ * pas vendre malgré le stock réel" (2026-10-27). `stock_central` part
+ * toujours de 0 et n'est alimentée QUE par des opérations déjà validées
+ * en ligne (voir `validerEtAppliquerOperationStock`) : un poste qui
+ * vendait encore uniquement en local avant d'activer la validation
+ * distante n'y a jamais rien inscrit, donc son stock réel — pourtant
+ * bien réel — y est invisible. Cette opération fixe une quantité
+ * ABSOLUE (jamais un delta, contrairement à `validerEtAppliquerOperationStock`) :
+ * destinée à être envoyée UNE SEULE FOIS, depuis le poste qui détient le
+ * vrai stock à jour (voir `StockRepository.listTout()` côté Electron).
+ */
+export interface LigneInitialisationStock {
+  produitId: string;
+  emplacementId: string;
+  quantite: number;
+}
+
 export interface ModeleRow {
   id: string;
   motif: string;
@@ -270,6 +288,7 @@ export interface ServerStorage {
   trouverCompteParIdentifiant(identifiant: string): Promise<CompteRow | null>;
 
   validerEtAppliquerOperationStock(demande: DemandeValidationStock): Promise<ResultatValidationStock>;
+  initialiserStockCentral(lignes: LigneInitialisationStock[]): Promise<{ lignesAppliquees: number }>;
 
   listerModelesActifs(): Promise<ModeleRow[]>;
   listerProduitsActifs(): Promise<ProduitRow[]>;

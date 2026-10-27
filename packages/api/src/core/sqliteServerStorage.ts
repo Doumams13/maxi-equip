@@ -19,6 +19,7 @@ import {
   type CompteRow,
   type DemandeValidationStock,
   type ResultatValidationStock,
+  type LigneInitialisationStock,
 } from "./serverStorage.js";
 
 /**
@@ -575,5 +576,18 @@ export class SqliteServerStorage implements ServerStorage {
     });
 
     return executer();
+  }
+
+  async initialiserStockCentral(lignes: LigneInitialisationStock[]): Promise<{ lignesAppliquees: number }> {
+    const db = this.db;
+    const upsert = db.prepare(
+      `INSERT INTO stock_central (produit_id, emplacement_id, quantite) VALUES (@produitId, @emplacementId, @quantite)
+       ON CONFLICT(produit_id, emplacement_id) DO UPDATE SET quantite = excluded.quantite`
+    );
+    const executer = db.transaction((): number => {
+      for (const l of lignes) upsert.run(l);
+      return lignes.length;
+    });
+    return { lignesAppliquees: executer() };
   }
 }

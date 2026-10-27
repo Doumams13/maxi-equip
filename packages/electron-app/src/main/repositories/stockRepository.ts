@@ -34,6 +34,21 @@ export class StockRepository {
       .all(produitId) as { emplacementId: string; quantite: number }[];
   }
 
+  /**
+   * TOUT le stock de ce poste, tous produits et emplacements confondus —
+   * correction "pc annexe ne peut pas vendre malgré le stock réel"
+   * (2026-10-27). Utilisée UNIQUEMENT pour amorcer `stock_central` côté
+   * serveur (voir `ValidationStockDistanteService.initialiserStockCentral`),
+   * depuis le poste qui détient le vrai stock à jour.
+   */
+  listTout(): { produitId: string; emplacementId: string; quantite: number }[] {
+    return this.db.prepare("SELECT produit_id as produitId, emplacement_id as emplacementId, quantite FROM stocks").all() as {
+      produitId: string;
+      emplacementId: string;
+      quantite: number;
+    }[];
+  }
+
   /** Stock total (tous emplacements confondus) pour plusieurs produits — colonne "Stock" de la maquette (CarreauxPage). */
   getTotalsForProduits(produitIds: string[]): Map<string, number> {
     if (produitIds.length === 0) return new Map();

@@ -267,3 +267,49 @@ describe("Amorçage ponctuel du stock central — route /app/operations/initiali
     expect(res.status).toBe(401);
   });
 });
+
+describe("Lecture du stock central — route /app/operations/stock (correction 'vente sur un poste annexe non répercutée après 10+ minutes')", () => {
+  beforeEach(() => {
+    process.env["JWT_SIGNING_SECRET"] = SECRET_TEST;
+    process.env["MAXI_EQUIP_ENV"] = "test";
+    initialiserStockageServeur(":memory:");
+  });
+  afterEach(() => {
+    delete process.env["JWT_SIGNING_SECRET"];
+    delete process.env["MAXI_EQUIP_ENV"];
+    fermerStockageServeur();
+  });
+
+  const PRODUIT = "55555555-5555-4555-8555-555555555555";
+  const DEPOT = "66666666-6666-4666-8666-666666666666";
+
+  function initialiserStock(body: unknown) {
+    return { method: "POST" as const, path: "/v1/app/operations/initialiser-stock", headers: { authorization: `Bearer ${tokenInstallation()}` }, body };
+  }
+
+  function lireStock() {
+    return { method: "GET" as const, path: "/v1/app/operations/stock", headers: { authorization: `Bearer ${tokenInstallation()}` }, body: undefined };
+  }
+
+  it("aucun stock central : tableau vide", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req(lireStock()));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ lignes: [] });
+  });
+
+  it("reflète la valeur actuelle après une validation de vente (pas seulement après initialisation)", async () => {
+    const router = createRouter();
+    await router.dispatch(req(initialiserStock({ lignes: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 29 }] })));
+    await router.dispatch(req(validerStock({ deltas: [{ produitId: PRODUIT, emplacementId: DEPOT, delta: -16 }] })));
+
+    const res = await router.dispatch(req(lireStock()));
+    expect(res.body).toMatchObject({ lignes: [{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 13 }] });
+  });
+
+  it("sans jeton d'installation → 401", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req({ method: "GET", path: "/v1/app/operations/stock", headers: {} }));
+    expect(res.status).toBe(401);
+  });
+});

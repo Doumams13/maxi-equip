@@ -20,6 +20,7 @@ import {
   type DemandeValidationStock,
   type ResultatValidationStock,
   type LigneInitialisationStock,
+  type LigneStockCentral,
 } from "./serverStorage.js";
 
 const { Pool } = pg;
@@ -404,6 +405,13 @@ export class PostgresServerStorage implements ServerStorage {
     } finally {
       client.release();
     }
+  }
+
+  async listerStockCentral(): Promise<LigneStockCentral[]> {
+    const res = await this.pool.query(
+      `SELECT produit_id as "produitId", emplacement_id as "emplacementId", quantite FROM stock_central`
+    );
+    return res.rows as LigneStockCentral[];
   }
 
   async listerModelesActifs(): Promise<ModeleRow[]> {

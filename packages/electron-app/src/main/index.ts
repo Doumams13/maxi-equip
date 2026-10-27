@@ -409,6 +409,8 @@ app.whenReady().then(async () => {
     const imageService = new ImageService(imageProduitRepository, mainWindow, boiteEnvoiRepository);
     // Correction "photos de carreaux absentes sur poste restauré/secondaire" (2026-10-24) — voir syncService.ts.
     syncService.definirImageService(imageService);
+    // Correction "vente sur un poste annexe non répercutée sur le PC Shop après 10+ minutes" (2026-10-27) — voir syncService.ts.
+    syncService.definirRattrapageStock(stockRepository, validationStockDistanteService);
 
     bootstrapDefaultEmplacements(emplacementRepository);
     registerMetierIpcHandlers(

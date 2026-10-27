@@ -1,7 +1,7 @@
 import { getStorage } from "./storeServeur.js";
-import type { DemandeValidationStock, ResultatValidationStock, LigneInitialisationStock } from "./serverStorage.js";
+import type { DemandeValidationStock, ResultatValidationStock, LigneInitialisationStock, LigneStockCentral } from "./serverStorage.js";
 
-export type { DemandeValidationStock, ResultatValidationStock, LigneInitialisationStock } from "./serverStorage.js";
+export type { DemandeValidationStock, ResultatValidationStock, LigneInitialisationStock, LigneStockCentral } from "./serverStorage.js";
 
 /**
  * Validation atomique d'une opération de stock partagé — correction
@@ -23,4 +23,13 @@ export function validerEtAppliquerOperationStock(demande: DemandeValidationStock
  */
 export function initialiserStockCentral(lignes: LigneInitialisationStock[]): Promise<{ lignesAppliquees: number }> {
   return getStorage().initialiserStockCentral(lignes);
+}
+
+/**
+ * Lecture complète du stock partagé — voir `LigneStockCentral`
+ * (serverStorage.ts) pour le raisonnement complet et
+ * `routes/v1/app/operations/stock.ts` pour la seule route qui l'appelle.
+ */
+export function listerStockCentral(): Promise<LigneStockCentral[]> {
+  return getStorage().listerStockCentral();
 }

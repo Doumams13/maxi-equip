@@ -53,6 +53,10 @@ export type ResultatInitialisationStock =
   | { success: true; lignesAppliquees: number }
   | { success: false; message: string };
 
+export type ResultatLectureStockCentral =
+  | { success: true; lignes: { produitId: string; emplacementId: string; quantite: number }[] }
+  | { success: false; message: string };
+
 export class ValidationStockDistanteService {
   /** Vrai dès que la synchronisation (URL + jeton) est configurée sur ce poste — jamais basé sur un état réseau instantané (qui ne se sait qu'en tentant réellement l'appel). */
   estConfiguree(): boolean {
@@ -134,6 +138,47 @@ export class ValidationStockDistanteService {
 
       const corps = (await reponse.json()) as { lignesAppliquees: number };
       return { success: true, lignesAppliquees: corps.lignesAppliquees };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
+      return { success: false, message: `Connexion internet requise pour cette opération : ${message}` };
+    } finally {
+      clearTimeout(delai);
+    }
+  }
+
+  /**
+   * Rattrapage périodique du stock partagé — correction "vente sur un
+   * poste annexe non répercutée sur le PC Shop après 10+ minutes"
+   * (2026-10-27). `stock_central` est déjà la source de vérité pour
+   * TOUTE opération de stock (vente/annulation/entrée/sortie/transfert —
+   * voir VenteService/StockService, qui y écrivent toutes via
+   * `valider()` ci-dessus), mais jusqu'ici rien ne la relisait jamais :
+   * un poste ne rafraîchissait sa copie locale d'un produit que
+   * lorsqu'IL réalisait lui-même une opération sur ce produit. Appelée à
+   * chaque cycle de synchronisation (voir SyncService), sur TOUS les
+   * postes (Shop et annexes confondus) — jamais un sens privilégié.
+   */
+  async recupererStockCentral(): Promise<ResultatLectureStockCentral> {
+    const { apiUrl, jwt } = getConfigurationSync();
+    if (!jwt) {
+      return { success: false, message: "Synchronisation non configurée sur ce poste." };
+    }
+
+    const controller = new AbortController();
+    const delai = setTimeout(() => controller.abort(), DELAI_MAX_REQUETE_MS);
+    try {
+      const reponse = await fetch(`${apiUrl}/v1/app/operations/stock`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${jwt}` },
+        signal: controller.signal,
+      });
+
+      if (!reponse.ok) {
+        return { success: false, message: `Le serveur a refusé la demande (HTTP ${reponse.status}).` };
+      }
+
+      const corps = (await reponse.json()) as { lignes: { produitId: string; emplacementId: string; quantite: number }[] };
+      return { success: true, lignes: corps.lignes };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";
       return { success: false, message: `Connexion internet requise pour cette opération : ${message}` };

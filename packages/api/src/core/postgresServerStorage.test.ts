@@ -582,6 +582,19 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
       expect(venteB).toMatchObject({ success: false, raison: "stock_insuffisant" });
     });
   });
+
+  describe("Lecture complète du stock central (réel PostgreSQL) — correction 'vente sur un poste annexe non répercutée après 10+ minutes' (2026-10-27)", () => {
+    const PRODUIT = uuidDeterministe("901");
+    const DEPOT = uuidDeterministe("902");
+
+    it("reflète la valeur APRÈS une vente validée en ligne, pas seulement après une initialisation", async () => {
+      await storage.initialiserStockCentral([{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 29 }]);
+      await storage.validerEtAppliquerOperationStock({ deltas: [{ produitId: PRODUIT, emplacementId: DEPOT, delta: -16 }] });
+
+      const lignes = await storage.listerStockCentral();
+      expect(lignes).toEqual(expect.arrayContaining([{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 13 }]));
+    });
+  });
 });
 
 describe("PostgresServerStorage — sélection automatique du backend (storeServeur.ts)", () => {

@@ -20,6 +20,7 @@ import {
   type DemandeValidationStock,
   type ResultatValidationStock,
   type LigneInitialisationStock,
+  type LigneStockCentral,
 } from "./serverStorage.js";
 
 /**
@@ -589,5 +590,11 @@ export class SqliteServerStorage implements ServerStorage {
       return lignes.length;
     });
     return { lignesAppliquees: executer() };
+  }
+
+  async listerStockCentral(): Promise<LigneStockCentral[]> {
+    return this.db
+      .prepare("SELECT produit_id as produitId, emplacement_id as emplacementId, quantite FROM stock_central")
+      .all() as LigneStockCentral[];
   }
 }

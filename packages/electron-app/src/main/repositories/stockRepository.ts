@@ -81,6 +81,31 @@ export class StockRepository {
     }
   }
 
+  /**
+   * Applique plusieurs quantités ABSOLUES — correction "vente sur un
+   * poste annexe non répercutée sur le PC Shop après 10+ minutes"
+   * (2026-10-27). Utilisé UNIQUEMENT pour le rattrapage périodique depuis
+   * `stock_central` (voir ValidationStockDistanteService.recupererStockCentral,
+   * appelé par SyncService à chaque cycle) — même principe que
+   * `setQuantite` ci-dessus (jamais une saisie utilisateur directe).
+   *
+   * Une ligne dont le produit ou le dépôt n'existe pas ENCORE localement
+   * (catalogue pas totalement aligné entre postes, voir syncService.ts)
+   * est ignorée plutôt que de faire échouer tout le lot — jamais une
+   * transaction unique qui annulerait les lignes valides à cause d'une
+   * seule contrainte de clé étrangère ; retentée au prochain cycle une
+   * fois le produit reçu.
+   */
+  appliquerValeursAbsolues(lignes: { produitId: string; emplacementId: string; quantite: number }[]): void {
+    for (const l of lignes) {
+      try {
+        this.setQuantite(l.produitId, l.emplacementId, l.quantite);
+      } catch {
+        // Ignoré volontairement — voir commentaire ci-dessus.
+      }
+    }
+  }
+
   /** Applique un delta (positif ou négatif) — jamais une valeur absolue (Corrections §4). */
   applyDelta(delta: domainStock.StockDelta & { produitId: string }): void {
     const existing = this.db

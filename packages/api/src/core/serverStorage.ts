@@ -226,6 +226,27 @@ export interface LigneInitialisationStock {
   quantite: number;
 }
 
+/**
+ * Lecture complète de `stock_central` — correction "vente sur un poste
+ * annexe non répercutée sur le PC Shop après 10+ minutes" (2026-10-27).
+ * `stock_central` est déjà la source de vérité partagée (alimentée par
+ * `validerEtAppliquerOperationStock`/`initialiserStockCentral`), mais
+ * jusqu'ici RIEN ne la relisait jamais côté client : un poste ne
+ * rafraîchit sa copie LOCALE d'un produit que lorsqu'IL réalise lui-même
+ * une opération validée en ligne sur ce produit (voir VenteService/
+ * StockService, qui appliquent `stockApres` reçu). Un poste resté
+ * inactif sur un produit ne voit donc jamais les ventes faites ailleurs,
+ * même indéfiniment. Cette lecture est volontairement intégrale (jamais
+ * paginée/filtrée) : le volume reste celui du catalogue produit × dépôt,
+ * du même ordre que `listerImagesActives()` déjà relu en entier à chaque
+ * cycle de synchronisation.
+ */
+export interface LigneStockCentral {
+  produitId: string;
+  emplacementId: string;
+  quantite: number;
+}
+
 export interface ModeleRow {
   id: string;
   motif: string;
@@ -289,6 +310,7 @@ export interface ServerStorage {
 
   validerEtAppliquerOperationStock(demande: DemandeValidationStock): Promise<ResultatValidationStock>;
   initialiserStockCentral(lignes: LigneInitialisationStock[]): Promise<{ lignesAppliquees: number }>;
+  listerStockCentral(): Promise<LigneStockCentral[]>;
 
   listerModelesActifs(): Promise<ModeleRow[]>;
   listerProduitsActifs(): Promise<ProduitRow[]>;

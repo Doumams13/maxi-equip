@@ -65,6 +65,39 @@ export class SyncService {
     this.imageService = imageService;
   }
 
+  /**
+   * Correction "vente sur un poste annexe non répercutée sur le PC Shop
+   * après 10+ minutes" (2026-10-27) — même raisonnement que le setter
+   * d'images ci-dessus (optionnel, réglé via SETTER plutôt qu'un
+   * paramètre de constructeur pour ne pas perturber l'ordre de
+   * construction de main/index.ts ni les tests existants qui
+   * construisent `SyncService` avec 3 arguments).
+   *
+   * Types structurels minimaux (jamais `StockRepository`/
+   * `ValidationStockDistanteService` importés ici) — ce fichier reste
+   * testable sans aucun runtime Electron, convention de ce projet (voir
+   * syncService.test.ts : `vi.mock("electron")` n'est jamais utilisé).
+   */
+  private rattrapageStock?: {
+    stockRepository: { appliquerValeursAbsolues(lignes: { produitId: string; emplacementId: string; quantite: number }[]): void };
+    validationStockDistanteService: {
+      recupererStockCentral(): Promise<
+        { success: true; lignes: { produitId: string; emplacementId: string; quantite: number }[] } | { success: false; message: string }
+      >;
+    };
+  };
+
+  definirRattrapageStock(
+    stockRepository: { appliquerValeursAbsolues(lignes: { produitId: string; emplacementId: string; quantite: number }[]): void },
+    validationStockDistanteService: {
+      recupererStockCentral(): Promise<
+        { success: true; lignes: { produitId: string; emplacementId: string; quantite: number }[] } | { success: false; message: string }
+      >;
+    }
+  ): void {
+    this.rattrapageStock = { stockRepository, validationStockDistanteService };
+  }
+
   constructor(
     private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
     private readonly syncRepository: SyncRepository,
@@ -107,6 +140,19 @@ export class SyncService {
           // Jamais faire échouer la synchronisation métier (déjà réussie à ce stade) pour un rattrapage de photos — retenté au prochain cycle.
           // eslint-disable-next-line no-console
           console.error("[sync] rattrapage des images manquantes impossible :", err instanceof Error ? err.message : err);
+        }
+      }
+
+      if (this.rattrapageStock) {
+        try {
+          const resultat = await this.rattrapageStock.validationStockDistanteService.recupererStockCentral();
+          if (resultat.success) {
+            this.rattrapageStock.stockRepository.appliquerValeursAbsolues(resultat.lignes);
+          }
+        } catch (err) {
+          // Même principe que le rattrapage d'images ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
+          // eslint-disable-next-line no-console
+          console.error("[sync] rattrapage du stock partagé impossible :", err instanceof Error ? err.message : err);
         }
       }
 

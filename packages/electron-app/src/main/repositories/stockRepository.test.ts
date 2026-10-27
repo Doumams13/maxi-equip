@@ -60,3 +60,63 @@ describe("StockRepository.listTout (base réelle)", () => {
     );
   });
 });
+
+/**
+ * Tests réels (vraie base SQLite) de `appliquerValeursAbsolues` —
+ * correction "vente sur un poste annexe non répercutée sur le PC Shop
+ * après 10+ minutes" (2026-10-27).
+ */
+describe("StockRepository.appliquerValeursAbsolues (base réelle)", () => {
+  let db: Database.Database;
+  let produits: ProduitRepository;
+  let stocks: StockRepository;
+  let akebe: string;
+  let akanda: string;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    runMigrations(db);
+    produits = new ProduitRepository(db);
+    stocks = new StockRepository(db);
+    const emplacements = new EmplacementRepository(db);
+    bootstrapDefaultEmplacements(emplacements);
+    const depots = emplacements.list().filter((e) => !e.estPointDeVente);
+    akebe = depots[0]!.id;
+    akanda = depots[1]!.id;
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("fixe chaque ligne à une valeur ABSOLUE, pas un delta — un stock local existant est écrasé", () => {
+    const p1 = produits.create({ motif: "A", type: "carrelage", taille: "60x60", tailleTri: 3600, reference: "A-60", prix: 1000, seuilAlerte: 1 });
+    stocks.applyDelta({ produitId: p1, emplacementId: akebe, delta: 999 });
+
+    stocks.appliquerValeursAbsolues([{ produitId: p1, emplacementId: akebe, quantite: 13 }]);
+
+    expect(stocks.getQuantite(p1, akebe)).toBe(13);
+  });
+
+  it("crée la ligne si elle n'existait pas localement", () => {
+    const p1 = produits.create({ motif: "A", type: "carrelage", taille: "60x60", tailleTri: 3600, reference: "A-60", prix: 1000, seuilAlerte: 1 });
+
+    stocks.appliquerValeursAbsolues([{ produitId: p1, emplacementId: akanda, quantite: 4 }]);
+
+    expect(stocks.getQuantite(p1, akanda)).toBe(4);
+  });
+
+  it("une ligne référençant un produit inconnu localement est ignorée, jamais une exception — les autres lignes valides sont quand même appliquées", () => {
+    const p1 = produits.create({ motif: "A", type: "carrelage", taille: "60x60", tailleTri: 3600, reference: "A-60", prix: 1000, seuilAlerte: 1 });
+
+    expect(() =>
+      stocks.appliquerValeursAbsolues([
+        { produitId: "produit-inconnu", emplacementId: akebe, quantite: 50 },
+        { produitId: p1, emplacementId: akanda, quantite: 7 },
+      ])
+    ).not.toThrow();
+
+    expect(stocks.getQuantite(p1, akanda)).toBe(7);
+  });
+});

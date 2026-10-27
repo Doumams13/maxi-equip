@@ -425,4 +425,60 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
       expect(resultat).toMatchObject({ success: true });
     });
   });
+
+  describe("definirRattrapageStock — rattrapage du stock partagé (correction 'vente sur un poste annexe non répercutée sur le PC Shop après 10+ minutes')", () => {
+    function reponsePullVide() {
+      return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+    }
+
+    it("applique localement les lignes renvoyées par recupererStockCentral, APRÈS un PULL réussi", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const lignes = [{ produitId: "p1", emplacementId: "akebe", quantite: 13 }];
+      const recupererStockCentral = vi.fn(async () => ({ success: true as const, lignes }));
+      const appliquerValeursAbsolues = vi.fn();
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageStock({ appliquerValeursAbsolues }, { recupererStockCentral });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat.success).toBe(true);
+      expect(recupererStockCentral).toHaveBeenCalledTimes(1);
+      expect(appliquerValeursAbsolues).toHaveBeenCalledWith(lignes);
+    });
+
+    it("un échec de recupererStockCentral n'applique rien localement et ne fait jamais échouer la synchronisation", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererStockCentral = vi.fn(async () => ({ success: false as const, message: "hors ligne" }));
+      const appliquerValeursAbsolues = vi.fn();
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageStock({ appliquerValeursAbsolues }, { recupererStockCentral });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+      expect(appliquerValeursAbsolues).not.toHaveBeenCalled();
+    });
+
+    it("une exception du rattrapage de stock ne fait jamais échouer la synchronisation (déjà réussie à ce stade)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererStockCentral = vi.fn(async () => {
+        throw new Error("panne réseau sur le rattrapage de stock");
+      });
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageStock({ appliquerValeursAbsolues: vi.fn() }, { recupererStockCentral });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+
+    it("sans rattrapage défini : synchronisation inchangée (rétrocompatibilité)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+  });
 });

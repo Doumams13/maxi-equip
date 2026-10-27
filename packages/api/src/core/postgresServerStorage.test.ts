@@ -460,6 +460,60 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
     });
   });
 
+  describe("Rattrapage proactif des comptes — listerComptesActifs (réel PostgreSQL) — correction 'visibilité croisée Factures/Historique entre postes' (2026-10-27)", () => {
+    const COMPTE_CATCHUP_1 = uuidDeterministe("801");
+    const COMPTE_CATCHUP_2 = uuidDeterministe("802");
+
+    it("renvoie un compte créé, SANS le hash de mot de passe", async () => {
+      await storage.appliquerOperationCompte({
+        operation: "create",
+        compteId: COMPTE_CATCHUP_1,
+        identifiant: "catchup.test",
+        hashMotDePasse: "$argon2id$ne-doit-jamais-apparaitre",
+        nom: "Catchup Test",
+        role: "gerant",
+        actif: true,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      const comptes = await storage.listerComptesActifs();
+      const compte = comptes.find((c) => c.id === COMPTE_CATCHUP_1);
+      expect(compte).toEqual({ id: COMPTE_CATCHUP_1, identifiant: "catchup.test", nom: "Catchup Test", role: "gerant", actif: true });
+    });
+
+    it("un compte désactivé (actif: false) reste présent dans la liste, jamais filtré par actif", async () => {
+      await storage.appliquerOperationCompte({
+        operation: "create",
+        compteId: COMPTE_CATCHUP_2,
+        identifiant: "desactive.test",
+        hashMotDePasse: "$argon2id$hash",
+        nom: "Désactivé",
+        role: "gerant",
+        actif: false,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      const comptes = await storage.listerComptesActifs();
+      expect(comptes.find((c) => c.id === COMPTE_CATCHUP_2)?.actif).toBe(false);
+    });
+
+    it("un compte supprimé (deleted_at renseigné) n'apparaît plus dans la liste", async () => {
+      await storage.appliquerOperationCompte({
+        operation: "delete",
+        compteId: COMPTE_CATCHUP_1,
+        identifiant: "catchup.test",
+        hashMotDePasse: "$argon2id$x",
+        nom: "Catchup Test",
+        role: "gerant",
+        actif: true,
+        updatedAt: "2026-02-01T00:00:00.000Z",
+      });
+
+      const comptes = await storage.listerComptesActifs();
+      expect(comptes.some((c) => c.id === COMPTE_CATCHUP_1)).toBe(false);
+    });
+  });
+
   describe("Dépôts centralisés (réel PostgreSQL) — correction 'visibilité croisée Factures/Historique entre postes' (2026-10-27)", () => {
     const DEPOT_1 = uuidDeterministe("701");
     const DEPOT_2 = uuidDeterministe("702");

@@ -14,6 +14,7 @@ import { LoginCentralService } from "./auth/loginCentralService.js";
 import { registerSetupIpcHandlers } from "./ipc/setup.js";
 import { EmplacementRepository, bootstrapDefaultEmplacements } from "./repositories/emplacementRepository.js";
 import { EmplacementSyncService } from "./services/emplacementSyncService.js";
+import { CompteSyncService } from "./services/compteSyncService.js";
 import { ProduitRepository } from "./repositories/produitRepository.js";
 import { StockRepository } from "./repositories/stockRepository.js";
 import { MouvementRepository } from "./repositories/mouvementRepository.js";
@@ -414,6 +415,8 @@ app.whenReady().then(async () => {
     syncService.definirRattrapageStock(stockRepository, validationStockDistanteService);
     // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 0a — voir syncService.ts.
     syncService.definirRattrapageEmplacements(emplacementRepository, new EmplacementSyncService());
+    // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 1 — voir syncService.ts.
+    syncService.definirRattrapageComptes(utilisateurRepository, new CompteSyncService());
 
     bootstrapDefaultEmplacements(emplacementRepository);
 

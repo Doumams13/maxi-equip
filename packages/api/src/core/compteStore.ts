@@ -1,7 +1,7 @@
 import { getStorage } from "./storeServeur.js";
-import type { CompteCataloguePayload, CompteRow } from "./serverStorage.js";
+import type { CompteCataloguePayload, CompteRow, CompteCatchupRow } from "./serverStorage.js";
 
-export type { CompteCataloguePayload, CompteRow } from "./serverStorage.js";
+export type { CompteCataloguePayload, CompteRow, CompteCatchupRow } from "./serverStorage.js";
 
 /**
  * Comptes utilisateurs centralisés — correction "travail à distance /
@@ -18,4 +18,14 @@ export function appliquerOperationCompte(payload: CompteCataloguePayload): Promi
 
 export function trouverCompteParIdentifiant(identifiant: string): Promise<CompteRow | null> {
   return getStorage().trouverCompteParIdentifiant(identifiant);
+}
+
+/**
+ * Rattrapage proactif — correction "visibilité croisée Factures/
+ * Historique entre postes" (2026-10-27), Phase 1. Voir
+ * `CompteCatchupRow` (serverStorage.ts) pour le raisonnement complet et
+ * `routes/v1/app/comptes/list.ts` pour la seule route qui l'appelle.
+ */
+export function listerComptesActifs(): Promise<CompteCatchupRow[]> {
+  return getStorage().listerComptesActifs();
 }

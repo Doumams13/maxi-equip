@@ -174,6 +174,24 @@ export interface CompteRow {
 }
 
 /**
+ * Vue de rattrapage d'un compte — correction "visibilité croisée
+ * Factures/Historique entre postes" (2026-10-27), Phase 1. Délibérément
+ * SANS `hashMotDePasse` (contrairement à `CompteRow` ci-dessus, réservé
+ * à `trouverCompteParIdentifiant`/`/app/auth/login`) : cette vue est
+ * exposée par une route de rattrapage lue à chaque cycle de
+ * synchronisation par tout poste déjà authentifié au niveau
+ * installation — jamais une raison de faire circuler des hashs de mot
+ * de passe sur un canal qui n'en a aucun besoin.
+ */
+export interface CompteCatchupRow {
+  id: string;
+  identifiant: string;
+  nom: string;
+  role: string;
+  actif: boolean;
+}
+
+/**
  * Dépôt/point de vente centralisé — correction "visibilité croisée
  * Factures/Historique entre postes" (2026-10-27). Même principe que
  * `CompteCataloguePayload` ci-dessus (projection mutable, upsert
@@ -345,6 +363,7 @@ export interface ServerStorage {
 
   appliquerOperationCompte(payload: CompteCataloguePayload): Promise<{ applique: boolean }>;
   trouverCompteParIdentifiant(identifiant: string): Promise<CompteRow | null>;
+  listerComptesActifs(): Promise<CompteCatchupRow[]>;
 
   appliquerOperationEmplacement(payload: EmplacementCataloguePayload): Promise<{ applique: boolean }>;
   listerEmplacementsActifs(): Promise<EmplacementRow[]>;

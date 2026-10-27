@@ -23,6 +23,7 @@ import {
   type LigneStockCentral,
   type EmplacementCataloguePayload,
   type EmplacementRow,
+  type CompteCatchupRow,
 } from "./serverStorage.js";
 
 const { Pool } = pg;
@@ -571,6 +572,11 @@ export class PostgresServerStorage implements ServerStorage {
     );
     const row = res.rows[0] as CompteRow | undefined;
     return row ?? null;
+  }
+
+  async listerComptesActifs(): Promise<CompteCatchupRow[]> {
+    const res = await this.pool.query(`SELECT id, identifiant, nom, role, actif FROM comptes_utilisateurs WHERE deleted_at IS NULL`);
+    return res.rows as CompteCatchupRow[];
   }
 
   async appliquerOperationEmplacement(payload: EmplacementCataloguePayload): Promise<{ applique: boolean }> {

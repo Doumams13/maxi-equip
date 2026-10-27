@@ -23,6 +23,7 @@ import {
   type LigneStockCentral,
   type EmplacementCataloguePayload,
   type EmplacementRow,
+  type CompteCatchupRow,
 } from "./serverStorage.js";
 
 /**
@@ -548,6 +549,13 @@ export class SqliteServerStorage implements ServerStorage {
       .get(identifiant) as { id: string; identifiant: string; hashMotDePasse: string; nom: string; role: string; actif: number } | undefined;
     if (!row) return null;
     return { id: row.id, identifiant: row.identifiant, hashMotDePasse: row.hashMotDePasse, nom: row.nom, role: row.role, actif: row.actif === 1 };
+  }
+
+  async listerComptesActifs(): Promise<CompteCatchupRow[]> {
+    const rows = this.db
+      .prepare("SELECT id, identifiant, nom, role, actif FROM comptes_utilisateurs WHERE deleted_at IS NULL")
+      .all() as { id: string; identifiant: string; nom: string; role: string; actif: number }[];
+    return rows.map((r) => ({ id: r.id, identifiant: r.identifiant, nom: r.nom, role: r.role, actif: r.actif === 1 }));
   }
 
   async appliquerOperationEmplacement(payload: EmplacementCataloguePayload): Promise<{ applique: boolean }> {

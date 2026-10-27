@@ -18,6 +18,7 @@ import { validerOperationStockRoute } from "./routes/v1/app/operations/valider.j
 import { initialiserStockRoute } from "./routes/v1/app/operations/initialiser-stock.js";
 import { stockCentralRoute } from "./routes/v1/app/operations/stock.js";
 import { emplacementsListRoute } from "./routes/v1/app/emplacements/list.js";
+import { comptesListRoute } from "./routes/v1/app/comptes/list.js";
 
 export function createRouter(): Router {
   const router = new Router();
@@ -40,6 +41,7 @@ export function createRouter(): Router {
   router.register(initialiserStockRoute);
   router.register(stockCentralRoute);
   router.register(emplacementsListRoute);
+  router.register(comptesListRoute);
   return router;
 }
 

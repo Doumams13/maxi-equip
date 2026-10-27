@@ -542,4 +542,65 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
       expect(resultat).toMatchObject({ success: true });
     });
   });
+
+  describe("definirRattrapageComptes — rattrapage proactif des comptes (correction 'visibilité croisée Factures/Historique entre postes')", () => {
+    function reponsePullVide() {
+      return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+    }
+
+    it("applique localement chaque compte renvoyé par recupererComptesActifs, APRÈS un PULL réussi", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const comptes = [
+        { id: "u1", identifiant: "awa", nom: "Awa Ndiaye", role: "gerant" as const, actif: true },
+        { id: "u2", identifiant: "jean", nom: "Jean Dupont", role: "administrateur" as const, actif: false },
+      ];
+      const recupererComptesActifs = vi.fn(async () => ({ success: true as const, comptes }));
+      const creerDepuisServeur = vi.fn();
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageComptes({ creerDepuisServeur }, { recupererComptesActifs });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat.success).toBe(true);
+      expect(recupererComptesActifs).toHaveBeenCalledTimes(1);
+      expect(creerDepuisServeur).toHaveBeenCalledTimes(2);
+      expect(creerDepuisServeur).toHaveBeenNthCalledWith(1, comptes[0]);
+      expect(creerDepuisServeur).toHaveBeenNthCalledWith(2, comptes[1]);
+    });
+
+    it("un échec de recupererComptesActifs n'applique rien localement et ne fait jamais échouer la synchronisation", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererComptesActifs = vi.fn(async () => ({ success: false as const, message: "hors ligne" }));
+      const creerDepuisServeur = vi.fn();
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageComptes({ creerDepuisServeur }, { recupererComptesActifs });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+      expect(creerDepuisServeur).not.toHaveBeenCalled();
+    });
+
+    it("une exception du rattrapage des comptes ne fait jamais échouer la synchronisation (déjà réussie à ce stade)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererComptesActifs = vi.fn(async () => {
+        throw new Error("panne réseau sur le rattrapage des comptes");
+      });
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageComptes({ creerDepuisServeur: vi.fn() }, { recupererComptesActifs });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+
+    it("sans rattrapage défini : synchronisation inchangée (rétrocompatibilité)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+  });
 });

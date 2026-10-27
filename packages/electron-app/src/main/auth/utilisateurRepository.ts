@@ -208,6 +208,36 @@ export class UtilisateurRepository {
   }
 
   /**
+   * Rattrapage proactif des comptes — correction "visibilité croisée
+   * Factures/Historique entre postes" (2026-10-27), Phase 1. Différent
+   * de `upsertDepuisConnexionCentrale` ci-dessus sur un point précis :
+   * CE compte n'a peut-être jamais été utilisé sur ce poste (ni jamais
+   * connecté), donc `actif` doit refléter l'état RÉEL renvoyé par le
+   * serveur — jamais forcé à 1 (contrairement à la connexion, où un
+   * compte désactivé est déjà rejeté AVANT d'arriver ici côté serveur).
+   * Débloque les FK `factures.vendeur_utilisateur_id`/
+   * `mouvements.utilisateur_id` pour un vendeur qui ne s'est jamais
+   * connecté sur ce poste précis. Même hash factice non vérifiable que
+   * ci-dessus — jamais un mot de passe réel transmis par ce canal.
+   */
+  creerDepuisServeur(compte: { id: string; identifiant: string; nom: string; role: Role; actif: boolean }): void {
+    const now = new Date().toISOString();
+    const existe = this.db.prepare("SELECT id FROM utilisateurs WHERE id = ?").get(compte.id) as { id: string } | undefined;
+    if (existe) {
+      this.db
+        .prepare("UPDATE utilisateurs SET identifiant = ?, nom = ?, role = ?, actif = ?, updated_at = ? WHERE id = ?")
+        .run(compte.identifiant, compte.nom, compte.role, compte.actif ? 1 : 0, now, compte.id);
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO utilisateurs (id, nom, identifiant, password_hash, role, actif, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(compte.id, compte.nom, compte.identifiant, UtilisateurRepository.HASH_FACTICE_COMPTE_CENTRAL, compte.role, compte.actif ? 1 : 0, now, now);
+  }
+
+  /**
    * Vue COMPLÈTE (avec le hash) — réservée à la synchronisation du
    * compte vers le serveur central (correction "travail à distance /
    * plusieurs machines en parallèle", 2026-10-22, voir

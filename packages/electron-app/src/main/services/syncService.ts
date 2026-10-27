@@ -132,6 +132,37 @@ export class SyncService {
     this.rattrapageEmplacements = { emplacementRepository, emplacementSyncService };
   }
 
+  /**
+   * Correction "visibilité croisée Factures/Historique entre postes"
+   * (2026-10-27), Phase 1 — même forme que `definirRattrapageEmplacements`
+   * ci-dessus.
+   */
+  private rattrapageComptes?: {
+    utilisateurRepository: {
+      creerDepuisServeur(compte: { id: string; identifiant: string; nom: string; role: "administrateur" | "gerant"; actif: boolean }): void;
+    };
+    compteSyncService: {
+      recupererComptesActifs(): Promise<
+        | { success: true; comptes: { id: string; identifiant: string; nom: string; role: "administrateur" | "gerant"; actif: boolean }[] }
+        | { success: false; message: string }
+      >;
+    };
+  };
+
+  definirRattrapageComptes(
+    utilisateurRepository: {
+      creerDepuisServeur(compte: { id: string; identifiant: string; nom: string; role: "administrateur" | "gerant"; actif: boolean }): void;
+    },
+    compteSyncService: {
+      recupererComptesActifs(): Promise<
+        | { success: true; comptes: { id: string; identifiant: string; nom: string; role: "administrateur" | "gerant"; actif: boolean }[] }
+        | { success: false; message: string }
+      >;
+    }
+  ): void {
+    this.rattrapageComptes = { utilisateurRepository, compteSyncService };
+  }
+
   constructor(
     private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
     private readonly syncRepository: SyncRepository,
@@ -187,6 +218,19 @@ export class SyncService {
           // Même principe que les rattrapages ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
           // eslint-disable-next-line no-console
           console.error("[sync] rattrapage des dépôts impossible :", err instanceof Error ? err.message : err);
+        }
+      }
+
+      if (this.rattrapageComptes) {
+        try {
+          const resultat = await this.rattrapageComptes.compteSyncService.recupererComptesActifs();
+          if (resultat.success) {
+            for (const c of resultat.comptes) this.rattrapageComptes.utilisateurRepository.creerDepuisServeur(c);
+          }
+        } catch (err) {
+          // Même principe que les rattrapages ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
+          // eslint-disable-next-line no-console
+          console.error("[sync] rattrapage des comptes impossible :", err instanceof Error ? err.message : err);
         }
       }
 

@@ -50,6 +50,35 @@ export class ModeleRepository {
     return id;
   }
 
+  /**
+   * Insère/met à jour un modèle reçu du serveur central — correction
+   * "visibilité croisée Factures/Historique entre postes" (2026-10-27),
+   * Phase 2. Conserve l'`id` EXACT d'origine (jamais un nouvel UUID
+   * local, même principe que `emplacementRepository.creerDepuisServeur`)
+   * — c'est cet id partagé qui permettra à un produit/une facture/un
+   * mouvement reçu d'un autre poste de résoudre sa clé étrangère
+   * `modele_id`/`produit_id` localement. Aucune dépendance de clé
+   * étrangère sur cette table : jamais besoin d'avaler une erreur FK
+   * ici (contrairement à `ProduitRepository.creerDepuisServeur`
+   * ci-dessous, dépendant de celle-ci).
+   */
+  creerDepuisServeur(modele: { id: string; motif: string; type: string; ordreVitrine: number | null }): void {
+    const now = new Date().toISOString();
+    const existe = this.db.prepare("SELECT id FROM modeles_produit WHERE id = ?").get(modele.id) as { id: string } | undefined;
+    if (existe) {
+      this.db
+        .prepare("UPDATE modeles_produit SET motif = ?, type = ?, ordre_vitrine = ?, updated_at = ? WHERE id = ?")
+        .run(modele.motif, modele.type, modele.ordreVitrine, now, modele.id);
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO modeles_produit (id, motif, type, ordre_vitrine, deleted_at, deleted_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)`
+      )
+      .run(modele.id, modele.motif, modele.type, modele.ordreVitrine, now, now);
+  }
+
   update(id: string, input: { motif?: string; type?: string }): void {
     const now = new Date().toISOString();
     if (input.motif !== undefined) {

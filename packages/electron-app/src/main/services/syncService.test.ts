@@ -603,4 +603,71 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
       expect(resultat).toMatchObject({ success: true });
     });
   });
+
+  describe("definirRattrapageCatalogue — rattrapage proactif du catalogue (correction 'visibilité croisée Factures/Historique entre postes')", () => {
+    function reponsePullVide() {
+      return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+    }
+
+    it("applique les modèles PUIS les produits renvoyés par recupererCatalogue, APRÈS un PULL réussi", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const modeles = [{ id: "m1", motif: "Marbre Blanc", type: "Faïence", ordreVitrine: null }];
+      const produits = [{ id: "p1", modeleId: "m1", taille: "60x60", tailleTri: 3600, largeur: 60, hauteur: 60, reference: "MB-6060", prix: 15000 }];
+      const recupererCatalogue = vi.fn(async () => ({ success: true as const, modeles, produits }));
+      const appelsOrdre: string[] = [];
+      const modeleRepository = { creerDepuisServeur: vi.fn(() => void appelsOrdre.push("modele")) };
+      const produitRepository = {
+        creerDepuisServeur: vi.fn(() => {
+          appelsOrdre.push("produit");
+          return true;
+        }),
+      };
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageCatalogue(modeleRepository, produitRepository, { recupererCatalogue });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat.success).toBe(true);
+      expect(modeleRepository.creerDepuisServeur).toHaveBeenCalledWith(modeles[0]);
+      expect(produitRepository.creerDepuisServeur).toHaveBeenCalledWith(produits[0]);
+      expect(appelsOrdre).toEqual(["modele", "produit"]);
+    });
+
+    it("un échec de recupererCatalogue n'applique rien localement et ne fait jamais échouer la synchronisation", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererCatalogue = vi.fn(async () => ({ success: false as const, message: "hors ligne" }));
+      const modeleRepository = { creerDepuisServeur: vi.fn() };
+      const produitRepository = { creerDepuisServeur: vi.fn(() => true) };
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageCatalogue(modeleRepository, produitRepository, { recupererCatalogue });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+      expect(modeleRepository.creerDepuisServeur).not.toHaveBeenCalled();
+      expect(produitRepository.creerDepuisServeur).not.toHaveBeenCalled();
+    });
+
+    it("une exception du rattrapage du catalogue ne fait jamais échouer la synchronisation (déjà réussie à ce stade)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererCatalogue = vi.fn(async () => {
+        throw new Error("panne réseau sur le rattrapage du catalogue");
+      });
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageCatalogue({ creerDepuisServeur: vi.fn() }, { creerDepuisServeur: vi.fn(() => true) }, { recupererCatalogue });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+
+    it("sans rattrapage défini : synchronisation inchangée (rétrocompatibilité)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+  });
 });

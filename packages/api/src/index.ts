@@ -19,6 +19,7 @@ import { initialiserStockRoute } from "./routes/v1/app/operations/initialiser-st
 import { stockCentralRoute } from "./routes/v1/app/operations/stock.js";
 import { emplacementsListRoute } from "./routes/v1/app/emplacements/list.js";
 import { comptesListRoute } from "./routes/v1/app/comptes/list.js";
+import { catalogueListRoute } from "./routes/v1/app/catalogue/list.js";
 
 export function createRouter(): Router {
   const router = new Router();
@@ -42,6 +43,7 @@ export function createRouter(): Router {
   router.register(stockCentralRoute);
   router.register(emplacementsListRoute);
   router.register(comptesListRoute);
+  router.register(catalogueListRoute);
   return router;
 }
 

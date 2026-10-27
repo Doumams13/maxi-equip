@@ -169,6 +169,75 @@ export class ProduitRepository {
     return id;
   }
 
+  /**
+   * Insère/met à jour une variante reçue du serveur central — correction
+   * "visibilité croisée Factures/Historique entre postes" (2026-10-27),
+   * Phase 2. Conserve l'`id` EXACT d'origine (même principe que
+   * `ModeleRepository.creerDepuisServeur`). La projection catalogue
+   * serveur (voir ProduitRow côté API) ne porte PAS motif/type en clair
+   * (seulement `modeleId`) — contrairement à cette table locale, qui les
+   * dénormalise sur chaque variante (affichage factures/mouvements sans
+   * jointure). Résolus ici depuis le modèle local : s'il n'existe pas
+   * encore (catalogue pas encore totalement rattrapé, voir
+   * SyncService), l'insertion est reportée (jamais un motif/type
+   * inventé) — retentée au prochain cycle, exactement comme une
+   * violation de clé étrangère ailleurs dans ce projet.
+   */
+  creerDepuisServeur(produit: {
+    id: string;
+    modeleId: string | null;
+    taille: string;
+    tailleTri: number;
+    largeur: number | null;
+    hauteur: number | null;
+    reference: string;
+    prix: number;
+  }): boolean {
+    let motif: string;
+    let type: string;
+    if (produit.modeleId) {
+      const modele = this.db.prepare("SELECT motif, type FROM modeles_produit WHERE id = ?").get(produit.modeleId) as
+        | { motif: string; type: string }
+        | undefined;
+      if (!modele) return false;
+      motif = modele.motif;
+      type = modele.type;
+    } else {
+      // Variante "catalogue legacy" sans modèle parent (voir
+      // enqueueProduitSync, ipc/metier.ts) — jamais poussée au serveur
+      // dans ce cas, donc jamais reçue ici non plus en pratique ; gardé
+      // par cohérence avec `create()` ci-dessus, qui accepte aussi un
+      // `modeleId` absent.
+      motif = produit.reference;
+      type = "";
+    }
+
+    const now = new Date().toISOString();
+    try {
+      const existe = this.db.prepare("SELECT id FROM produits WHERE id = ?").get(produit.id) as { id: string } | undefined;
+      if (existe) {
+        this.db
+          .prepare(
+            `UPDATE produits SET modele_id = ?, motif = ?, type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, updated_at = ?
+             WHERE id = ?`
+          )
+          .run(produit.modeleId, motif, type, produit.taille, produit.tailleTri, produit.largeur, produit.hauteur, produit.reference, produit.prix, now, produit.id);
+        return true;
+      }
+      this.db
+        .prepare(
+          `INSERT INTO produits (id, modele_id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, carreaux_par_carton, seuil_alerte, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)`
+        )
+        .run(produit.id, produit.modeleId, motif, type, produit.taille, produit.tailleTri, produit.largeur, produit.hauteur, produit.reference, produit.prix, now, now);
+      return true;
+    } catch {
+      // Violation de clé étrangère (ex. modele_id résolu localement mais
+      // supprimé entre-temps) — jamais bloquant, retenté au prochain cycle.
+      return false;
+    }
+  }
+
   /** Modifie une variante. Ne touche jamais aux images (gérées séparément via ImageService). */
   update(
     id: string,

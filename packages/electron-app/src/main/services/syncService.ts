@@ -163,6 +163,69 @@ export class SyncService {
     this.rattrapageComptes = { utilisateurRepository, compteSyncService };
   }
 
+  /**
+   * Correction "visibilité croisée Factures/Historique entre postes"
+   * (2026-10-27), Phase 2 — même forme que les rattrapages ci-dessus.
+   * `modeleRepository` appliqué AVANT `produitRepository` (voir
+   * executerSynchronisation) : un produit dénormalise motif/type depuis
+   * son modèle local (voir ProduitRepository.creerDepuisServeur), donc
+   * son application échoue silencieusement tant que le modèle n'est pas
+   * encore connu — retentée au prochain cycle, jamais bloquant.
+   */
+  private rattrapageCatalogue?: {
+    modeleRepository: { creerDepuisServeur(modele: { id: string; motif: string; type: string; ordreVitrine: number | null }): void };
+    produitRepository: {
+      creerDepuisServeur(produit: {
+        id: string;
+        modeleId: string | null;
+        taille: string;
+        tailleTri: number;
+        largeur: number | null;
+        hauteur: number | null;
+        reference: string;
+        prix: number;
+      }): boolean;
+    };
+    catalogueSyncService: {
+      recupererCatalogue(): Promise<
+        | {
+            success: true;
+            modeles: { id: string; motif: string; type: string; ordreVitrine: number | null }[];
+            produits: { id: string; modeleId: string; taille: string; tailleTri: number; largeur: number | null; hauteur: number | null; reference: string; prix: number }[];
+          }
+        | { success: false; message: string }
+      >;
+    };
+  };
+
+  definirRattrapageCatalogue(
+    modeleRepository: { creerDepuisServeur(modele: { id: string; motif: string; type: string; ordreVitrine: number | null }): void },
+    produitRepository: {
+      creerDepuisServeur(produit: {
+        id: string;
+        modeleId: string | null;
+        taille: string;
+        tailleTri: number;
+        largeur: number | null;
+        hauteur: number | null;
+        reference: string;
+        prix: number;
+      }): boolean;
+    },
+    catalogueSyncService: {
+      recupererCatalogue(): Promise<
+        | {
+            success: true;
+            modeles: { id: string; motif: string; type: string; ordreVitrine: number | null }[];
+            produits: { id: string; modeleId: string; taille: string; tailleTri: number; largeur: number | null; hauteur: number | null; reference: string; prix: number }[];
+          }
+        | { success: false; message: string }
+      >;
+    }
+  ): void {
+    this.rattrapageCatalogue = { modeleRepository, produitRepository, catalogueSyncService };
+  }
+
   constructor(
     private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
     private readonly syncRepository: SyncRepository,
@@ -218,6 +281,20 @@ export class SyncService {
           // Même principe que les rattrapages ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
           // eslint-disable-next-line no-console
           console.error("[sync] rattrapage des dépôts impossible :", err instanceof Error ? err.message : err);
+        }
+      }
+
+      if (this.rattrapageCatalogue) {
+        try {
+          const resultat = await this.rattrapageCatalogue.catalogueSyncService.recupererCatalogue();
+          if (resultat.success) {
+            for (const m of resultat.modeles) this.rattrapageCatalogue.modeleRepository.creerDepuisServeur(m);
+            for (const p of resultat.produits) this.rattrapageCatalogue.produitRepository.creerDepuisServeur(p);
+          }
+        } catch (err) {
+          // Même principe que les rattrapages ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
+          // eslint-disable-next-line no-console
+          console.error("[sync] rattrapage du catalogue impossible :", err instanceof Error ? err.message : err);
         }
       }
 

@@ -349,8 +349,16 @@ export class MouvementRepository {
 
     const q = filtres.recherche.trim();
     if (q) {
-      conditions.push("(factureNumero LIKE ? OR clientNom LIKE ? OR produitMotif LIKE ? OR produitTaille LIKE ?)");
-      params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+      // Correction "recherche Historique par référence produit" (2026-10-27)
+      // — le champ affichait "N° facture, client, produit…" mais ne
+      // cherchait en réalité QUE sur le motif/la taille, jamais sur la
+      // référence (ex. "YMG44057C") pourtant affichée partout ailleurs
+      // dans l'app comme identifiant principal d'un produit. Absent des
+      // événements "vente" (un seul événement par facture, potentiellement
+      // plusieurs produits — voir SELECT_EVENEMENTS), présent pour
+      // entrée/sortie/transfert.
+      conditions.push("(factureNumero LIKE ? OR clientNom LIKE ? OR produitMotif LIKE ? OR produitTaille LIKE ? OR produitReference LIKE ?)");
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
     }
     if (filtres.typeFiltre !== "tous") {
       conditions.push("type = ?");

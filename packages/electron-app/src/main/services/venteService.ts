@@ -432,14 +432,25 @@ export class VenteService {
       // une étape échouait entre les deux (§6 de la correction). Payload
       // volontairement limité aux champs métier utiles à une future
       // synchronisation — jamais un instantané de toute la base (§3).
+      //
+      // Correction "visibilité croisée Factures/Historique entre postes"
+      // (2026-10-27), Phase 3 — `emplacementId`/`identiteSnapshot`/
+      // `vendeurNomManuel` ajoutés (additif, jamais un changement du
+      // format existant) : sans `emplacementId`, une facture reçue d'un
+      // autre poste ne pourrait jamais s'insérer localement
+      // (`factures.emplacement_id` est NOT NULL) ; sans
+      // `identiteSnapshot`, son PDF ne pourrait pas être régénéré
+      // correctement sur un poste dont l'identité entreprise diffère.
       this.boiteEnvoiRepository.creer("vente", factureId, {
         factureId,
         numero,
         date: now,
+        emplacementId: input.pointDeVenteId,
         clientNom: input.clientNom,
         clientTelephone: clientTelephoneNormalise,
         clientAdresse: input.clientAdresse,
         vendeurUtilisateurId: input.vendeurUtilisateurId,
+        vendeurNomManuel: vendeurEffectif.estPrecisionManuelle ? input.vendeurNomManuel : null,
         modeReglement: input.modeReglement,
         total,
         remise: input.remise,
@@ -447,6 +458,7 @@ export class VenteService {
         montantPaye,
         lignes: lignesFacture,
         mouvementIds,
+        identiteSnapshot,
       });
 
       return { factureId, numero, total, remise: input.remise };

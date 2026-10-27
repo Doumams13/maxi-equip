@@ -770,6 +770,60 @@ describe("§18-J — Offline-first (boîte d'envoi)", async () => {
     expect(payload.numero).toBe("FAC-2026-TEST");
     expect(payload.total).toBe(15000);
   });
+
+  /**
+   * Correction "visibilité croisée Factures/Historique entre postes"
+   * (2026-10-27), Phase 3 — `emplacementId` manquait jusqu'ici
+   * (bloquant : `factures.emplacement_id` est NOT NULL sur le poste
+   * récepteur), `identiteSnapshot` aussi (nécessaire pour régénérer le
+   * PDF correctement ailleurs).
+   */
+  it("la boîte d'envoi contient aussi l'emplacementId (point de vente) ET l'identiteSnapshot", async () => {
+    const produitRepository = { findById: (id: string) => (id === "p1" ? { id: "p1", prix: 15000, motif: "Marbre Blanc", taille: "60×60" } : null) };
+    const stockRepository = { getQuantite: () => 10, applyDelta: vi.fn() };
+    const mouvementRepository = { create: () => "m-1", listParFacture: () => [] };
+    const factureRepository = { nextNumero: () => "FAC-2026-TEST", create: vi.fn(() => "facture-1"), createReleveInterne: vi.fn(), findById: () => null, annuler: vi.fn() };
+    const boiteEnvoiCree: unknown[] = [];
+    const boiteEnvoiRepository = { creer: (...args: unknown[]) => { boiteEnvoiCree.push(args); return "be-1"; } };
+    const parametresRepository = {
+      getIdentite: () => ({ nom: "MAXI EQUIP", adresse: "Libreville", quartier: "Akébé", telephones: ["077000000"], nomAdministrateur: "Admin", nomGerant: null }),
+    };
+    const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
+    const service = new VenteService(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fauxDb as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      produitRepository as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      stockRepository as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mouvementRepository as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      factureRepository as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      boiteEnvoiRepository as any,
+      undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      parametresRepository as any
+    );
+
+    await service.enregistrerVente({
+      pointDeVenteId: "shop-akebe",
+      clientNom: "Dupont",
+      clientTelephone: null,
+      clientAdresse: null,
+      vendeurUtilisateurId: "u1",
+      vendeurCompteConnecteNom: "Admin",
+      vendeurNomManuel: null,
+      modeReglement: "Espèces",
+      remise: 0,
+      lignes: [{ produitId: "p1", quantite: 1, prixUnitaire: 15000, allocationsDepots: [{ emplacementId: "akebe", quantite: 1 }] }],
+    });
+
+    const [, , payload] = boiteEnvoiCree[0] as [string, string, { emplacementId: string; identiteSnapshot: { nom: string } | null }];
+    expect(payload.emplacementId).toBe("shop-akebe");
+    expect(payload.identiteSnapshot).toMatchObject({ nom: "MAXI EQUIP" });
+  });
 });
 
 describe("Remise / Négociation", async () => {

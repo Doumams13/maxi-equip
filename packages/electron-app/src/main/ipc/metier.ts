@@ -1,5 +1,7 @@
-import { ipcMain, BrowserWindow, dialog } from "electron";
+import { app, ipcMain, BrowserWindow, dialog } from "electron";
 import { copyFile, readFile } from "node:fs/promises";
+import { existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { join } from "node:path";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { ModeleRepository } from "../repositories/modeleRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
@@ -1152,6 +1154,33 @@ export function enqueueProduitSync(boiteEnvoiRepository: BoiteEnvoiRepository, p
 
 type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "CONNEXION_REQUISE" | "UNKNOWN";
 
+/**
+ * Correction "erreur de vente générique et sans trace" (2026-10-27) —
+ * jusqu'ici une erreur technique inattendue (ni stock insuffisant, ni
+ * validation métier connue) affichait seulement "Une erreur inattendue
+ * s'est produite", et `console.error` seul (invisible en pratique dans
+ * un build packagé — aucune console accessible sur un poste de vente).
+ * Impossible de diagnostiquer à distance ce qui avait réellement échoué.
+ * Même principe que `app:reportRendererError` (ipc/index.ts) : écriture
+ * best-effort dans un fichier, jamais bloquante, jamais une deuxième
+ * erreur non gérée qui aggraverait le problème initial.
+ */
+function journaliserErreurTechnique(contexte: string, err: unknown): void {
+  try {
+    const dir = join(app.getPath("userData"), "logs");
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const ligne = `${JSON.stringify({
+      date: new Date().toISOString(),
+      contexte,
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    })}\n`;
+    appendFileSync(join(dir, "erreurs-stock.log"), ligne);
+  } catch {
+    // Best-effort — ne doit jamais faire planter quoi que ce soit.
+  }
+}
+
 function mapStockError(err: unknown): { code: StockErrorReason; message: string; available?: number; requested?: number } {
   if (err instanceof domainStock.InsufficientStockError) {
     return { code: "INSUFFICIENT_STOCK", message: err.message, available: err.available, requested: err.requested };
@@ -1171,5 +1200,7 @@ function mapStockError(err: unknown): { code: StockErrorReason; message: string;
   }
   // eslint-disable-next-line no-console
   console.error("[metier] Erreur technique inattendue :", err);
-  return { code: "UNKNOWN", message: "Une erreur inattendue s'est produite." };
+  journaliserErreurTechnique("mapStockError", err);
+  const detail = err instanceof Error && err.message ? err.message : "détail indisponible";
+  return { code: "UNKNOWN", message: `Une erreur inattendue s'est produite : ${detail}. Merci de signaler ce message exact au support.` };
 }

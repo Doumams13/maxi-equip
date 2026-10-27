@@ -7,7 +7,7 @@ import { ProduitRepository } from "../repositories/produitRepository.js";
 import { BoiteEnvoiRepository } from "../repositories/boiteEnvoiRepository.js";
 import { PromotionRepository } from "../repositories/promotionRepository.js";
 import { ParametresRepository } from "../repositories/parametresRepository.js";
-import { ValidationStockDistanteService, erreurDepuisEchecValidationDistante } from "./validationStockDistanteService.js";
+import { ValidationStockDistanteService, erreurDepuisEchecValidationDistante, compenserApresEchecLocal } from "./validationStockDistanteService.js";
 
 export class VenteValidationError extends Error {
   constructor(message: string) {
@@ -168,6 +168,11 @@ export class VenteService {
     // seule source de vérité pour construire réellement la facture.
     let stockApresServeur: { produitId: string; emplacementId: string; quantite: number }[] | null = null;
     let numeroServeur: string | undefined;
+    // Correction "vente décrémentée sans facture générée" (2026-10-27) —
+    // conservés hors du bloc ci-dessous pour pouvoir compenser (voir
+    // compenserApresEchecLocal) si la transaction locale plus bas échoue
+    // APRÈS que ce commit serveur ait déjà eu lieu.
+    let deltasValidesEnLigne: { produitId: string; emplacementId: string; delta: number }[] = [];
     if (this.validationStockDistanteService?.estConfiguree()) {
       const deltas: { produitId: string; emplacementId: string; delta: number }[] = [];
       for (const ligne of input.lignes) {
@@ -182,6 +187,7 @@ export class VenteService {
         if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
         stockApresServeur = resultat.stockApres;
         numeroServeur = resultat.numero;
+        deltasValidesEnLigne = deltas;
       }
     }
 
@@ -446,7 +452,18 @@ export class VenteService {
       return { factureId, numero, total, remise: input.remise };
     });
 
-    return executer();
+    try {
+      return executer();
+    } catch (err) {
+      // Correction "vente décrémentée sans facture générée" (2026-10-27)
+      // — voir compenserApresEchecLocal. L'erreur d'origine (celle que
+      // l'utilisateur doit voir) est TOUJOURS relancée telle quelle après
+      // la tentative de compensation, jamais masquée par elle.
+      if (this.validationStockDistanteService) {
+        await compenserApresEchecLocal(this.validationStockDistanteService, deltasValidesEnLigne);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -511,6 +528,9 @@ export class VenteService {
     // annulation, divergence permanente avec le stock réellement
     // disponible). Lecture seule ici, avant la transaction locale.
     let stockApresServeur: { produitId: string; emplacementId: string; quantite: number }[] | null = null;
+    // Correction "vente décrémentée sans facture générée" (2026-10-27) —
+    // mêmes raisons que dans enregistrerVente ci-dessus.
+    let deltasValidesEnLigne: { produitId: string; emplacementId: string; delta: number }[] = [];
     if (this.validationStockDistanteService?.estConfiguree()) {
       const factureAvantTransaction = this.factureRepository.findById(factureId);
       if (!factureAvantTransaction) throw new VenteValidationError("Facture introuvable.");
@@ -523,6 +543,7 @@ export class VenteService {
         const resultat = await this.validationStockDistanteService.valider(deltas);
         if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
         stockApresServeur = resultat.stockApres;
+        deltasValidesEnLigne = deltas;
       }
     }
 
@@ -577,6 +598,15 @@ export class VenteService {
       });
     });
 
-    executer();
+    try {
+      executer();
+    } catch (err) {
+      // Correction "vente décrémentée sans facture générée" (2026-10-27)
+      // — voir compenserApresEchecLocal.
+      if (this.validationStockDistanteService) {
+        await compenserApresEchecLocal(this.validationStockDistanteService, deltasValidesEnLigne);
+      }
+      throw err;
+    }
   }
 }

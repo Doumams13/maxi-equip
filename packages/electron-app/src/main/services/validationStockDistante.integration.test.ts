@@ -239,4 +239,52 @@ describe("VenteService/StockService — validation en ligne du stock partagé (b
       expect(stockRepository.getQuantite(produitId, autreDepot)).toBe(10);
     });
   });
+
+  /**
+   * Correction "vente décrémentée sans facture générée" (2026-10-27) —
+   * reproduit le bug réel signalé : le serveur valide et décrémente
+   * (COMMIT), puis la transaction locale échoue pour une tout autre
+   * raison (ici : une remise invalide, mais n'importe quelle erreur
+   * locale tardive produirait le même symptôme) — sans compensation, le
+   * stock central resterait décrémenté alors qu'aucune facture/mouvement
+   * local n'existe.
+   */
+  describe("Compensation après échec LOCAL survenant APRÈS une validation distante déjà réussie", () => {
+    it("enregistrerVente : la remise invalide échoue APRÈS le commit serveur → un second appel compense avec les deltas inversés", async () => {
+      stockRepository.applyDelta({ emplacementId: depotId, delta: 10, produitId });
+      const faux = new FauxValidationDistante(true, {
+        success: true,
+        numero: "FAC-2099-0001",
+        stockApres: [{ produitId, emplacementId: depotId, quantite: 7 }],
+      });
+      const service = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository, undefined, undefined, faux as never);
+
+      const venteAvecRemiseInvalide = { ...ligneVenteSimple(3), remise: 999_999_999 }; // dépasse largement le total → InvalidRemiseError, levée APRÈS le commit serveur
+
+      await expect(service.enregistrerVente(venteAvecRemiseInvalide)).rejects.toThrow(/remise/i);
+
+      // Le commit serveur d'origine, PUIS la compensation (deltas inversés).
+      expect(faux.appelsRecus).toEqual([
+        [{ produitId, emplacementId: depotId, delta: -3 }],
+        [{ produitId, emplacementId: depotId, delta: 3 }],
+      ]);
+      // Transaction locale entièrement annulée (ACID SQLite) — jamais de facture, stock local inchangé.
+      expect(factureRepository.list(10)).toHaveLength(0);
+      expect(stockRepository.getQuantite(produitId, depotId)).toBe(10);
+    });
+
+    it("StockService.enregistrerEntree : une erreur locale tardive (FK manquante) déclenche la même compensation", async () => {
+      const faux = new FauxValidationDistante(true, { success: true, stockApres: [{ produitId, emplacementId: depotId, quantite: 20 }] });
+      const service = new StockService(db, stockRepository, mouvementRepository, boiteEnvoiRepository, faux as never);
+
+      // utilisateurId inexistant → FK "mouvements.utilisateur_id REFERENCES utilisateurs(id)" viole APRÈS le commit serveur.
+      await expect(service.enregistrerEntree(produitId, depotId, 20, "utilisateur-inexistant")).rejects.toThrow();
+
+      expect(faux.appelsRecus).toEqual([
+        [{ produitId, emplacementId: depotId, delta: 20 }],
+        [{ produitId, emplacementId: depotId, delta: -20 }],
+      ]);
+      expect(stockRepository.getQuantite(produitId, depotId)).toBe(0); // jamais touché — transaction locale annulée
+    });
+  });
 });

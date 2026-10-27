@@ -40,6 +40,44 @@ export type ResultatValidationStockDistante =
   | { success: false; raison: "stock_insuffisant"; details: { produitId: string; emplacementId: string; disponible: number; demande: number }[] }
   | { success: false; raison: "hors_ligne" | "erreur_serveur"; message: string };
 
+/**
+ * Compense un échec LOCAL survenu APRÈS une validation distante déjà
+ * réussie — correction "vente décrémentée sans facture générée"
+ * (2026-10-27). `valider()` ci-dessous COMMIT immédiatement côté serveur
+ * (stock_central modifié, éventuellement un numéro de facture consommé) ;
+ * si la transaction SQLite locale qui suit échoue pour QUELQUE RAISON
+ * QUE CE SOIT (FK manquante, erreur disque, validation métier échouant
+ * tardivement...), ce commit serveur n'était jusqu'ici JAMAIS annulé —
+ * le stock central restait décrémenté alors qu'aucune facture/mouvement
+ * local n'existe, un écart permanent et invisible jusqu'au prochain
+ * rattrapage (voir SyncService).
+ *
+ * Renvoie exactement l'inverse des deltas déjà appliqués (addition ⇄
+ * soustraction se neutralisent, sûr sous concurrence — jamais une valeur
+ * absolue qui écraserait une modification faite entre-temps par un autre
+ * poste). Best-effort : si la compensation elle-même échoue (ex. perte
+ * de connexion au pire moment), l'écart persiste jusqu'au prochain
+ * rattrapage périodique — journalisé, jamais silencieux, mais ne doit
+ * jamais masquer l'erreur locale d'origine (toujours relancée par
+ * l'appelant après cet appel).
+ */
+export async function compenserApresEchecLocal(
+  service: ValidationStockDistanteService,
+  deltasDejaAppliques: { produitId: string; emplacementId: string; delta: number }[]
+): Promise<void> {
+  if (deltasDejaAppliques.length === 0) return;
+  try {
+    const resultat = await service.valider(deltasDejaAppliques.map((d) => ({ ...d, delta: -d.delta })));
+    if (!resultat.success) {
+      // eslint-disable-next-line no-console
+      console.error("[stock] compensation refusée par le serveur après échec local :", resultat);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[stock] compensation du stock distant après échec local impossible :", err instanceof Error ? err.message : err);
+  }
+}
+
 /** Traduit un échec de validation distante en l'exception appropriée — stock réellement insuffisant (même type d'erreur domaine qu'une vérification locale, voir mapStockError) ou connexion requise (hors-ligne/serveur en erreur). */
 export function erreurDepuisEchecValidationDistante(resultat: Extract<ResultatValidationStockDistante, { success: false }>): Error {
   if (resultat.raison === "stock_insuffisant") {

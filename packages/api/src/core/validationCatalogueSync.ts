@@ -2,6 +2,7 @@ import { ValidationError } from "./errors.js";
 import type { ModeleCataloguePayload, ProduitCataloguePayload, PromotionCataloguePayload, ImageSyncPayload } from "./catalogStore.js";
 import type { IdentiteCataloguePayload } from "./identiteStore.js";
 import type { CompteCataloguePayload } from "./compteStore.js";
+import type { EmplacementCataloguePayload } from "./emplacementStore.js";
 
 /**
  * Validation stricte des opérations catalogue reçues (modèle, produit,
@@ -187,6 +188,32 @@ export function validerOperationCompte(payload: unknown): CompteCataloguePayload
     hashMotDePasse,
     nom: texte(payload["nom"], "nom", 150),
     role,
+    actif: Boolean(payload["actif"]),
+    updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
+  };
+}
+
+const TYPES_EMPLACEMENT = new Set(["shop", "depot"]);
+
+/**
+ * Dépôt/point de vente — correction "visibilité croisée Factures/
+ * Historique entre postes" (2026-10-27). Même raisonnement que
+ * `validerOperationCompte` ci-dessus (projection mutable).
+ */
+export function validerOperationEmplacement(payload: unknown): EmplacementCataloguePayload {
+  if (!estObjetPlain(payload)) throw new ValidationError("Le payload 'emplacement' doit être un objet.");
+  const type = payload["type"];
+  if (typeof type !== "string" || !TYPES_EMPLACEMENT.has(type)) {
+    throw new ValidationError("Le champ 'type' doit être 'shop' ou 'depot'.");
+  }
+
+  return {
+    operation: operation(payload["operation"]),
+    emplacementId: uuid(payload["emplacementId"], "emplacementId"),
+    nom: texte(payload["nom"], "nom", 150),
+    type: type as "shop" | "depot",
+    ville: texte(payload["ville"], "ville", 150),
+    estPointDeVente: Boolean(payload["estPointDeVente"]),
     actif: Boolean(payload["actif"]),
     updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
   };

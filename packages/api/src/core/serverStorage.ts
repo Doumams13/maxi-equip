@@ -22,7 +22,16 @@ export type TypeOperationSync =
   | "promotion"
   | "modele"
   | "produit"
-  | "compte";
+  | "compte"
+  // Correction "visibilité croisée Factures/Historique entre postes"
+  // (2026-10-27) — centralisation des dépôts, préalable bloquant : sans
+  // id de dépôt partagé entre postes, aucune facture/mouvement reçu d'un
+  // autre poste ne pourrait jamais résoudre sa clé étrangère
+  // `emplacement_id` localement. Même mécanisme de projection que
+  // "compte" (upsert conditionné sur updatedAt), jamais le journal
+  // `operations_synchronisees` (un dépôt est une entité mutable,
+  // renommée/archivée au fil du temps — pas un événement immuable).
+  | "emplacement";
 
 export interface OperationRecue {
   entityType: TypeOperationSync;
@@ -161,6 +170,35 @@ export interface CompteRow {
   hashMotDePasse: string;
   nom: string;
   role: string;
+  actif: boolean;
+}
+
+/**
+ * Dépôt/point de vente centralisé — correction "visibilité croisée
+ * Factures/Historique entre postes" (2026-10-27). Même principe que
+ * `CompteCataloguePayload` ci-dessus (projection mutable, upsert
+ * conditionné sur `updatedAt`, jamais le journal d'événements
+ * immuables) — voir `push.ts` (TYPES_PROJECTION) et
+ * `routes/v1/app/emplacements/list.ts` (seule route qui relit cette
+ * projection, pour le rattrapage périodique côté app).
+ */
+export interface EmplacementCataloguePayload {
+  operation: "create" | "update" | "delete";
+  emplacementId: string;
+  nom: string;
+  type: "shop" | "depot";
+  ville: string;
+  estPointDeVente: boolean;
+  actif: boolean;
+  updatedAt: string;
+}
+
+export interface EmplacementRow {
+  id: string;
+  nom: string;
+  type: string;
+  ville: string;
+  estPointDeVente: boolean;
   actif: boolean;
 }
 
@@ -307,6 +345,9 @@ export interface ServerStorage {
 
   appliquerOperationCompte(payload: CompteCataloguePayload): Promise<{ applique: boolean }>;
   trouverCompteParIdentifiant(identifiant: string): Promise<CompteRow | null>;
+
+  appliquerOperationEmplacement(payload: EmplacementCataloguePayload): Promise<{ applique: boolean }>;
+  listerEmplacementsActifs(): Promise<EmplacementRow[]>;
 
   validerEtAppliquerOperationStock(demande: DemandeValidationStock): Promise<ResultatValidationStock>;
   initialiserStockCentral(lignes: LigneInitialisationStock[]): Promise<{ lignesAppliquees: number }>;

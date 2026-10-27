@@ -481,4 +481,65 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
       expect(resultat).toMatchObject({ success: true });
     });
   });
+
+  describe("definirRattrapageEmplacements — centralisation des dépôts (correction 'visibilité croisée Factures/Historique entre postes')", () => {
+    function reponsePullVide() {
+      return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+    }
+
+    it("applique localement chaque dépôt renvoyé par recupererEmplacementsActifs, APRÈS un PULL réussi", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const emplacements = [
+        { id: "e1", nom: "Akébé", type: "depot" as const, ville: "Libreville", estPointDeVente: false, actif: true },
+        { id: "e2", nom: "SHOP", type: "shop" as const, ville: "Libreville", estPointDeVente: true, actif: true },
+      ];
+      const recupererEmplacementsActifs = vi.fn(async () => ({ success: true as const, emplacements }));
+      const creerDepuisServeur = vi.fn();
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageEmplacements({ creerDepuisServeur }, { recupererEmplacementsActifs });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat.success).toBe(true);
+      expect(recupererEmplacementsActifs).toHaveBeenCalledTimes(1);
+      expect(creerDepuisServeur).toHaveBeenCalledTimes(2);
+      expect(creerDepuisServeur).toHaveBeenNthCalledWith(1, emplacements[0]);
+      expect(creerDepuisServeur).toHaveBeenNthCalledWith(2, emplacements[1]);
+    });
+
+    it("un échec de recupererEmplacementsActifs n'applique rien localement et ne fait jamais échouer la synchronisation", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererEmplacementsActifs = vi.fn(async () => ({ success: false as const, message: "hors ligne" }));
+      const creerDepuisServeur = vi.fn();
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageEmplacements({ creerDepuisServeur }, { recupererEmplacementsActifs });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+      expect(creerDepuisServeur).not.toHaveBeenCalled();
+    });
+
+    it("une exception du rattrapage des dépôts ne fait jamais échouer la synchronisation (déjà réussie à ce stade)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererEmplacementsActifs = vi.fn(async () => {
+        throw new Error("panne réseau sur le rattrapage des dépôts");
+      });
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageEmplacements({ creerDepuisServeur: vi.fn() }, { recupererEmplacementsActifs });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+
+    it("sans rattrapage défini : synchronisation inchangée (rétrocompatibilité)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+  });
 });

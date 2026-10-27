@@ -460,6 +460,85 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
     });
   });
 
+  describe("Dépôts centralisés (réel PostgreSQL) — correction 'visibilité croisée Factures/Historique entre postes' (2026-10-27)", () => {
+    const DEPOT_1 = uuidDeterministe("701");
+    const DEPOT_2 = uuidDeterministe("702");
+
+    it("appliquerOperationEmplacement crée le dépôt, retrouvable ensuite via listerEmplacementsActifs", async () => {
+      await storage.appliquerOperationEmplacement({
+        operation: "create",
+        emplacementId: DEPOT_1,
+        nom: "Akébé",
+        type: "depot",
+        ville: "Libreville",
+        estPointDeVente: false,
+        actif: true,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      const emplacements = await storage.listerEmplacementsActifs();
+      expect(emplacements).toEqual(expect.arrayContaining([{ id: DEPOT_1, nom: "Akébé", type: "depot", ville: "Libreville", estPointDeVente: false, actif: true }]));
+    });
+
+    it("une modification plus récente écrase les champs (upsert conditionné par updatedAt, même principe que compte)", async () => {
+      await storage.appliquerOperationEmplacement({
+        operation: "update",
+        emplacementId: DEPOT_1,
+        nom: "Akébé renommé",
+        type: "depot",
+        ville: "Libreville",
+        estPointDeVente: false,
+        actif: false,
+        updatedAt: "2026-02-01T00:00:00.000Z",
+      });
+      const emplacements = await storage.listerEmplacementsActifs();
+      const depot = emplacements.find((e) => e.id === DEPOT_1);
+      expect(depot).toMatchObject({ nom: "Akébé renommé", actif: false });
+    });
+
+    it("une modification PLUS ANCIENNE que la version déjà stockée est ignorée (jamais de recul dans le temps)", async () => {
+      const { applique } = await storage.appliquerOperationEmplacement({
+        operation: "update",
+        emplacementId: DEPOT_1,
+        nom: "Nom périmé",
+        type: "depot",
+        ville: "Libreville",
+        estPointDeVente: false,
+        actif: true,
+        updatedAt: "2026-01-15T00:00:00.000Z",
+      });
+      expect(applique).toBe(false);
+      const depot = (await storage.listerEmplacementsActifs()).find((e) => e.id === DEPOT_1);
+      expect(depot?.nom).toBe("Akébé renommé");
+    });
+
+    it("un dépôt 'delete' (deleted_at renseigné) n'apparaît plus dans listerEmplacementsActifs", async () => {
+      await storage.appliquerOperationEmplacement({
+        operation: "create",
+        emplacementId: DEPOT_2,
+        nom: "Akanda",
+        type: "depot",
+        ville: "Libreville",
+        estPointDeVente: false,
+        actif: true,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      expect((await storage.listerEmplacementsActifs()).some((e) => e.id === DEPOT_2)).toBe(true);
+
+      await storage.appliquerOperationEmplacement({
+        operation: "delete",
+        emplacementId: DEPOT_2,
+        nom: "Akanda",
+        type: "depot",
+        ville: "Libreville",
+        estPointDeVente: false,
+        actif: true,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      expect((await storage.listerEmplacementsActifs()).some((e) => e.id === DEPOT_2)).toBe(false);
+    });
+  });
+
   describe("Validation atomique du stock partagé (réel PostgreSQL) — correction 'travailler en parallèle' (2026-10-22)", () => {
     const PRODUIT_STOCK_1 = uuidDeterministe("601");
     const DEPOT_AKEBE = uuidDeterministe("602");

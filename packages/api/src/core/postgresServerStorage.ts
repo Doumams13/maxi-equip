@@ -21,6 +21,8 @@ import {
   type ResultatValidationStock,
   type LigneInitialisationStock,
   type LigneStockCentral,
+  type EmplacementCataloguePayload,
+  type EmplacementRow,
 } from "./serverStorage.js";
 
 const { Pool } = pg;
@@ -152,6 +154,21 @@ export class PostgresServerStorage implements ServerStorage {
         updated_at        TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_comptes_identifiant ON comptes_utilisateurs (identifiant) WHERE deleted_at IS NULL;
+
+      -- Dépôts/points de vente centralisés — correction "visibilité
+      -- croisée Factures/Historique entre postes" (2026-10-27). Voir
+      -- serverStorage.ts (EmplacementCataloguePayload) pour le
+      -- raisonnement complet.
+      CREATE TABLE IF NOT EXISTS emplacements (
+        id                  TEXT PRIMARY KEY,
+        nom                 TEXT NOT NULL,
+        type                TEXT NOT NULL,
+        ville               TEXT NOT NULL,
+        est_point_de_vente  BOOLEAN NOT NULL DEFAULT FALSE,
+        actif               BOOLEAN NOT NULL DEFAULT TRUE,
+        deleted_at          TEXT,
+        updated_at          TEXT NOT NULL
+      );
 
       -- Stock partagé, autorité unique pour toute opération qui en vérifie
       -- la disponibilité (voir DemandeValidationStock) — jamais déduit du
@@ -554,6 +571,32 @@ export class PostgresServerStorage implements ServerStorage {
     );
     const row = res.rows[0] as CompteRow | undefined;
     return row ?? null;
+  }
+
+  async appliquerOperationEmplacement(payload: EmplacementCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const res = await this.pool.query(
+      `INSERT INTO emplacements (id, nom, type, ville, est_point_de_vente, actif, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO UPDATE SET
+         nom = excluded.nom,
+         type = excluded.type,
+         ville = excluded.ville,
+         est_point_de_vente = excluded.est_point_de_vente,
+         actif = excluded.actif,
+         deleted_at = excluded.deleted_at,
+         updated_at = excluded.updated_at
+       WHERE excluded.updated_at >= emplacements.updated_at`,
+      [payload.emplacementId, payload.nom, payload.type, payload.ville, payload.estPointDeVente, payload.actif, deletedAt, payload.updatedAt]
+    );
+    return { applique: (res.rowCount ?? 0) > 0 };
+  }
+
+  async listerEmplacementsActifs(): Promise<EmplacementRow[]> {
+    const res = await this.pool.query(
+      `SELECT id, nom, type, ville, est_point_de_vente as "estPointDeVente", actif FROM emplacements WHERE deleted_at IS NULL`
+    );
+    return res.rows as EmplacementRow[];
   }
 
   async validerEtAppliquerOperationStock(demande: DemandeValidationStock): Promise<ResultatValidationStock> {

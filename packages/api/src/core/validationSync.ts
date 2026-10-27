@@ -37,6 +37,9 @@ const TYPES_SUPPORTES: readonly TypeOperationSync[] = [
   // Correction "travail à distance / plusieurs machines en parallèle"
   // (2026-10-22) — voir core/compteStore.ts.
   "compte",
+  // Correction "visibilité croisée Factures/Historique entre postes"
+  // (2026-10-27) — voir core/emplacementStore.ts.
+  "emplacement",
 ];
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

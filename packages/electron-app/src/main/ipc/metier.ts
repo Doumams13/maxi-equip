@@ -22,7 +22,7 @@ import { genererDocumentInternePdf } from "../services/documentInterneDocumentSe
 import { genererBilanPdf } from "../services/bilanDocumentService.js";
 import { checkAdminGuard } from "../auth/checkAdminGuard.js";
 import { stock as domainStock } from "@maxi-equip/domain";
-import type { ModeleProduit, Produit } from "@maxi-equip/shared-types";
+import type { ModeleProduit, Produit, Emplacement } from "@maxi-equip/shared-types";
 
 /**
  * Canaux IPC métier (Phase 2). Chaque canal est nommé explicitement,
@@ -766,6 +766,7 @@ export function registerMetierIpcHandlers(
     }
     try {
       emplacementRepository.renommer(id, nouveauNom);
+      enqueueEmplacementSync(boiteEnvoiRepository, emplacementRepository.findById(id)!, "update");
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
@@ -781,6 +782,7 @@ export function registerMetierIpcHandlers(
     }
     try {
       const id = emplacementRepository.creerDepot(nom, "Libreville");
+      enqueueEmplacementSync(boiteEnvoiRepository, emplacementRepository.findById(id)!, "create");
       return { success: true, id };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
@@ -822,6 +824,7 @@ export function registerMetierIpcHandlers(
     // l'interface.
     try {
       emplacementRepository.archiver(id);
+      enqueueEmplacementSync(boiteEnvoiRepository, emplacementRepository.findById(id)!, "update");
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
@@ -835,6 +838,7 @@ export function registerMetierIpcHandlers(
       return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
     }
     emplacementRepository.reactiver(id);
+    enqueueEmplacementSync(boiteEnvoiRepository, emplacementRepository.findById(id)!, "update");
     return { success: true };
   });
 
@@ -860,7 +864,13 @@ export function registerMetierIpcHandlers(
       return { success: false, message: "Seul l'Administrateur peut modifier cette configuration." };
     }
     try {
+      // Capturé AVANT la suppression — plus rien à lire localement une
+      // fois la ligne physiquement supprimée, mais le serveur a besoin
+      // du dernier état connu (nom/type/ville) pour journaliser la
+      // suppression de façon cohérente avec les autres opérations.
+      const emplacement = emplacementRepository.findById(id);
       emplacementRepository.supprimerDefinitivement(id);
+      if (emplacement) enqueueEmplacementSync(boiteEnvoiRepository, emplacement, "delete");
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Une erreur inattendue s'est produite.";
@@ -1119,6 +1129,26 @@ export function registerMetierIpcHandlers(
  * `updatedAt` et les champs dénormalisés correspondent exactement à ce
  * qui est réellement en base localement.
  */
+/**
+ * Correction "visibilité croisée Factures/Historique entre postes"
+ * (2026-10-27) — même mécanisme générique que `enqueueModeleSync`/
+ * `enqueueProduitSync` ci-dessous : un dépôt est une projection mutable
+ * (voir core/emplacementStore.ts côté API), jamais le journal
+ * d'événements immuables.
+ */
+export function enqueueEmplacementSync(boiteEnvoiRepository: BoiteEnvoiRepository, emplacement: Emplacement, operation: "create" | "update" | "delete"): void {
+  boiteEnvoiRepository.creer("emplacement", emplacement.id, {
+    operation,
+    emplacementId: emplacement.id,
+    nom: emplacement.nom,
+    type: emplacement.type,
+    ville: emplacement.ville,
+    estPointDeVente: emplacement.estPointDeVente,
+    actif: emplacement.actif,
+    updatedAt: emplacement.updatedAt,
+  });
+}
+
 export function enqueueModeleSync(boiteEnvoiRepository: BoiteEnvoiRepository, modele: ModeleProduit, operation: "create" | "update" | "delete"): void {
   boiteEnvoiRepository.creer("modele", modele.id, {
     operation,

@@ -5,7 +5,8 @@ import { validerOperationModele, validerOperationProduit, validerOperationPromot
 import { appliquerOperationModele, appliquerOperationProduit, appliquerOperationPromotion } from "../../../../core/catalogStore.js";
 import { appliquerOperationIdentite } from "../../../../core/identiteStore.js";
 import { appliquerOperationCompte } from "../../../../core/compteStore.js";
-import { validerOperationCompte } from "../../../../core/validationCatalogueSync.js";
+import { appliquerOperationEmplacement } from "../../../../core/emplacementStore.js";
+import { validerOperationCompte, validerOperationEmplacement } from "../../../../core/validationCatalogueSync.js";
 
 /**
  * POST /v1/sync/push — Phase 3.6, Partie 3.
@@ -44,7 +45,7 @@ import { validerOperationCompte } from "../../../../core/validationCatalogueSync
  */
 
 const TYPES_CATALOGUE = new Set(["modele", "produit", "promotion"]);
-const TYPES_PROJECTION = new Set([...TYPES_CATALOGUE, "parametres_entreprise", "compte"]);
+const TYPES_PROJECTION = new Set([...TYPES_CATALOGUE, "parametres_entreprise", "compte", "emplacement"]);
 
 export const pushRoute: Route = {
   method: "POST",
@@ -75,7 +76,9 @@ export const pushRoute: Route = {
               ? validerOperationPromotion(op.payload)
               : op.entityType === "compte"
                 ? validerOperationCompte(op.payload)
-                : validerOperationIdentite(op.payload);
+                : op.entityType === "emplacement"
+                  ? validerOperationEmplacement(op.payload)
+                  : validerOperationIdentite(op.payload);
       operationsCatalogue.push({ index, entityType: op.entityType, payload });
     });
 
@@ -89,6 +92,7 @@ export const pushRoute: Route = {
       else if (entityType === "produit") await appliquerOperationProduit(payload as never);
       else if (entityType === "promotion") await appliquerOperationPromotion(payload as never);
       else if (entityType === "compte") await appliquerOperationCompte(payload as never);
+      else if (entityType === "emplacement") await appliquerOperationEmplacement(payload as never);
       else await appliquerOperationIdentite(payload as never);
       // Idempotent par construction (upsert conditionné par updatedAt) —
       // toujours "cree" du point de vue du client, qui n'a besoin que de

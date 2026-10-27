@@ -21,6 +21,8 @@ import {
   type ResultatValidationStock,
   type LigneInitialisationStock,
   type LigneStockCentral,
+  type EmplacementCataloguePayload,
+  type EmplacementRow,
 } from "./serverStorage.js";
 
 /**
@@ -131,6 +133,21 @@ export class SqliteServerStorage implements ServerStorage {
         updated_at        TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_comptes_identifiant ON comptes_utilisateurs (identifiant) WHERE deleted_at IS NULL;
+
+      -- Dépôts/points de vente centralisés — correction "visibilité
+      -- croisée Factures/Historique entre postes" (2026-10-27). Voir
+      -- serverStorage.ts (EmplacementCataloguePayload) pour le
+      -- raisonnement complet.
+      CREATE TABLE IF NOT EXISTS emplacements (
+        id                  TEXT PRIMARY KEY,
+        nom                 TEXT NOT NULL,
+        type                TEXT NOT NULL,
+        ville               TEXT NOT NULL,
+        est_point_de_vente  INTEGER NOT NULL DEFAULT 0,
+        actif               INTEGER NOT NULL DEFAULT 1,
+        deleted_at          TEXT,
+        updated_at          TEXT NOT NULL
+      );
 
       -- Stock partagé, autorité unique pour toute opération qui en vérifie
       -- la disponibilité (voir DemandeValidationStock) — jamais déduit du
@@ -531,6 +548,43 @@ export class SqliteServerStorage implements ServerStorage {
       .get(identifiant) as { id: string; identifiant: string; hashMotDePasse: string; nom: string; role: string; actif: number } | undefined;
     if (!row) return null;
     return { id: row.id, identifiant: row.identifiant, hashMotDePasse: row.hashMotDePasse, nom: row.nom, role: row.role, actif: row.actif === 1 };
+  }
+
+  async appliquerOperationEmplacement(payload: EmplacementCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const resultat = this.db
+      .prepare(
+        `INSERT INTO emplacements (id, nom, type, ville, est_point_de_vente, actif, deleted_at, updated_at)
+         VALUES (@id, @nom, @type, @ville, @estPointDeVente, @actif, @deletedAt, @updatedAt)
+         ON CONFLICT(id) DO UPDATE SET
+           nom = excluded.nom,
+           type = excluded.type,
+           ville = excluded.ville,
+           est_point_de_vente = excluded.est_point_de_vente,
+           actif = excluded.actif,
+           deleted_at = excluded.deleted_at,
+           updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= emplacements.updated_at`
+      )
+      .run({
+        id: payload.emplacementId,
+        nom: payload.nom,
+        type: payload.type,
+        ville: payload.ville,
+        estPointDeVente: payload.estPointDeVente ? 1 : 0,
+        actif: payload.actif ? 1 : 0,
+        deletedAt,
+        updatedAt: payload.updatedAt,
+      });
+
+    return { applique: resultat.changes > 0 };
+  }
+
+  async listerEmplacementsActifs(): Promise<EmplacementRow[]> {
+    const rows = this.db
+      .prepare("SELECT id, nom, type, ville, est_point_de_vente as estPointDeVente, actif FROM emplacements WHERE deleted_at IS NULL")
+      .all() as { id: string; nom: string; type: string; ville: string; estPointDeVente: number; actif: number }[];
+    return rows.map((r) => ({ id: r.id, nom: r.nom, type: r.type, ville: r.ville, estPointDeVente: r.estPointDeVente === 1, actif: r.actif === 1 }));
   }
 
   async validerEtAppliquerOperationStock(demande: DemandeValidationStock): Promise<ResultatValidationStock> {

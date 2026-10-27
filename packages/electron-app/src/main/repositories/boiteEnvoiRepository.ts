@@ -42,7 +42,11 @@ export type TypeOperationBoiteEnvoi =
   // Correction "travail à distance / plusieurs machines en parallèle"
   // (2026-10-22) — même mécanisme générique (voir core/compteStore.ts
   // côté API).
-  | "compte";
+  | "compte"
+  // Correction "visibilité croisée Factures/Historique entre postes"
+  // (2026-10-27) — même mécanisme générique (voir
+  // core/emplacementStore.ts côté API).
+  | "emplacement";
 export type StatutBoiteEnvoi = "pending" | "sent" | "confirmed" | "error";
 
 export interface EntreeBoiteEnvoi {

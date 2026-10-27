@@ -13,6 +13,7 @@ import { AuthService } from "./auth/authService.js";
 import { LoginCentralService } from "./auth/loginCentralService.js";
 import { registerSetupIpcHandlers } from "./ipc/setup.js";
 import { EmplacementRepository, bootstrapDefaultEmplacements } from "./repositories/emplacementRepository.js";
+import { EmplacementSyncService } from "./services/emplacementSyncService.js";
 import { ProduitRepository } from "./repositories/produitRepository.js";
 import { StockRepository } from "./repositories/stockRepository.js";
 import { MouvementRepository } from "./repositories/mouvementRepository.js";
@@ -411,8 +412,33 @@ app.whenReady().then(async () => {
     syncService.definirImageService(imageService);
     // Correction "vente sur un poste annexe non répercutée sur le PC Shop après 10+ minutes" (2026-10-27) — voir syncService.ts.
     syncService.definirRattrapageStock(stockRepository, validationStockDistanteService);
+    // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 0a — voir syncService.ts.
+    syncService.definirRattrapageEmplacements(emplacementRepository, new EmplacementSyncService());
 
     bootstrapDefaultEmplacements(emplacementRepository);
+
+    // Correction "visibilité croisée Factures/Historique entre postes"
+    // (2026-10-27) — rattrapage PONCTUEL : les dépôts déjà créés
+    // localement AVANT cette correction (SHOP/Akébé/Akanda du bootstrap
+    // ci-dessus inclus) n'ont jamais été mis en file vers le serveur
+    // central (le mécanisme n'existait pas encore). Rejoué UNE SEULE
+    // FOIS, jamais à chaque démarrage (même idiome que le rattrapage des
+    // comptes plus haut) — sans ça, ils resteraient invisibles sur tout
+    // autre poste indéfiniment.
+    if (!boiteEnvoiRepository.existeEntreePourType("emplacement")) {
+      for (const e of emplacementRepository.list()) {
+        boiteEnvoiRepository.creer("emplacement", e.id, {
+          operation: "create",
+          emplacementId: e.id,
+          nom: e.nom,
+          type: e.type,
+          ville: e.ville,
+          estPointDeVente: e.estPointDeVente,
+          actif: e.actif,
+          updatedAt: e.updatedAt,
+        });
+      }
+    }
     registerMetierIpcHandlers(
       produitRepository,
       emplacementRepository,

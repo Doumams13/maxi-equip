@@ -9,6 +9,8 @@ interface EmplacementRow {
   ville: string;
   est_point_de_vente: number;
   actif: number;
+  created_at: string;
+  updated_at: string;
 }
 
 function rowToEmplacement(row: EmplacementRow): Emplacement {
@@ -19,8 +21,8 @@ function rowToEmplacement(row: EmplacementRow): Emplacement {
     ville: row.ville,
     estPointDeVente: row.est_point_de_vente === 1,
     actif: row.actif === 1,
-    createdAt: "",
-    updatedAt: "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -52,6 +54,34 @@ export class EmplacementRepository {
       )
       .run(id, input.nom, input.type, input.ville, input.estPointDeVente ? 1 : 0, now, now);
     return id;
+  }
+
+  /**
+   * Insère/met à jour un dépôt reçu du serveur central — correction
+   * "visibilité croisée Factures/Historique entre postes" (2026-10-27).
+   * Conserve l'`id` EXACT d'origine (jamais un nouvel UUID local, même
+   * principe que `imageProduitRepository.creerDepuisServeur`/
+   * `utilisateurRepository.upsertDepuisConnexionCentrale`) — c'est cet
+   * id partagé qui permettra à une facture/un mouvement reçu d'un autre
+   * poste de résoudre sa clé étrangère `emplacement_id` localement.
+   * Aucune dépendance de clé étrangère sur cette table : jamais besoin
+   * d'avaler une erreur FK ici, contrairement aux images (`modele_id`).
+   */
+  creerDepuisServeur(input: { id: string; nom: string; type: "shop" | "depot"; ville: string; estPointDeVente: boolean; actif: boolean }): void {
+    const now = new Date().toISOString();
+    const existe = this.db.prepare("SELECT id FROM emplacements WHERE id = ?").get(input.id) as { id: string } | undefined;
+    if (existe) {
+      this.db
+        .prepare("UPDATE emplacements SET nom = ?, type = ?, ville = ?, est_point_de_vente = ?, actif = ?, updated_at = ? WHERE id = ?")
+        .run(input.nom, input.type, input.ville, input.estPointDeVente ? 1 : 0, input.actif ? 1 : 0, now, input.id);
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO emplacements (id, nom, type, ville, est_point_de_vente, actif, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(input.id, input.nom, input.type, input.ville, input.estPointDeVente ? 1 : 0, input.actif ? 1 : 0, now, now);
   }
 
   /**

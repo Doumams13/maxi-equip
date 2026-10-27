@@ -98,6 +98,40 @@ export class SyncService {
     this.rattrapageStock = { stockRepository, validationStockDistanteService };
   }
 
+  /**
+   * Correction "visibilité croisée Factures/Historique entre postes"
+   * (2026-10-27), Phase 0a — même raisonnement/même forme que les deux
+   * setters ci-dessus (optionnel, types structurels minimaux, jamais
+   * `EmplacementRepository`/`EmplacementSyncService` importés ici).
+   * Préalable bloquant aux phases suivantes : sans id de dépôt partagé
+   * entre postes, rien de ce qui en dépend ne peut fonctionner.
+   */
+  private rattrapageEmplacements?: {
+    emplacementRepository: {
+      creerDepuisServeur(emplacement: { id: string; nom: string; type: "shop" | "depot"; ville: string; estPointDeVente: boolean; actif: boolean }): void;
+    };
+    emplacementSyncService: {
+      recupererEmplacementsActifs(): Promise<
+        | { success: true; emplacements: { id: string; nom: string; type: "shop" | "depot"; ville: string; estPointDeVente: boolean; actif: boolean }[] }
+        | { success: false; message: string }
+      >;
+    };
+  };
+
+  definirRattrapageEmplacements(
+    emplacementRepository: {
+      creerDepuisServeur(emplacement: { id: string; nom: string; type: "shop" | "depot"; ville: string; estPointDeVente: boolean; actif: boolean }): void;
+    },
+    emplacementSyncService: {
+      recupererEmplacementsActifs(): Promise<
+        | { success: true; emplacements: { id: string; nom: string; type: "shop" | "depot"; ville: string; estPointDeVente: boolean; actif: boolean }[] }
+        | { success: false; message: string }
+      >;
+    }
+  ): void {
+    this.rattrapageEmplacements = { emplacementRepository, emplacementSyncService };
+  }
+
   constructor(
     private readonly boiteEnvoiRepository: BoiteEnvoiRepository,
     private readonly syncRepository: SyncRepository,
@@ -140,6 +174,19 @@ export class SyncService {
           // Jamais faire échouer la synchronisation métier (déjà réussie à ce stade) pour un rattrapage de photos — retenté au prochain cycle.
           // eslint-disable-next-line no-console
           console.error("[sync] rattrapage des images manquantes impossible :", err instanceof Error ? err.message : err);
+        }
+      }
+
+      if (this.rattrapageEmplacements) {
+        try {
+          const resultat = await this.rattrapageEmplacements.emplacementSyncService.recupererEmplacementsActifs();
+          if (resultat.success) {
+            for (const e of resultat.emplacements) this.rattrapageEmplacements.emplacementRepository.creerDepuisServeur(e);
+          }
+        } catch (err) {
+          // Même principe que les rattrapages ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
+          // eslint-disable-next-line no-console
+          console.error("[sync] rattrapage des dépôts impossible :", err instanceof Error ? err.message : err);
         }
       }
 

@@ -2,6 +2,8 @@ import { ipcMain } from "electron";
 import { SyncService, type ResultatSynchronisation } from "../services/syncService.js";
 import { getConfigurationSync } from "../services/syncConfig.js";
 import type { SessionManager } from "../auth/sessionManager.js";
+import type { BackupService } from "../services/backupService.js";
+import { declencherSauvegardeAutoEtCloudSiNecessaire } from "../services/cloudBackupTrigger.js";
 
 /**
  * Phase 3.7, Partie 14 : `sync:run` et `sync:estEnCours` — inchangés
@@ -33,7 +35,17 @@ import type { SessionManager } from "../auth/sessionManager.js";
  */
 export async function executerSyncRun(
   syncService: Pick<SyncService, "executerSynchronisation">,
-  sessionManager: Pick<SessionManager, "isAuthenticated" | "clear">
+  sessionManager: Pick<SessionManager, "isAuthenticated" | "clear">,
+  /**
+   * Système multiposte fiable (2026-10-28) — OPTIONNEL (jamais un site
+   * d'appel/test existant cassé) : quand fourni, un clic manuel sur
+   * "Synchroniser" peut lui aussi déclencher une sauvegarde automatique
+   * cloud si nécessaire (voir cloudBackupTrigger.ts — no-op la quasi-
+   * totalité du temps, limité à 24h par BackupService), exactement
+   * comme le cycle automatique de main/index.ts. Jamais attendu
+   * (fire-and-forget) : n'allonge jamais la réponse perçue du clic.
+   */
+  backupService?: Pick<BackupService, "creerSauvegardeAutomatiqueSiNecessaire">
 ): Promise<ResultatSynchronisation> {
   if (!sessionManager.isAuthenticated()) {
     return { success: false, etape: "push" as const, message: "Non authentifié." };
@@ -42,11 +54,12 @@ export async function executerSyncRun(
   if (resultat.posteBloque) {
     sessionManager.clear();
   }
+  if (resultat.success && backupService) declencherSauvegardeAutoEtCloudSiNecessaire(backupService);
   return resultat;
 }
 
-export function registerSyncIpcHandlers(syncService: SyncService, sessionManager: SessionManager): void {
-  ipcMain.handle("sync:run", () => executerSyncRun(syncService, sessionManager));
+export function registerSyncIpcHandlers(syncService: SyncService, sessionManager: SessionManager, backupService?: BackupService): void {
+  ipcMain.handle("sync:run", () => executerSyncRun(syncService, sessionManager, backupService));
 
   ipcMain.handle("sync:estEnCours", () => {
     return syncService.estEnCours();

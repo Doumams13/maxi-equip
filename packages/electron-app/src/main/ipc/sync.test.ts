@@ -45,4 +45,43 @@ describe("executerSyncRun", () => {
     expect(resultat.posteBloque).toBe(true);
     expect(sessionManager.clear).toHaveBeenCalledTimes(1);
   });
+
+  describe("déclenchement de la sauvegarde cloud — système multiposte fiable (2026-10-28)", () => {
+    it("synchronisation réussie + backupService fourni : déclenche la vérification de sauvegarde", async () => {
+      const syncService = makeSyncService({ success: true });
+      const sessionManager = makeSessionManager(true);
+      const backupService = { creerSauvegardeAutomatiqueSiNecessaire: vi.fn(() => null) };
+
+      await executerSyncRun(syncService, sessionManager, backupService);
+
+      expect(backupService.creerSauvegardeAutomatiqueSiNecessaire).toHaveBeenCalledTimes(1);
+    });
+
+    it("sans backupService (rétrocompatibilité) : ne plante jamais, comportement historique inchangé", async () => {
+      const syncService = makeSyncService({ success: true });
+      const sessionManager = makeSessionManager(true);
+
+      await expect(executerSyncRun(syncService, sessionManager)).resolves.toEqual({ success: true });
+    });
+
+    it("synchronisation échouée : ne déclenche JAMAIS la vérification de sauvegarde", async () => {
+      const syncService = makeSyncService({ success: false, etape: "push", message: "panne" });
+      const sessionManager = makeSessionManager(true);
+      const backupService = { creerSauvegardeAutomatiqueSiNecessaire: vi.fn(() => null) };
+
+      await executerSyncRun(syncService, sessionManager, backupService);
+
+      expect(backupService.creerSauvegardeAutomatiqueSiNecessaire).not.toHaveBeenCalled();
+    });
+
+    it("poste bloqué (success: false) : ne déclenche jamais de sauvegarde non plus", async () => {
+      const syncService = makeSyncService({ success: false, etape: "push", posteBloque: true, message: "bloqué" });
+      const sessionManager = makeSessionManager(true);
+      const backupService = { creerSauvegardeAutomatiqueSiNecessaire: vi.fn(() => null) };
+
+      await executerSyncRun(syncService, sessionManager, backupService);
+
+      expect(backupService.creerSauvegardeAutomatiqueSiNecessaire).not.toHaveBeenCalled();
+    });
+  });
 });

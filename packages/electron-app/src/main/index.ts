@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, session, Menu } from "electron";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { closeDatabase, openDatabase, getEncryptionKey, getDatabasePath } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { registerIpcHandlers } from "./ipc/index.js";
@@ -27,14 +27,12 @@ import { SyncRepository } from "./repositories/syncRepository.js";
 import { SyncService } from "./services/syncService.js";
 import { registerSyncIpcHandlers } from "./ipc/sync.js";
 import { BackupService } from "./services/backupService.js";
-import { S3CloudBackupProvider } from "./services/s3CloudBackupProvider.js";
-import { CloudBackupService } from "./services/cloudBackupService.js";
+import { declencherSauvegardeAutoEtCloudSiNecessaire } from "./services/cloudBackupTrigger.js";
 import { registerBackupIpcHandlers } from "./ipc/backup.js";
 import { BackupRestoreService } from "./services/backupRestoreService.js";
 import { registerBackupRestoreIpcHandlers } from "./ipc/backupRestore.js";
 import { registerInstallationRecuperationIpcHandlers } from "./ipc/installationRecuperation.js";
 import { registerAutoUpdateIpcHandlers } from "./ipc/autoUpdate.js";
-import { getConfigurationCloudBackup } from "./services/syncConfig.js";
 import { DemandeRepository } from "./repositories/demandeRepository.js";
 import { NotificationRepository } from "./repositories/notificationRepository.js";
 import { DemandeService } from "./services/demandeService.js";
@@ -184,42 +182,6 @@ function applyContentSecurityPolicy(): void {
       },
     });
   });
-}
-
-/**
- * Correction Phase Finale, Bloc 4 (remédiation pré-production — backup
- * cloud) — envoie une sauvegarde AUTOMATIQUE déjà créée localement vers
- * un stockage cloud, UNIQUEMENT si les variables `CLOUD_BACKUP_*` sont
- * configurées (voir .env.example). Réutilise tel quel le dossier produit
- * par `BackupService` (jamais une seconde logique de sauvegarde/
- * chiffrement — voir cloudBackupService.ts). Best-effort : jamais
- * bloquant, jamais remonté à l'utilisateur (le prochain backup
- * automatique retentera naturellement dans 24h).
- */
-async function envoyerBackupVersCloudSiConfigure(cheminDossierBackup: string): Promise<void> {
-  // Config locale persistée (restaurée après un vol/panne) en priorité,
-  // sinon variables d'environnement — voir syncConfig.ts. Comportement
-  // inchangé si aucune des deux n'est configurée (jamais une erreur).
-  const config = getConfigurationCloudBackup();
-  if (!config) return;
-
-  try {
-    const provider = new S3CloudBackupProvider({
-      bucket: config.bucket,
-      region: config.region,
-      endpoint: config.endpoint,
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
-    });
-    const resultat = await new CloudBackupService(provider).sauvegarderVersLeCloud(cheminDossierBackup, basename(cheminDossierBackup));
-    if (!resultat.success) {
-      // eslint-disable-next-line no-console
-      console.error("[backup-cloud] envoi impossible :", resultat.message);
-    }
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error("[backup-cloud] envoi impossible :", err instanceof Error ? err.message : err);
-  }
 }
 
 app.whenReady().then(async () => {
@@ -484,7 +446,17 @@ app.whenReady().then(async () => {
       promotionRepository
     );
     registerImageIpcHandlers(imageService, sessionManager);
-    registerSyncIpcHandlers(syncService, sessionManager);
+
+    // Sauvegarde (Phase 3.8) — service indépendant, jamais un accès
+    // filesystem direct depuis le Renderer (Partie 13). Construit ICI
+    // (avant registerSyncIpcHandlers juste en dessous) — système
+    // multiposte fiable (2026-10-28) : le cycle de synchro déclenche
+    // maintenant lui aussi une sauvegarde automatique si nécessaire (voir
+    // cloudBackupTrigger.ts), donc `backupService` doit exister avant.
+    const backupService = new BackupService(db, getEncryptionKey(), join(app.getPath("userData"), "backups"));
+    registerBackupIpcHandlers(backupService, sessionManager);
+
+    registerSyncIpcHandlers(syncService, sessionManager, backupService);
 
     // Synchronisation automatique périodique — correction "délai de
     // propagation vers le site public" : jusqu'ici, PUSH/PULL ne se
@@ -514,6 +486,12 @@ app.whenReady().then(async () => {
               mainWindow.webContents.send("session:revoquee", resultat.message ?? "Ce poste a été bloqué par un administrateur.");
             }
           }
+          // Système multiposte fiable (2026-10-28) — voir
+          // cloudBackupTrigger.ts : no-op bon marché la quasi-totalité du
+          // temps (limité à 24h par BackupService), déclenche réellement
+          // une sauvegarde cloud le jour où c'est nécessaire, sans
+          // attendre un redémarrage de l'application.
+          if (resultat.success) declencherSauvegardeAutoEtCloudSiNecessaire(backupService);
         })
         .catch((err) => {
           // eslint-disable-next-line no-console
@@ -542,30 +520,12 @@ app.whenReady().then(async () => {
       console.error("[demandes] purge des anciennes demandes impossible :", err);
     }
 
-    // Sauvegarde (Phase 3.8) — service indépendant, jamais un accès
-    // filesystem direct depuis le Renderer (Partie 13). Le déclenchement
-    // automatique (Partie 10) est protégé par try/catch : un échec de
-    // sauvegarde ne doit JAMAIS empêcher l'application de démarrer
-    // normalement (Partie 18 : ne rien casser de l'existant).
-    const backupService = new BackupService(db, getEncryptionKey(), join(app.getPath("userData"), "backups"));
-    registerBackupIpcHandlers(backupService, sessionManager);
-    try {
-      const resultatBackupAuto = backupService.creerSauvegardeAutomatiqueSiNecessaire();
-      // Bloc 4 (remédiation pré-production) — backup cloud, entièrement
-      // OPT-IN : n'a strictement aucun effet si les variables
-      // CLOUD_BACKUP_* ne sont pas configurées (voir .env.example),
-      // exactement le même principe que les autres secours déjà établis
-      // dans ce projet (JWT, CORS...). Jamais bloquant pour le
-      // démarrage — un échec d'envoi cloud est journalisé, jamais
-      // remonté à l'utilisateur ni retenté ici (le prochain backup
-      // automatique retentera naturellement).
-      if (resultatBackupAuto?.success && resultatBackupAuto.chemin) {
-        void envoyerBackupVersCloudSiConfigure(resultatBackupAuto.chemin);
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("[backup] sauvegarde automatique impossible :", err);
-    }
+    // Sauvegarde automatique au démarrage (Phase 3.8) — `backupService`
+    // déjà construit plus haut (voir son commentaire). Best-effort, jamais
+    // bloquant pour le démarrage (Partie 18 : ne rien casser de l'existant)
+    // — même fonction partagée que le déclenchement depuis le cycle de
+    // synchro (voir cloudBackupTrigger.ts), jamais une seconde logique.
+    declencherSauvegardeAutoEtCloudSiNecessaire(backupService);
 
     // Restauration (Phase 3.9) — réutilise le même BackupService (pour la safety backup) et la même clé/chemin déjà résolus ci-dessus, jamais une seconde logique de gestion de clé.
     const restoreService = new BackupRestoreService(backupService, getEncryptionKey(), getDatabasePath(), closeDatabase);

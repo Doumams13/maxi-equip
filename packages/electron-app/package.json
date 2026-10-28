@@ -1,6 +1,6 @@
 {
   "name": "@maxi-equip/electron-app",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "private": true,
   "description": "Application Windows MAXI EQUIP (SHOP). Electron + React + TypeScript, local-first avec SQLite chiffré (SQLCipher).",
   "author": "MAXI EQUIP",

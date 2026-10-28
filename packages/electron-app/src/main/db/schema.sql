@@ -265,11 +265,21 @@ CREATE TABLE IF NOT EXISTS lignes_demande (
 
 CREATE TABLE IF NOT EXISTS notifications (
   id          TEXT PRIMARY KEY,
-  type        TEXT NOT NULL CHECK (type IN ('demande', 'stock', 'sync')),
+  -- Système multiposte fiable (2026-10-28) : 4 types ajoutés, une
+  -- notification par vente/entrée/sortie/transfert VALIDÉ reçu d'un
+  -- autre poste (voir SyncApplicationService).
+  type        TEXT NOT NULL CHECK (type IN ('demande', 'stock', 'sync', 'vente', 'entree', 'sortie', 'transfert')),
   titre       TEXT NOT NULL,
   message     TEXT NOT NULL,
   lue         INTEGER NOT NULL DEFAULT 0 CHECK (lue IN (0, 1)),
   demande_id  TEXT REFERENCES demandes (id),
+  -- Renseignés uniquement pour vente/entree/sortie/transfert — jamais
+  -- détourner demande_id pour ce besoin (voir shared-types/demande.ts).
+  entity_type TEXT,
+  entity_id   TEXT,
+  -- Poste à l'origine de l'opération, déduit par le serveur (voir
+  -- routes/v1/app/sync/push.ts côté API) — jamais déclaré par le client.
+  poste_id    TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );

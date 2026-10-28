@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
-import { Save, Plus, Trash2, Pencil, Archive, RotateCcw, Check, X, History, FolderOpen } from "lucide-react";
+import { Save, Plus, Trash2, Pencil, Archive, RotateCcw, Check, X, History, FolderOpen, Server } from "lucide-react";
 import type { Emplacement } from "@maxi-equip/shared-types";
 import { ConfirmationMotDePasse } from "../components/ConfirmationMotDePasse.js";
 
@@ -656,6 +656,8 @@ export function ParametresScreen() {
         </Button>
       </Card>
 
+      <BlocPostes />
+
       {confirmationInitStock && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 250 }}>
           <Card elevated style={{ width: "min(460px, 92vw)", boxSizing: "border-box" }}>
@@ -692,6 +694,77 @@ export function ParametresScreen() {
  * le résultat, jamais un accès direct au système de fichiers ni à la
  * cryptographie.
  */
+/**
+ * Bascule vers le registre des postes — système multiposte fiable
+ * (2026-10-28). Ce poste (typiquement PC Shop, la toute première
+ * installation, jamais passée par une restauration) n'a encore aucune
+ * ligne `postes` côté serveur — tant que `posteObtenirMoi()` renvoie
+ * `poste: null`, ce bloc affiche le bouton ; une fois rejoint, il
+ * affiche simplement la confirmation (rien à refaire).
+ *
+ * Action explicite, volontaire, déclenchée UNE FOIS par
+ * l'Administrateur — jamais automatique (voir re-emettre-moi.ts côté
+ * API et posteSyncService.ts côté Electron pour le raisonnement complet).
+ */
+function BlocPostes() {
+  const { showSuccess, showError } = useToast();
+  const [poste, setPoste] = useState<{ id: string; nom: string | null } | null | undefined>(undefined);
+  const [enCours, setEnCours] = useState(false);
+
+  async function charger() {
+    const res = await window.maxiEquip.posteObtenirMoi();
+    setPoste(res.success ? res.poste : null);
+  }
+
+  useEffect(() => {
+    void charger();
+  }, []);
+
+  async function handleRejoindre() {
+    setEnCours(true);
+    try {
+      const res = await window.maxiEquip.posteRejoindreRegistre();
+      if (res.success) {
+        showSuccess("Poste enregistré", "Ce poste fait désormais partie du registre des postes — un blocage à distance sera possible depuis l'écran « Postes ».");
+        await charger();
+      } else {
+        showError("Impossible de rejoindre le registre", res.message ?? "Erreur inattendue.");
+      }
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  // undefined = encore en cours de chargement — jamais afficher le
+  // bouton par erreur avant de savoir si ce poste est déjà enregistré.
+  if (poste === undefined) return null;
+
+  return (
+    <Card style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <Server size={16} color={defaultTokens.colors.accent} />
+        <h2 style={{ fontFamily: defaultTokens.typography.display, fontSize: 15, margin: 0 }}>Registre des postes</h2>
+      </div>
+      {poste !== null ? (
+        <p style={{ margin: 0, fontSize: 12.5, color: defaultTokens.colors.textSoft, lineHeight: 1.5 }}>
+          Ce poste fait partie du registre ({poste.nom ?? "non nommé"}) — voir l'écran « Postes » pour le gérer.
+        </p>
+      ) : (
+        <>
+          <p style={{ margin: "0 0 18px", fontSize: 12.5, color: defaultTokens.colors.textSoft, lineHeight: 1.5 }}>
+            Ce poste ne fait pas encore partie du registre des postes — nécessaire pour pouvoir le bloquer à distance en cas de vol ou de perte, et
+            pour apparaître dans l'écran « Postes ».
+          </p>
+          <Button variant="secondary" onClick={() => void handleRejoindre()} loading={enCours}>
+            <Server size={15} />
+            Rejoindre le registre des postes
+          </Button>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function BlocSauvegarde() {
   const [statut, setStatut] = useState<{ derniereAutomatique: { createdAt: string } | null; nombreVulnerables: number } | null>(null);
   const [creationEnCours, setCreationEnCours] = useState(false);

@@ -9,6 +9,9 @@ interface NotificationRow {
   message: string;
   lue: number;
   demande_id: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  poste_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -21,6 +24,9 @@ function rowToNotification(row: NotificationRow): Notification {
     message: row.message,
     lue: row.lue === 1,
     demandeId: row.demande_id,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    posteId: row.poste_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -29,12 +35,26 @@ function rowToNotification(row: NotificationRow): Notification {
 export class NotificationRepository {
   constructor(private readonly db: Database.Database) {}
 
-  creer(type: NotificationType, titre: string, message: string, demandeId: string | null = null): Notification {
+  /**
+   * `origine` — système multiposte fiable (2026-10-28) : UNIQUEMENT pour
+   * vente/entree/sortie/transfert (voir SyncApplicationService), jamais
+   * pour "demande" qui continue d'utiliser `demandeId` positionnel
+   * ci-dessus (aucun site d'appel existant cassé).
+   */
+  creer(
+    type: NotificationType,
+    titre: string,
+    message: string,
+    demandeId: string | null = null,
+    origine?: { entityType: string; entityId: string; posteId: string | null }
+  ): Notification {
     const id = randomUUID();
     const maintenant = new Date().toISOString();
     this.db
-      .prepare("INSERT INTO notifications (id, type, titre, message, lue, demande_id, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)")
-      .run(id, type, titre, message, demandeId, maintenant, maintenant);
+      .prepare(
+        "INSERT INTO notifications (id, type, titre, message, lue, demande_id, entity_type, entity_id, poste_id, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)"
+      )
+      .run(id, type, titre, message, demandeId, origine?.entityType ?? null, origine?.entityId ?? null, origine?.posteId ?? null, maintenant, maintenant);
     return this.findById(id)!;
   }
 

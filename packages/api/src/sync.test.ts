@@ -47,6 +47,56 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     expect(pullRes.body).toMatchObject({ operations: [{ entityType: "vente", entityId: UUID_1 }] });
   });
 
+  describe("Système multiposte fiable (2026-10-28) — poste d'origine tamponné sur vente/entree/sortie/transfert", () => {
+    it("vente/entree/sortie/transfert reçoivent posteId = sub du jeton, JAMAIS une valeur fournie par le client", async () => {
+      const router = createRouter();
+      const token = signerJwt({ sub: "poste-reel-1", role: "app" }, SECRET_TEST, 3600);
+      await router.dispatch(
+        req({
+          method: "POST",
+          path: "/v1/sync/push",
+          headers: { authorization: `Bearer ${token}` },
+          body: {
+            operations: [
+              { entityType: "vente", entityId: UUID_1, payload: { numero: "FAC-1", posteId: "falsifie-par-le-client" } },
+              { entityType: "entree", entityId: UUID_2, payload: { quantite: 5 } },
+            ],
+          },
+        })
+      );
+
+      const { operations } = await listerOperationsDepuis(0);
+      const vente = operations.find((o) => o.entityId === UUID_1)!;
+      const entree = operations.find((o) => o.entityId === UUID_2)!;
+      expect((vente.payload as { posteId: string }).posteId).toBe("poste-reel-1");
+      expect((entree.payload as { posteId: string }).posteId).toBe("poste-reel-1");
+    });
+
+    it("annulation/demande ne reçoivent JAMAIS de posteId — hors périmètre des notifications", async () => {
+      const router = createRouter();
+      const token = signerJwt({ sub: "poste-reel-2", role: "app" }, SECRET_TEST, 3600);
+      await router.dispatch(
+        req({
+          method: "POST",
+          path: "/v1/sync/push",
+          headers: { authorization: `Bearer ${token}` },
+          body: {
+            operations: [
+              { entityType: "annulation", entityId: UUID_1, payload: { factureId: UUID_1 } },
+              { entityType: "demande", entityId: UUID_2, payload: { clientNom: "X" } },
+            ],
+          },
+        })
+      );
+
+      const { operations } = await listerOperationsDepuis(0);
+      const annulation = operations.find((o) => o.entityId === UUID_1)!;
+      const demande = operations.find((o) => o.entityId === UUID_2)!;
+      expect((annulation.payload as Record<string, unknown>).posteId).toBeUndefined();
+      expect((demande.payload as Record<string, unknown>).posteId).toBeUndefined();
+    });
+  });
+
   it("TEST 2 — PUSH sans JWT : 401, aucune donnée enregistrée", async () => {
     const router = createRouter();
     const res = await router.dispatch(

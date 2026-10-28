@@ -46,6 +46,12 @@ function messageConnexionCentrale(reason: string, message: string | undefined): 
   if (reason === "TROP_DE_TENTATIVES") {
     return { title: "Trop de tentatives", message: message ?? "Trop de tentatives de connexion — réessayez plus tard." };
   }
+  // Système multiposte fiable (2026-10-28) — distinct des trois motifs
+  // historiques ci-dessous : jamais un problème d'identifiant/mot de
+  // passe, le poste lui-même a été bloqué par un administrateur.
+  if (reason === "POSTE_BLOQUE") {
+    return { title: "Poste bloqué", message: message ?? "Ce poste a été bloqué par un administrateur. Contactez-le pour être réautorisé." };
+  }
   return null;
 }
 

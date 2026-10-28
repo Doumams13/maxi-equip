@@ -3,6 +3,9 @@ import Database from "better-sqlite3-multiple-ciphers";
 import { runMigrations } from "../db/migrate.js";
 import { FactureRepository } from "../repositories/factureRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
+import { NotificationRepository } from "../repositories/notificationRepository.js";
+import { ProduitRepository } from "../repositories/produitRepository.js";
+import { EmplacementRepository } from "../repositories/emplacementRepository.js";
 import { SyncApplicationService } from "./syncApplicationService.js";
 
 /**
@@ -109,5 +112,116 @@ describe("SyncApplicationService.appliquer (base réelle)", () => {
 
     expect(traitee).toBe(false);
     expect(mouvementRepository.findById("m1")).toBeNull();
+  });
+
+  describe("notifications — système multiposte fiable (2026-10-28), Phase E", () => {
+    let notificationRepository: NotificationRepository;
+    let serviceAvecNotifications: SyncApplicationService;
+
+    beforeEach(() => {
+      notificationRepository = new NotificationRepository(db);
+      serviceAvecNotifications = new SyncApplicationService(factureRepository, mouvementRepository, {
+        notificationRepository,
+        produitRepository: new ProduitRepository(db),
+        emplacementRepository: new EmplacementRepository(db),
+      });
+    });
+
+    it("sans dépendance notifications fournie (2 arguments) : aucune notification créée, comportement historique inchangé", () => {
+      service.appliquer("entree", { mouvementId: "m1", produitId: "p1", emplacementId: "shop", quantite: 10, date: "2026-01-01T00:00:00.000Z", utilisateurId: "u1" });
+      expect(notificationRepository.listerRecentes()).toHaveLength(0);
+    });
+
+    it("'vente' nouvellement appliquée : crée une notification avec posteId et le détail des articles", () => {
+      const traitee = serviceAvecNotifications.appliquer("vente", {
+        factureId: "f1", numero: "FAC-2026-0001", date: "2026-01-01T00:00:00.000Z", emplacementId: "shop", clientNom: "Client",
+        clientTelephone: null, clientAdresse: null, vendeurUtilisateurId: "u1", vendeurNomManuel: null, modeReglement: "Espèces",
+        total: 10000, remise: 0, statutPaiement: "payee", montantPaye: 10000,
+        lignes: [{ produitId: "p1", motif: "X", reference: "REF-1", taille: "Z", quantite: 2, prixUnitaire: 5000, prixUnitaireNormal: null, promotionId: null, promotionLibelle: null, promotionType: null, promotionValeur: null, surfaceCartonM2: null }],
+        mouvementIds: [], identiteSnapshot: null, posteId: "poste-pcx-1",
+      });
+
+      expect(traitee).toBe(true);
+      const notifs = notificationRepository.listerRecentes();
+      expect(notifs).toHaveLength(1);
+      expect(notifs[0]).toMatchObject({ type: "vente", entityType: "vente", entityId: "f1", posteId: "poste-pcx-1" });
+      expect(notifs[0]!.message).toContain("FAC-2026-0001");
+      expect(notifs[0]!.message).toContain("X");
+    });
+
+    it("'vente' retentée (déjà appliquée, balayage de rattrapage) : jamais une seconde notification", () => {
+      const payload = {
+        factureId: "f1", numero: "FAC-2026-0001", date: "2026-01-01T00:00:00.000Z", emplacementId: "shop", clientNom: "Client",
+        clientTelephone: null, clientAdresse: null, vendeurUtilisateurId: "u1", vendeurNomManuel: null, modeReglement: "Espèces",
+        total: 10000, remise: 0, statutPaiement: "payee", montantPaye: 10000, lignes: [], mouvementIds: [], identiteSnapshot: null, posteId: "poste-1",
+      };
+
+      serviceAvecNotifications.appliquer("vente", payload);
+      serviceAvecNotifications.appliquer("vente", payload); // 2e tentative — même entité, déjà appliquée
+
+      expect(notificationRepository.listerRecentes()).toHaveLength(1);
+    });
+
+    it("'vente' avec payload antérieur à la Phase 3 (emplacementId absent) : jamais de notification (jamais réellement appliquée)", () => {
+      serviceAvecNotifications.appliquer("vente", { factureId: "f1", numero: "FAC-1", total: 1000, lignes: [] });
+      expect(notificationRepository.listerRecentes()).toHaveLength(0);
+    });
+
+    it("'entree' nouvellement appliquée : notification avec produit/dépôt/poste", () => {
+      serviceAvecNotifications.appliquer("entree", { mouvementId: "m1", produitId: "p1", emplacementId: "shop", quantite: 10, date: "2026-01-01T00:00:00.000Z", utilisateurId: "u1", posteId: "poste-2" });
+
+      const notifs = notificationRepository.listerRecentes();
+      expect(notifs).toHaveLength(1);
+      expect(notifs[0]).toMatchObject({ type: "entree", entityType: "entree", entityId: "m1", posteId: "poste-2" });
+      expect(notifs[0]!.message).toContain("SHOP");
+      expect(notifs[0]!.message).toContain("X"); // motif du produit p1
+    });
+
+    it("'entree' retentée (balayage de rattrapage) : jamais une seconde notification", () => {
+      const payload = { mouvementId: "m1", produitId: "p1", emplacementId: "shop", quantite: 10, date: "2026-01-01T00:00:00.000Z", utilisateurId: "u1", posteId: "poste-2" };
+      serviceAvecNotifications.appliquer("entree", payload);
+      serviceAvecNotifications.appliquer("entree", payload);
+
+      expect(notificationRepository.listerRecentes()).toHaveLength(1);
+    });
+
+    it("'sortie' nouvellement appliquée : notification dédiée, jamais confondue avec 'entree'", () => {
+      serviceAvecNotifications.appliquer("sortie", { mouvementId: "m1", produitId: "p1", emplacementId: "shop", quantite: 3, date: "2026-01-01T00:00:00.000Z", utilisateurId: "u1", posteId: "poste-3" });
+
+      const notifs = notificationRepository.listerRecentes();
+      expect(notifs[0]).toMatchObject({ type: "sortie", entityType: "sortie" });
+    });
+
+    it("'transfert' nouvellement appliqué : notification mentionne dépôt source ET destination", () => {
+      const now = new Date().toISOString();
+      db.prepare("INSERT INTO emplacements (id, nom, type, ville, est_point_de_vente, created_at, updated_at) VALUES ('depot2', 'Akébé', 'depot', 'Libreville', 0, ?, ?)").run(now, now);
+
+      serviceAvecNotifications.appliquer("transfert", {
+        mouvementId: "m1", produitId: "p1", emplacementSourceId: "shop", emplacementDestinationId: "depot2", quantite: 4, date: "2026-01-01T00:00:00.000Z", utilisateurId: null, posteId: "poste-4",
+      });
+
+      const notifs = notificationRepository.listerRecentes();
+      expect(notifs[0]).toMatchObject({ type: "transfert", entityType: "transfert" });
+      expect(notifs[0]!.message).toContain("SHOP");
+      expect(notifs[0]!.message).toContain("Akébé");
+    });
+
+    it("'annulation' n'a jamais généré de notification — hors périmètre de cette correction", () => {
+      serviceAvecNotifications.appliquer("vente", {
+        factureId: "f1", numero: "FAC-1", date: "2026-01-01T00:00:00.000Z", emplacementId: "shop", clientNom: "Client",
+        clientTelephone: null, clientAdresse: null, vendeurUtilisateurId: "u1", vendeurNomManuel: null, modeReglement: "Espèces",
+        total: 10000, remise: 0, statutPaiement: "payee", montantPaye: 10000, lignes: [], mouvementIds: [], identiteSnapshot: null,
+      });
+      serviceAvecNotifications.appliquer("annulation", { factureId: "f1", motifAnnulation: "Erreur", annuleeLe: "2026-02-01T00:00:00.000Z", annuleePar: "u1" });
+
+      expect(notificationRepository.listerRecentes()).toHaveLength(1); // toujours la seule de la vente — rien ajouté par l'annulation
+    });
+
+    it("dépendance pas encore résolvable (produit inconnu) : échec, jamais de notification", () => {
+      const traitee = serviceAvecNotifications.appliquer("sortie", { mouvementId: "m1", produitId: "produit-inconnu", emplacementId: "shop", quantite: 5, date: "2026-01-01T00:00:00.000Z", utilisateurId: null });
+
+      expect(traitee).toBe(false);
+      expect(notificationRepository.listerRecentes()).toHaveLength(0);
+    });
   });
 });

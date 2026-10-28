@@ -22,7 +22,7 @@ import type { LoginCentralService } from "./loginCentralService.js";
  */
 
 /** Motifs d'échec propres à la connexion EN LIGNE — jamais dans packages/domain, qui ignore tout du réseau/de la synchronisation. */
-export type RaisonEchecConnexionCentrale = "CONNEXION_REQUISE" | "TROP_DE_TENTATIVES";
+export type RaisonEchecConnexionCentrale = "CONNEXION_REQUISE" | "TROP_DE_TENTATIVES" | "POSTE_BLOQUE";
 
 export type LoginOutcome =
   | { success: true; session: domainAuth.SessionLocale }
@@ -73,7 +73,13 @@ export class AuthService {
     const resultat = await this.loginCentralService!.login(identifiant, motDePasseEnClair);
     if (!resultat.success) {
       const reason: domainAuth.AuthenticationFailureReason | RaisonEchecConnexionCentrale =
-        resultat.raison === "identifiants_invalides" ? "WRONG_PASSWORD" : resultat.raison === "trop_de_tentatives" ? "TROP_DE_TENTATIVES" : "CONNEXION_REQUISE";
+        resultat.raison === "identifiants_invalides"
+          ? "WRONG_PASSWORD"
+          : resultat.raison === "trop_de_tentatives"
+            ? "TROP_DE_TENTATIVES"
+            : resultat.raison === "poste_bloque"
+              ? "POSTE_BLOQUE"
+              : "CONNEXION_REQUISE";
       return { success: false, reason, message: resultat.message };
     }
 

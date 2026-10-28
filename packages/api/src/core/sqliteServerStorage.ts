@@ -1,4 +1,5 @@
 import Database from "better-sqlite3-multiple-ciphers";
+import { randomUUID } from "node:crypto";
 import {
   slugify,
   type ServerStorage,
@@ -24,6 +25,8 @@ import {
   type EmplacementCataloguePayload,
   type EmplacementRow,
   type CompteCatchupRow,
+  type PosteRow,
+  type ResultatCreationPosteAnnexe,
 } from "./serverStorage.js";
 
 /**
@@ -167,6 +170,20 @@ export class SqliteServerStorage implements ServerStorage {
         prefix  TEXT PRIMARY KEY,
         dernier INTEGER NOT NULL DEFAULT 0
       );
+
+      -- Identité et autorisation des postes — système multiposte fiable
+      -- (2026-10-28). Voir serverStorage.ts (PosteRow) pour le
+      -- raisonnement complet.
+      CREATE TABLE IF NOT EXISTS postes (
+        id                  TEXT PRIMARY KEY,
+        nom                 TEXT,
+        role                TEXT NOT NULL CHECK (role IN ('shop', 'pcx')),
+        statut              TEXT NOT NULL DEFAULT 'actif' CHECK (statut IN ('actif', 'bloque')),
+        enregistre_le       TEXT NOT NULL,
+        dernier_contact_le  TEXT,
+        updated_at          TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_postes_role_shop_unique ON postes (role) WHERE role = 'shop';
     `);
 
     // Secours pour un fichier SQLite de dev déjà créé avant cette
@@ -658,5 +675,62 @@ export class SqliteServerStorage implements ServerStorage {
     return this.db
       .prepare("SELECT produit_id as produitId, emplacement_id as emplacementId, quantite FROM stock_central")
       .all() as LigneStockCentral[];
+  }
+
+  private static readonly SELECT_POSTE =
+    "SELECT id, nom, role, statut, enregistre_le as enregistreLe, dernier_contact_le as dernierContactLe, updated_at as updatedAt FROM postes";
+
+  async getPoste(id: string): Promise<PosteRow | null> {
+    const row = this.db.prepare(`${SqliteServerStorage.SELECT_POSTE} WHERE id = ?`).get(id) as PosteRow | undefined;
+    return row ?? null;
+  }
+
+  async listerPostes(): Promise<PosteRow[]> {
+    return this.db.prepare(`${SqliteServerStorage.SELECT_POSTE} ORDER BY enregistre_le ASC`).all() as PosteRow[];
+  }
+
+  async creerPosteAnnexeSiLimiteNonAtteinte(maintenant: string): Promise<ResultatCreationPosteAnnexe> {
+    const MAX_PCX = 5;
+    const db = this.db;
+    const executer = db.transaction((): ResultatCreationPosteAnnexe => {
+      const { n } = db.prepare("SELECT COUNT(*) as n FROM postes WHERE role = 'pcx'").get() as { n: number };
+      if (n >= MAX_PCX) return { success: false, raison: "limite_atteinte" };
+      const id = randomUUID();
+      db.prepare("INSERT INTO postes (id, nom, role, statut, enregistre_le, updated_at) VALUES (?, NULL, 'pcx', 'actif', ?, ?)").run(id, maintenant, maintenant);
+      return { success: true, poste: { id, nom: null, role: "pcx", statut: "actif", enregistreLe: maintenant, dernierContactLe: null, updatedAt: maintenant } };
+    });
+    return executer();
+  }
+
+  async obtenirOuCreerPosteShop(maintenant: string): Promise<PosteRow> {
+    const db = this.db;
+    const executer = db.transaction((): PosteRow => {
+      const existant = db.prepare(`${SqliteServerStorage.SELECT_POSTE} WHERE role = 'shop' LIMIT 1`).get() as PosteRow | undefined;
+      if (existant) return existant;
+      const id = randomUUID();
+      db.prepare("INSERT INTO postes (id, nom, role, statut, enregistre_le, updated_at) VALUES (?, NULL, 'shop', 'actif', ?, ?)").run(id, maintenant, maintenant);
+      return { id, nom: null, role: "shop", statut: "actif", enregistreLe: maintenant, dernierContactLe: null, updatedAt: maintenant };
+    });
+    return executer();
+  }
+
+  async definirNomPoste(id: string, nom: string, maintenant: string): Promise<{ applique: boolean }> {
+    const resultat = this.db.prepare("UPDATE postes SET nom = ?, updated_at = ? WHERE id = ?").run(nom, maintenant, id);
+    return { applique: resultat.changes > 0 };
+  }
+
+  async bloquerPoste(id: string, maintenant: string): Promise<{ applique: boolean }> {
+    const resultat = this.db.prepare("UPDATE postes SET statut = 'bloque', updated_at = ? WHERE id = ?").run(maintenant, id);
+    return { applique: resultat.changes > 0 };
+  }
+
+  async reautoriserPoste(id: string, maintenant: string): Promise<{ applique: boolean }> {
+    const resultat = this.db.prepare("UPDATE postes SET statut = 'actif', updated_at = ? WHERE id = ?").run(maintenant, id);
+    return { applique: resultat.changes > 0 };
+  }
+
+  async retirerPoste(id: string): Promise<{ applique: boolean }> {
+    const resultat = this.db.prepare("DELETE FROM postes WHERE id = ?").run(id);
+    return { applique: resultat.changes > 0 };
   }
 }

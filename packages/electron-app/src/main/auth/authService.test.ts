@@ -131,6 +131,16 @@ describe("AuthService", () => {
       expect(!resultat.success && resultat.message).toBe("Réessayez dans 300 secondes.");
     });
 
+    it("système multiposte fiable (2026-10-28) : échec 'poste_bloque' → reason POSTE_BLOQUE, jamais WRONG_PASSWORD", async () => {
+      const faux = new FauxLoginCentral(true, { success: false, raison: "poste_bloque", message: "Ce poste a été bloqué par un administrateur." });
+      const service = new AuthService(repository, hasher, session, faux as never);
+
+      const resultat = await service.login("x", "y");
+      expect(resultat.success).toBe(false);
+      expect(!resultat.success && resultat.reason).toBe("POSTE_BLOQUE");
+      expect(!resultat.success && resultat.message).toBe("Ce poste a été bloqué par un administrateur.");
+    });
+
     it("échec 'hors_ligne' (serveur injoignable) → reason CONNEXION_REQUISE, jamais un repli silencieux sur la base locale", async () => {
       const faux = new FauxLoginCentral(true, { success: false, raison: "hors_ligne", message: "Connexion internet requise pour se connecter depuis ce poste : timeout." });
       const service = new AuthService(repository, hasher, session, faux as never);

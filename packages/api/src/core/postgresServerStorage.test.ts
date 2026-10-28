@@ -728,6 +728,88 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
       expect(lignes).toEqual(expect.arrayContaining([{ produitId: PRODUIT, emplacementId: DEPOT, quantite: 13 }]));
     });
   });
+
+  describe("Identité et registre des postes (réel PostgreSQL) — système multiposte fiable (2026-10-28)", () => {
+    async function nettoyerPostesAnnexes(): Promise<void> {
+      const postes = await storage.listerPostes();
+      for (const p of postes.filter((p) => p.role === "pcx")) {
+        await storage.retirerPoste(p.id);
+      }
+    }
+
+    it("la limite de 5 postes annexes est respectée même sous 7 tentatives RÉELLEMENT concurrentes (verrou consultatif Postgres, jamais 6 par une condition de course)", async () => {
+      await nettoyerPostesAnnexes();
+      const maintenant = new Date().toISOString();
+
+      const resultats = await Promise.all(
+        Array.from({ length: 7 }, () => storage.creerPosteAnnexeSiLimiteNonAtteinte(maintenant))
+      );
+
+      const reussis = resultats.filter((r) => r.success);
+      const refuses = resultats.filter((r) => !r.success);
+      expect(reussis).toHaveLength(5);
+      expect(refuses).toHaveLength(2);
+      for (const r of refuses) {
+        if (!r.success) expect(r.raison).toBe("limite_atteinte");
+      }
+
+      // Vérification indépendante en relisant réellement la table, jamais
+      // seulement la valeur de retour des appels ci-dessus.
+      const tousLesPostes = await storage.listerPostes();
+      expect(tousLesPostes.filter((p) => p.role === "pcx")).toHaveLength(5);
+    });
+
+    it("renommer un poste annexe ne change jamais son identité technique (id)", async () => {
+      await nettoyerPostesAnnexes();
+      const creation = await storage.creerPosteAnnexeSiLimiteNonAtteinte(new Date().toISOString());
+      expect(creation.success).toBe(true);
+      if (!creation.success) return;
+      const id = creation.poste.id;
+
+      const resultat = await storage.definirNomPoste(id, "PCX1 - Comptoir", new Date().toISOString());
+      expect(resultat.applique).toBe(true);
+
+      const relu = await storage.getPoste(id);
+      expect(relu).toMatchObject({ id, nom: "PCX1 - Comptoir", role: "pcx" });
+    });
+
+    it("obtenirOuCreerPosteShop est idempotent même sous des appels RÉELLEMENT concurrents — jamais deux lignes 'shop'", async () => {
+      const maintenant = new Date().toISOString();
+      const resultats = await Promise.all(Array.from({ length: 5 }, () => storage.obtenirOuCreerPosteShop(maintenant)));
+
+      const idsDistincts = new Set(resultats.map((p) => p.id));
+      expect(idsDistincts.size).toBe(1);
+
+      const tousLesPostes = await storage.listerPostes();
+      expect(tousLesPostes.filter((p) => p.role === "shop")).toHaveLength(1);
+    });
+
+    it("bloquer puis réautoriser un poste annexe fonctionne, sans jamais toucher à son nom ni à son id", async () => {
+      await nettoyerPostesAnnexes();
+      const creation = await storage.creerPosteAnnexeSiLimiteNonAtteinte(new Date().toISOString());
+      expect(creation.success).toBe(true);
+      if (!creation.success) return;
+      const id = creation.poste.id;
+      await storage.definirNomPoste(id, "PCX2 - Dépôt", new Date().toISOString());
+
+      await storage.bloquerPoste(id, new Date().toISOString());
+      expect(await storage.getPoste(id)).toMatchObject({ id, nom: "PCX2 - Dépôt", statut: "bloque" });
+
+      await storage.reautoriserPoste(id, new Date().toISOString());
+      expect(await storage.getPoste(id)).toMatchObject({ id, nom: "PCX2 - Dépôt", statut: "actif" });
+    });
+
+    it("retirerPoste supprime définitivement la ligne — libère réellement la place pour un nouveau poste annexe", async () => {
+      await nettoyerPostesAnnexes();
+      const creation = await storage.creerPosteAnnexeSiLimiteNonAtteinte(new Date().toISOString());
+      expect(creation.success).toBe(true);
+      if (!creation.success) return;
+
+      const retrait = await storage.retirerPoste(creation.poste.id);
+      expect(retrait.applique).toBe(true);
+      expect(await storage.getPoste(creation.poste.id)).toBeNull();
+    });
+  });
 });
 
 describe("PostgresServerStorage — sélection automatique du backend (storeServeur.ts)", () => {

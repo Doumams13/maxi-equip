@@ -1,7 +1,24 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { defaultTokens } from "@maxi-equip/design-system";
-import { Bell } from "lucide-react";
+import { Bell, MessageSquareText, ShoppingCart, PackagePlus, PackageMinus, ArrowLeftRight } from "lucide-react";
 import type { Notification } from "@maxi-equip/shared-types";
+
+/**
+ * Système multiposte fiable (2026-10-28) — une icône par type, jamais
+ * un rendu uniforme (voir plan Phase E). "stock"/"sync" n'ont jamais été
+ * réellement émis (voir demandeService.ts, seul créateur historique) —
+ * couverts par défaut, jamais un type non géré qui casserait le rendu.
+ */
+const ICONES_PAR_TYPE: Record<Notification["type"], ReactNode> = {
+  demande: <MessageSquareText size={14} />,
+  vente: <ShoppingCart size={14} />,
+  entree: <PackagePlus size={14} />,
+  sortie: <PackageMinus size={14} />,
+  transfert: <ArrowLeftRight size={14} />,
+  stock: <Bell size={14} />,
+  sync: <Bell size={14} />,
+};
 
 /**
  * Phase 4.1, Partie 5/6 — indicateur de notifications dans le Header
@@ -14,8 +31,20 @@ import type { Notification } from "@maxi-equip/shared-types";
  * Au clic sur une notification liée à une demande : marque la
  * notification comme lue et navigue directement vers l'écran Demandes
  * (Partie 5 : "clic -> ouverture directe de la demande concernée").
+ *
+ * `onOuvrirEntite` — système multiposte fiable (2026-10-28) : second
+ * callback générique, à côté de `onOuvrirDemande` (jamais une
+ * réécriture de celui-ci) — pour les notifications vente/entree/sortie/
+ * transfert, qui utilisent `entityType`/`entityId` plutôt que
+ * `demandeId` (voir shared-types/demande.ts).
  */
-export function IndicateurNotifications({ onOuvrirDemande }: { onOuvrirDemande: (demandeId: string) => void }) {
+export function IndicateurNotifications({
+  onOuvrirDemande,
+  onOuvrirEntite,
+}: {
+  onOuvrirDemande: (demandeId: string) => void;
+  onOuvrirEntite?: (entityType: string, entityId: string) => void;
+}) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [nonLues, setNonLues] = useState(0);
   const [ouvert, setOuvert] = useState(false);
@@ -48,6 +77,7 @@ export function IndicateurNotifications({ onOuvrirDemande }: { onOuvrirDemande: 
     }
     setOuvert(false);
     if (n.demandeId) onOuvrirDemande(n.demandeId);
+    else if (n.entityType && n.entityId) onOuvrirEntite?.(n.entityType, n.entityId);
   }
 
   return (
@@ -122,24 +152,32 @@ export function IndicateurNotifications({ onOuvrirDemande }: { onOuvrirDemande: 
           {notifications.length === 0 ? (
             <div style={{ padding: 16, fontSize: 12.5, color: defaultTokens.colors.textFaint }}>Aucune notification pour le moment.</div>
           ) : (
-            notifications.map((n) => (
-              <div
-                key={n.id}
-                onClick={() => void handleClicNotification(n)}
-                style={{
-                  padding: "10px 14px",
-                  borderBottom: `1px solid ${defaultTokens.colors.borderSoft}`,
-                  cursor: n.demandeId ? "pointer" : "default",
-                  background: n.lue ? "transparent" : defaultTokens.colors.accentSoft,
-                }}
-              >
-                <div style={{ fontSize: 12.5, fontWeight: n.lue ? 500 : 700, color: defaultTokens.colors.text }}>{n.titre}</div>
-                <div style={{ fontSize: 12, color: defaultTokens.colors.textSoft, marginTop: 2 }}>{n.message}</div>
-                <div style={{ fontSize: 10.5, color: defaultTokens.colors.textFaint, marginTop: 4 }}>
-                  {new Date(n.createdAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+            notifications.map((n) => {
+              const ouvrable = Boolean(n.demandeId) || Boolean(n.entityType && n.entityId);
+              return (
+                <div
+                  key={n.id}
+                  onClick={() => void handleClicNotification(n)}
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    padding: "10px 14px",
+                    borderBottom: `1px solid ${defaultTokens.colors.borderSoft}`,
+                    cursor: ouvrable ? "pointer" : "default",
+                    background: n.lue ? "transparent" : defaultTokens.colors.accentSoft,
+                  }}
+                >
+                  <div style={{ flexShrink: 0, marginTop: 2, color: defaultTokens.colors.textSoft }}>{ICONES_PAR_TYPE[n.type] ?? <Bell size={14} />}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: n.lue ? 500 : 700, color: defaultTokens.colors.text }}>{n.titre}</div>
+                    <div style={{ fontSize: 12, color: defaultTokens.colors.textSoft, marginTop: 2 }}>{n.message}</div>
+                    <div style={{ fontSize: 10.5, color: defaultTokens.colors.textFaint, marginTop: 4 }}>
+                      {new Date(n.createdAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}

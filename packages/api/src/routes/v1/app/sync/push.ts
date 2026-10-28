@@ -1,6 +1,7 @@
 import type { Route } from "../../../../core/types.js";
 import { validerRequetePush } from "../../../../core/validationSync.js";
 import { enregistrerOperations, type OperationRecue, type ResultatEnregistrement } from "../../../../core/storeServeur.js";
+import { getPosteEventBus } from "../../../../core/posteEventBus.js";
 import { validerOperationModele, validerOperationProduit, validerOperationPromotion, validerOperationIdentite } from "../../../../core/validationCatalogueSync.js";
 import { appliquerOperationModele, appliquerOperationProduit, appliquerOperationPromotion } from "../../../../core/catalogStore.js";
 import { appliquerOperationIdentite } from "../../../../core/identiteStore.js";
@@ -47,6 +48,19 @@ import { validerOperationCompte, validerOperationEmplacement } from "../../../..
 const TYPES_CATALOGUE = new Set(["modele", "produit", "promotion"]);
 const TYPES_PROJECTION = new Set([...TYPES_CATALOGUE, "parametres_entreprise", "compte", "emplacement"]);
 
+/**
+ * Système multiposte fiable (2026-10-28) — ces 4 types génèrent une
+ * notification sur les AUTRES postes une fois appliqués (voir
+ * SyncApplicationService côté Electron). Le poste d'origine n'est
+ * JAMAIS déclaré par le client (modifiable, falsifiable) — tamponné ici
+ * depuis `req.auth.sub`, connu de façon cryptographiquement fiable
+ * (voir router.ts/authentifier()), avant l'enregistrement dans le
+ * journal immuable `operations_synchronisees`. "annulation"/"demande"
+ * ne génèrent jamais de notification (hors périmètre de cette
+ * correction) — jamais tamponnés.
+ */
+const TYPES_AVEC_ORIGINE_POSTE = new Set(["vente", "entree", "sortie", "transfert"]);
+
 export const pushRoute: Route = {
   method: "POST",
   path: "/sync/push",
@@ -64,7 +78,11 @@ export const pushRoute: Route = {
 
     operations.forEach((op, index) => {
       if (!TYPES_PROJECTION.has(op.entityType)) {
-        operationsHeritees.push({ index, op });
+        const opAvecOrigine =
+          TYPES_AVEC_ORIGINE_POSTE.has(op.entityType) && typeof op.payload === "object" && op.payload !== null
+            ? { ...op, payload: { ...(op.payload as Record<string, unknown>), posteId: req.auth!.sub } }
+            : op;
+        operationsHeritees.push({ index, op: opAvecOrigine });
         return;
       }
       const payload =
@@ -105,6 +123,22 @@ export const pushRoute: Route = {
       const resultatsHerites = await enregistrerOperations(operationsHeritees.map((e) => e.op));
       operationsHeritees.forEach((entree, i) => {
         resultats[entree.index] = resultatsHerites[i]!;
+      });
+
+      // Système multiposte fiable (2026-10-28), Phase F — signal MINIMAL
+      // ("quelque chose a changé", jamais la donnée) aux autres postes
+      // connectés au flux SSE, UNIQUEMENT pour une opération RÉELLEMENT
+      // nouvelle (statut "cree", jamais "deja_traite" — un retry n'a
+      // rien de neuf à signaler, voir posteEventBus.ts). Le cycle de
+      // synchro périodique (5 minutes, voir main/index.ts côté Electron)
+      // reste le filet de sécurité en cas de signal manqué — jamais
+      // remplacé par ce mécanisme, qui n'est qu'un déclencheur plus
+      // rapide du même cycle normal.
+      const bus = getPosteEventBus();
+      operationsHeritees.forEach((entree, i) => {
+        if (resultatsHerites[i]!.statut === "cree") {
+          bus.diffuser({ type: entree.op.entityType });
+        }
       });
     }
 

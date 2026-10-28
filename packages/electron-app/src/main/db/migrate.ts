@@ -113,6 +113,8 @@ export function runMigrations(db: Database.Database): void {
   ajouterOrdreVitrineModelesSiAbsent(db);
   ajouterCarreauxParCartonProduitsSiAbsent(db);
   ajouterSurfaceCartonLignesFactureSiAbsente(db);
+  // Système multiposte fiable (2026-10-28)
+  elargirTypeNotificationsEtAjouterOrigineSiAbsent(db);
   setSchemaVersion(db);
 }
 
@@ -217,6 +219,47 @@ function retirerContrainteProduitIdLignesDemandeSiPresente(db: Database.Database
     `);
     db.exec("DROP TABLE lignes_demande;");
     db.exec("ALTER TABLE lignes_demande_nouvelle RENAME TO lignes_demande;");
+  });
+  executer();
+}
+
+/**
+ * Système multiposte fiable (2026-10-28) — `notifications.type` porte un
+ * CHECK figé à 'demande'|'stock'|'sync' (voir schema.sql) : SQLite ne
+ * permet pas de l'élargir par un simple ALTER TABLE, même idiome
+ * "recréer la table, copier, supprimer l'ancienne, renommer" que
+ * `retirerContrainteProduitIdLignesDemandeSiPresente` ci-dessus.
+ * `entity_type`/`entity_id`/`poste_id` ajoutées en même temps (toujours
+ * NULL sur les notifications existantes — jamais une valeur inventée
+ * rétroactivement, voir shared-types/demande.ts). Idempotente : ne
+ * s'exécute que si `poste_id` est encore absente.
+ */
+function elargirTypeNotificationsEtAjouterOrigineSiAbsent(db: Database.Database): void {
+  const colonnes = db.prepare("PRAGMA table_info(notifications)").all() as { name: string }[];
+  if (colonnes.some((c) => c.name === "poste_id")) return;
+
+  const executer = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE notifications_nouvelle (
+        id          TEXT PRIMARY KEY,
+        type        TEXT NOT NULL CHECK (type IN ('demande', 'stock', 'sync', 'vente', 'entree', 'sortie', 'transfert')),
+        titre       TEXT NOT NULL,
+        message     TEXT NOT NULL,
+        lue         INTEGER NOT NULL DEFAULT 0 CHECK (lue IN (0, 1)),
+        demande_id  TEXT REFERENCES demandes (id),
+        entity_type TEXT,
+        entity_id   TEXT,
+        poste_id    TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+    `);
+    db.exec(`
+      INSERT INTO notifications_nouvelle (id, type, titre, message, lue, demande_id, created_at, updated_at)
+      SELECT id, type, titre, message, lue, demande_id, created_at, updated_at FROM notifications;
+    `);
+    db.exec("DROP TABLE notifications;");
+    db.exec("ALTER TABLE notifications_nouvelle RENAME TO notifications;");
   });
   executer();
 }

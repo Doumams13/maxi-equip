@@ -164,7 +164,40 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
     const service = new SyncService(boiteEnvoiRepository, syncRepository);
     const resultat = await service.executerSynchronisation();
     expect(resultat.success).toBe(false);
+    expect(resultat.posteBloque).toBeUndefined();
     expect(boiteEnvoiRepository.findById(id)?.status).toBe("pending");
+  });
+
+  it("TEST 6b — système multiposte fiable (2026-10-28) : poste bloqué (403 au PUSH) distinct d'un jeton invalide (401), posteBloque: true", async () => {
+    const id = ajouterEntreeBoiteEnvoi();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: { code: "forbidden", message: "Ce poste a été bloqué par un administrateur." } }), { status: 403 }))
+    );
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(false);
+    expect(resultat.etape).toBe("push");
+    expect(resultat.posteBloque).toBe(true);
+    expect(resultat.message).toBe("Ce poste a été bloqué par un administrateur.");
+    expect(boiteEnvoiRepository.findById(id)?.status).toBe("pending");
+  });
+
+  it("TEST 6c — système multiposte fiable (2026-10-28) : poste bloqué (403 au PULL, après un PUSH réussi) : posteBloque: true", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/sync/push")) return new Response(JSON.stringify({ results: [] }), { status: 200 });
+        return new Response(JSON.stringify({ error: { code: "forbidden", message: "Ce poste a été bloqué par un administrateur." } }), { status: 403 });
+      })
+    );
+    const service = new SyncService(boiteEnvoiRepository, syncRepository);
+    const resultat = await service.executerSynchronisation();
+
+    expect(resultat.success).toBe(false);
+    expect(resultat.etape).toBe("pull");
+    expect(resultat.posteBloque).toBe(true);
   });
 
   it("TEST 7 — données serveur invalides (JSON illisible pendant le PULL) : pas de corruption locale, curseur non avancé", async () => {

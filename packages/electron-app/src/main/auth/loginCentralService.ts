@@ -17,7 +17,7 @@ const DELAI_MAX_REQUETE_MS = 15_000;
 
 export type ResultatLoginCentral =
   | { success: true; jwt: string; compte: { id: string; identifiant: string; nom: string; role: string } }
-  | { success: false; raison: "identifiants_invalides" | "trop_de_tentatives" | "hors_ligne" | "erreur_serveur"; message: string };
+  | { success: false; raison: "identifiants_invalides" | "trop_de_tentatives" | "poste_bloque" | "hors_ligne" | "erreur_serveur"; message: string };
 
 export class LoginCentralService {
   estConfiguree(): boolean {
@@ -43,6 +43,15 @@ export class LoginCentralService {
       if (reponse.status === 401) {
         const corps = (await reponse.json().catch(() => null)) as { error?: { message?: string } } | null;
         return { success: false, raison: "identifiants_invalides", message: corps?.error?.message ?? "Identifiant ou mot de passe incorrect." };
+      }
+      // Système multiposte fiable (2026-10-28) — 403 : le jeton
+      // d'INSTALLATION de ce poste reste cryptographiquement valide,
+      // mais ce poste a été bloqué par un administrateur (voir
+      // router.ts/authentifier()) — distinct d'un 401 (identifiant/mot
+      // de passe incorrect), jamais confondu avec lui.
+      if (reponse.status === 403) {
+        const corps = (await reponse.json().catch(() => null)) as { error?: { message?: string } } | null;
+        return { success: false, raison: "poste_bloque", message: corps?.error?.message ?? "Ce poste a été bloqué par un administrateur." };
       }
       if (reponse.status === 429) {
         const corps = (await reponse.json().catch(() => null)) as { error?: { message?: string } } | null;

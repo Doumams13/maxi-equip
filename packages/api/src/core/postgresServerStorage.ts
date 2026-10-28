@@ -1,4 +1,5 @@
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 import {
   slugify,
   type ServerStorage,
@@ -24,6 +25,8 @@ import {
   type EmplacementCataloguePayload,
   type EmplacementRow,
   type CompteCatchupRow,
+  type PosteRow,
+  type ResultatCreationPosteAnnexe,
 } from "./serverStorage.js";
 
 const { Pool } = pg;
@@ -188,6 +191,24 @@ export class PostgresServerStorage implements ServerStorage {
         prefix  TEXT PRIMARY KEY,
         dernier INTEGER NOT NULL DEFAULT 0
       );
+
+      -- Identité et autorisation des postes — système multiposte fiable
+      -- (2026-10-28). Voir serverStorage.ts (PosteRow) pour le
+      -- raisonnement complet. "id" devient le "sub" du JWT applicatif
+      -- (voir emissionJetonApplication.ts) — avant cette table, "sub"
+      -- était une valeur aléatoire jamais persistée.
+      CREATE TABLE IF NOT EXISTS postes (
+        id                  TEXT PRIMARY KEY,
+        nom                 TEXT,
+        role                TEXT NOT NULL CHECK (role IN ('shop', 'pcx')),
+        statut              TEXT NOT NULL DEFAULT 'actif' CHECK (statut IN ('actif', 'bloque')),
+        enregistre_le       TEXT NOT NULL,
+        dernier_contact_le  TEXT,
+        updated_at          TEXT NOT NULL
+      );
+      -- Un seul poste "shop" par installation (voir obtenirOuCreerPosteShop,
+      -- qui s'appuie sur cet index pour détecter une création concurrente).
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_postes_role_shop_unique ON postes (role) WHERE role = 'shop';
     `);
 
     // BUG RÉEL CORRIGÉ (2026-09-29) : cette colonne a été ajoutée à
@@ -673,5 +694,95 @@ export class PostgresServerStorage implements ServerStorage {
     } finally {
       client.release();
     }
+  }
+
+  private static readonly SELECT_POSTE =
+    `SELECT id, nom, role, statut, enregistre_le as "enregistreLe", dernier_contact_le as "dernierContactLe", updated_at as "updatedAt" FROM postes`;
+
+  async getPoste(id: string): Promise<PosteRow | null> {
+    const res = await this.pool.query(`${PostgresServerStorage.SELECT_POSTE} WHERE id = $1`, [id]);
+    return (res.rows[0] as PosteRow | undefined) ?? null;
+  }
+
+  async listerPostes(): Promise<PosteRow[]> {
+    const res = await this.pool.query(`${PostgresServerStorage.SELECT_POSTE} ORDER BY enregistre_le ASC`);
+    return res.rows as PosteRow[];
+  }
+
+  async creerPosteAnnexeSiLimiteNonAtteinte(maintenant: string): Promise<ResultatCreationPosteAnnexe> {
+    const MAX_PCX = 5;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Verrou consultatif scopé à la transaction (relâché automatiquement
+      // au COMMIT/ROLLBACK) — sérialise toute tentative concurrente de
+      // création d'un poste annexe le temps de compter puis d'insérer de
+      // façon atomique. Nécessaire ici car, contrairement au verrouillage
+      // de ligne de `validerEtAppliquerOperationStock`, aucune ligne
+      // précise n'existe encore à verrouiller pour un tout premier poste.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('postes_limite_pcx'))");
+      const compte = await client.query("SELECT COUNT(*)::int AS n FROM postes WHERE role = 'pcx'");
+      const n = (compte.rows[0] as { n: number }).n;
+      if (n >= MAX_PCX) {
+        await client.query("ROLLBACK");
+        return { success: false, raison: "limite_atteinte" };
+      }
+      const id = randomUUID();
+      await client.query(
+        `INSERT INTO postes (id, nom, role, statut, enregistre_le, updated_at) VALUES ($1, NULL, 'pcx', 'actif', $2, $2)`,
+        [id, maintenant]
+      );
+      await client.query("COMMIT");
+      return { success: true, poste: { id, nom: null, role: "pcx", statut: "actif", enregistreLe: maintenant, dernierContactLe: null, updatedAt: maintenant } };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async obtenirOuCreerPosteShop(maintenant: string): Promise<PosteRow> {
+    const existant = await this.pool.query(`${PostgresServerStorage.SELECT_POSTE} WHERE role = 'shop' LIMIT 1`);
+    if (existant.rows[0]) return existant.rows[0] as PosteRow;
+
+    const id = randomUUID();
+    try {
+      await this.pool.query(
+        `INSERT INTO postes (id, nom, role, statut, enregistre_le, updated_at) VALUES ($1, NULL, 'shop', 'actif', $2, $2)`,
+        [id, maintenant]
+      );
+      return { id, nom: null, role: "shop", statut: "actif", enregistreLe: maintenant, dernierContactLe: null, updatedAt: maintenant };
+    } catch (err) {
+      // Violation de idx_postes_role_shop_unique : une autre requête
+      // concurrente a créé le poste Shop entre le SELECT et cet INSERT
+      // (fenêtre de course rare pour une action manuelle ponctuelle) —
+      // relit la ligne réellement créée plutôt que propager l'erreur.
+      if ((err as { code?: string }).code === "23505") {
+        const relu = await this.pool.query(`${PostgresServerStorage.SELECT_POSTE} WHERE role = 'shop' LIMIT 1`);
+        return relu.rows[0] as PosteRow;
+      }
+      throw err;
+    }
+  }
+
+  async definirNomPoste(id: string, nom: string, maintenant: string): Promise<{ applique: boolean }> {
+    const res = await this.pool.query(`UPDATE postes SET nom = $1, updated_at = $2 WHERE id = $3`, [nom, maintenant, id]);
+    return { applique: (res.rowCount ?? 0) > 0 };
+  }
+
+  async bloquerPoste(id: string, maintenant: string): Promise<{ applique: boolean }> {
+    const res = await this.pool.query(`UPDATE postes SET statut = 'bloque', updated_at = $1 WHERE id = $2`, [maintenant, id]);
+    return { applique: (res.rowCount ?? 0) > 0 };
+  }
+
+  async reautoriserPoste(id: string, maintenant: string): Promise<{ applique: boolean }> {
+    const res = await this.pool.query(`UPDATE postes SET statut = 'actif', updated_at = $1 WHERE id = $2`, [maintenant, id]);
+    return { applique: (res.rowCount ?? 0) > 0 };
+  }
+
+  async retirerPoste(id: string): Promise<{ applique: boolean }> {
+    const res = await this.pool.query(`DELETE FROM postes WHERE id = $1`, [id]);
+    return { applique: (res.rowCount ?? 0) > 0 };
   }
 }

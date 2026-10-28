@@ -42,6 +42,15 @@ export interface ResultatSynchronisation {
   pull?: { recues: number };
   etape?: "configuration" | "push" | "pull";
   message?: string;
+  /**
+   * Système multiposte fiable (2026-10-28) — `true` UNIQUEMENT sur un
+   * 403 du serveur (jeton d'installation cryptographiquement valide,
+   * mais ce poste a été bloqué par un administrateur, voir
+   * router.ts/authentifier()) — jamais sur un 401 (jeton invalide/expiré,
+   * cas distinct, sans rapport avec un blocage). Lu par ipc/sync.ts et
+   * main/index.ts pour fermer immédiatement la session locale.
+   */
+  posteBloque?: boolean;
 }
 
 interface ReponsePush {
@@ -443,8 +452,20 @@ export class SyncService {
       return { success: false, etape: "push", message: `Impossible de contacter le serveur de synchronisation : ${message}`, confirmees: 0 };
     }
 
-    if (reponse.status === 401 || reponse.status === 403) {
+    if (reponse.status === 401) {
       return { success: false, etape: "push", message: "Authentification refusée par le serveur (jeton invalide ou expiré).", confirmees: 0 };
+    }
+    // Système multiposte fiable (2026-10-28) — 403 : distinct d'un
+    // jeton invalide, voir ResultatSynchronisation.posteBloque.
+    if (reponse.status === 403) {
+      const corps = (await reponse.json().catch(() => null)) as { error?: { message?: string } } | null;
+      return {
+        success: false,
+        etape: "push",
+        posteBloque: true,
+        message: corps?.error?.message ?? "Ce poste a été bloqué par un administrateur.",
+        confirmees: 0,
+      };
     }
     if (!reponse.ok) {
       const texte = await reponse.text().catch(() => "");
@@ -533,8 +554,19 @@ export class SyncService {
         return { success: false, etape: "pull", message: `Impossible de contacter le serveur pour le PULL : ${message}` };
       }
 
-      if (reponse.status === 401 || reponse.status === 403) {
+      if (reponse.status === 401) {
         return { success: false, etape: "pull", message: "Authentification refusée par le serveur lors du PULL." };
+      }
+      // Système multiposte fiable (2026-10-28) — voir le même
+      // raisonnement dans pousserLotGenerique ci-dessus.
+      if (reponse.status === 403) {
+        const corpsErreur = (await reponse.json().catch(() => null)) as { error?: { message?: string } } | null;
+        return {
+          success: false,
+          etape: "pull",
+          posteBloque: true,
+          message: corpsErreur?.error?.message ?? "Ce poste a été bloqué par un administrateur.",
+        };
       }
       if (!reponse.ok) {
         return { success: false, etape: "pull", message: `Le serveur a refusé le PULL (HTTP ${reponse.status}).` };

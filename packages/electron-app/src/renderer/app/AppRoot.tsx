@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { auth } from "@maxi-equip/domain";
-import { useToast } from "@maxi-equip/design-system";
+import { useToast, Card, Button, defaultTokens } from "@maxi-equip/design-system";
 import { Shell, type NavItem, type ScreenId } from "./Shell.js";
 import { DashboardScreen } from "./screens/DashboardScreen.js";
 import { ProduitsScreen } from "./screens/ProduitsScreen.js";
@@ -12,6 +12,7 @@ import { DemandesScreen } from "./screens/DemandesScreen.js";
 import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
 import { ParametresScreen } from "./screens/ParametresScreen.js";
 import { UtilisateursScreen } from "./screens/UtilisateursScreen.js";
+import { PostesScreen } from "./screens/PostesScreen.js";
 import { PromotionsScreen } from "./screens/PromotionsScreen.js";
 import { BilanScreen } from "./screens/BilanScreen.js";
 
@@ -46,7 +47,7 @@ export interface AppRootProps {
  * services/IPC (voir main/ipc/metier.ts), jamais uniquement ici.
  */
 export function AppRoot({ onLoggedOut }: AppRootProps) {
-  const { showSuccess } = useToast();
+  const { showSuccess, showError } = useToast();
   const [session, setSession] = useState<Session | null>(null);
   const [permissions, setPermissions] = useState<auth.PermissionSet | null>(null);
   const [activeScreen, setActiveScreen] = useState<ScreenId>("dashboard");
@@ -55,6 +56,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   const [factureAPreRemplir, setFactureAPreRemplir] = useState<string | null>(null);
   const [demandeAPreRemplir, setDemandeAPreRemplir] = useState<string | null>(null);
   const [demandesActives, setDemandesActives] = useState(0);
+  const [nomPosteRequis, setNomPosteRequis] = useState(false);
 
   /**
    * Correction "Workflow réel des demandes", Partie 18/19/20 : compteur
@@ -87,17 +89,59 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     setCibleSurbrillance(cible);
   }
 
+  /**
+   * Ouverture directe depuis une notification vente/entree/sortie/
+   * transfert — système multiposte fiable (2026-10-28). "vente" réutilise
+   * la navigation facture déjà existante ; "entree"/"sortie"/"transfert"
+   * ouvrent l'Historique (qui liste tous les mouvements, sans distinction
+   * de type contrairement aux écrans Entrée de stock/Transferts) — jamais
+   * de surbrillance précise pour ces trois-là pour l'instant, HistoriqueScreen
+   * n'en ayant pas besoin pour rester consultable (recherche déjà possible).
+   */
+  function ouvrirEntiteNotification(entityType: string, entityId: string) {
+    if (entityType === "vente") irVersOperation({ type: "facture", id: entityId });
+    else setActiveScreen("historique");
+  }
+
   useEffect(() => {
     void (async () => {
       const [s, p] = await Promise.all([window.maxiEquip.getSession(), window.maxiEquip.getPermissions()]);
       setSession(s);
       setPermissions(p);
       setLoading(false);
+
+      // Système multiposte fiable (2026-10-28) : juste après une
+      // restauration, le nouveau poste n'a pas encore de nom choisi
+      // (voir postes/moi.ts côté API) — aucun appel réseau émis sur une
+      // installation indépendante (isolation garantie côté Main, voir
+      // posteSyncService.ts).
+      if (s) {
+        const moi = await window.maxiEquip.posteObtenirMoi();
+        if (moi.success && moi.poste !== null && moi.poste.nom === null) {
+          setNomPosteRequis(true);
+        }
+      }
     })();
     void rafraichirCompteurDemandes();
     const intervalle = setInterval(() => void rafraichirCompteurDemandes(), 15000);
     return () => clearInterval(intervalle);
   }, []);
+
+  /**
+   * Blocage à distance (2026-10-28) — abonnement PERMANENT (jamais
+   * conditionné à la session, un blocage doit pouvoir être détecté à
+   * tout moment) : le cycle de synchro automatique côté Main peut
+   * fermer cette session SANS qu'aucun écran n'ait rien demandé (voir
+   * main/index.ts, `lancerSyncAutomatique`) — ce poste doit alors
+   * revenir à l'écran de connexion IMMÉDIATEMENT, jamais attendre une
+   * prochaine action de l'utilisateur qui échouerait silencieusement.
+   */
+  useEffect(() => {
+    return window.maxiEquip.onSessionRevoquee((message) => {
+      showError("Poste bloqué", message);
+      onLoggedOut();
+    });
+  }, [onLoggedOut, showError]);
 
   async function handleLogout() {
     await window.maxiEquip.logout();
@@ -118,6 +162,10 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
     { id: "promotions", label: "Promotions", autorise: permissions.canManagePromotions },
     { id: "utilisateurs", label: "Utilisateurs", autorise: permissions.canManageUsers },
+    // Système multiposte fiable (2026-10-28) — réservé à l'Administrateur,
+    // même garde que "Utilisateurs" (la protection réelle reste côté IPC,
+    // checkAdminGuard, voir ipc/postes.ts).
+    { id: "postes", label: "Postes", autorise: permissions.canManageUsers },
     { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
     // Correction "bilan d'activité" (2026-10-21) — réservé à l'Administrateur
     // (décision confirmée), la protection réelle restant côté IPC
@@ -212,6 +260,9 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       case "utilisateurs":
         if (!permissions!.canManageUsers) return null;
         return <UtilisateursScreen />;
+      case "postes":
+        if (!permissions!.canManageUsers) return null;
+        return <PostesScreen />;
       case "parametres":
         if (!permissions!.canEditCompanySettings) return null;
         return <ParametresScreen />;
@@ -224,15 +275,87 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   }
 
   return (
-    <Shell
-      session={{ nom: session.nom, role: session.role }}
-      navItems={navItems}
-      activeScreen={activeScreen}
-      onNavigate={setActiveScreen}
-      onLogout={handleLogout}
-      onOuvrirDemande={(demandeId) => irVersOperation({ type: "demande", id: demandeId })}
-    >
-      {renderScreen()}
-    </Shell>
+    <>
+      <Shell
+        session={{ nom: session.nom, role: session.role }}
+        navItems={navItems}
+        activeScreen={activeScreen}
+        onNavigate={setActiveScreen}
+        onLogout={handleLogout}
+        onOuvrirDemande={(demandeId) => irVersOperation({ type: "demande", id: demandeId })}
+        onOuvrirEntite={ouvrirEntiteNotification}
+      >
+        {renderScreen()}
+      </Shell>
+      {nomPosteRequis && <ModalNommerPoste onSuccess={() => setNomPosteRequis(false)} />}
+    </>
+  );
+}
+
+/**
+ * Modale "nommer ce poste" — système multiposte fiable (2026-10-28).
+ * Affichée une seule fois, juste après qu'un poste fraîchement
+ * restauré/enregistré ait obtenu une identité technique mais pas encore
+ * de nom choisi (voir l'effet ci-dessus) — jamais fermable sans
+ * nommer : un poste sans nom reste identifiable seulement par son id
+ * technique dans l'écran de gestion, ce qui gênerait l'administration
+ * au quotidien.
+ */
+function ModalNommerPoste({ onSuccess }: { onSuccess: () => void }) {
+  const { showSuccess, showError } = useToast();
+  const [nom, setNom] = useState("");
+  const [enCours, setEnCours] = useState(false);
+
+  async function handleSoumettre() {
+    if (!nom.trim()) return;
+    setEnCours(true);
+    try {
+      const res = await window.maxiEquip.posteDefinirNom(nom.trim());
+      if (res.success) {
+        showSuccess("Poste nommé", `Ce poste s'appelle désormais « ${nom.trim()} ».`);
+        onSuccess();
+      } else {
+        showError("Impossible d'enregistrer ce nom", res.message ?? "Erreur inattendue.");
+      }
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(20,35,20,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400 }}>
+      <Card elevated style={{ width: "min(440px, 92vw)", boxSizing: "border-box" }}>
+        <h2 style={{ margin: "0 0 10px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>Donnez un nom à ce poste</h2>
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: defaultTokens.colors.textSoft, lineHeight: 1.5 }}>
+          Ce nom aide à reconnaître ce poste dans l'écran « Postes » (ex. « PCX1 - Comptoir »). Il peut être modifié plus tard, sans jamais changer
+          l'identité technique de ce poste.
+        </p>
+        <input
+          type="text"
+          value={nom}
+          onChange={(e) => setNom(e.target.value)}
+          placeholder="ex : PCX1 - Comptoir"
+          autoFocus
+          style={{
+            padding: "9px 12px",
+            borderRadius: defaultTokens.radius.sm,
+            border: `1px solid ${defaultTokens.colors.border}`,
+            fontFamily: defaultTokens.typography.body,
+            fontSize: 14,
+            width: "100%",
+            boxSizing: "border-box",
+            background: "#fff",
+            color: defaultTokens.colors.text,
+            marginBottom: 16,
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSoumettre();
+          }}
+        />
+        <Button onClick={() => void handleSoumettre()} loading={enCours} disabled={!nom.trim()} style={{ width: "100%" }}>
+          Enregistrer
+        </Button>
+      </Card>
+    </div>
   );
 }

@@ -52,6 +52,9 @@ import { executerResetDonneesTest } from "./maintenance/resetDonneesTest.js";
 import { executerGenerationDonneesTest } from "./maintenance/genererDonneesTest.js";
 import { UtilisateurService } from "./services/utilisateurService.js";
 import { registerUtilisateursIpcHandlers } from "./ipc/utilisateurs.js";
+import { PosteSyncService } from "./services/posteSyncService.js";
+import { registerPostesIpcHandlers } from "./ipc/postes.js";
+import { SyncStreamClient } from "./services/syncStreamClient.js";
 import { ModeleRepository } from "./repositories/modeleRepository.js";
 import { PromotionRepository } from "./repositories/promotionRepository.js";
 import { PromotionService } from "./services/promotionService.js";
@@ -320,6 +323,13 @@ app.whenReady().then(async () => {
     const utilisateurService = new UtilisateurService(utilisateurRepository, hasher, boiteEnvoiRepository);
     registerUtilisateursIpcHandlers(utilisateurService, sessionManager);
 
+    // Identité et registre des postes — système multiposte fiable
+    // (2026-10-28). Service indépendant (jamais une dépendance du cycle
+    // de synchro automatique ci-dessous) : géré explicitement par
+    // l'écran Postes et le bouton "Rejoindre le registre" de Paramètres.
+    const posteSyncService = new PosteSyncService();
+    registerPostesIpcHandlers(posteSyncService, sessionManager);
+
     // Correction "travail à distance / plusieurs machines en parallèle"
     // (2026-10-22) — rattrapage PONCTUEL : les comptes déjà créés
     // localement AVANT cette correction n'ont jamais été mis en file vers
@@ -422,7 +432,17 @@ app.whenReady().then(async () => {
     // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 2 — voir syncService.ts.
     syncService.definirRattrapageCatalogue(modeleRepository, produitRepository, new CatalogueSyncService());
     // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 4 — voir syncService.ts.
-    syncService.definirApplicationOperationsMetier(new SyncApplicationService(factureRepository, mouvementRepository));
+    // Système multiposte fiable (2026-10-28), Phase E — notificationRepository/
+    // produitRepository/emplacementRepository servent UNIQUEMENT à composer
+    // le texte des notifications (jamais une règle métier) — voir
+    // syncApplicationService.ts.
+    syncService.definirApplicationOperationsMetier(
+      new SyncApplicationService(factureRepository, mouvementRepository, {
+        notificationRepository,
+        produitRepository,
+        emplacementRepository,
+      })
+    );
 
     bootstrapDefaultEmplacements(emplacementRepository);
 
@@ -479,13 +499,38 @@ app.whenReady().then(async () => {
     // silence ici, exactement comme le bouton manuel le ferait déjà.
     const INTERVALLE_SYNC_AUTOMATIQUE_MS = 5 * 60 * 1000;
     const lancerSyncAutomatique = (): void => {
-      void syncService.executerSynchronisation().catch((err) => {
-        // eslint-disable-next-line no-console
-        console.error("[sync-auto] échec inattendu :", err instanceof Error ? err.message : err);
-      });
+      void syncService
+        .executerSynchronisation()
+        .then((resultat) => {
+          // Système multiposte fiable (2026-10-28) — ce cycle tourne SANS
+          // qu'un écran n'ait rien demandé : contrairement à "sync:run"
+          // (ipc/sync.ts), aucun appelant ne verra le résultat autrement
+          // que par ce code. Ferme donc la session localement ET prévient
+          // le Renderer activement (push, jamais un simple polling) dès
+          // que le serveur signale que ce poste est bloqué.
+          if (resultat.posteBloque) {
+            sessionManager.clear();
+            if (!mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("session:revoquee", resultat.message ?? "Ce poste a été bloqué par un administrateur.");
+            }
+          }
+        })
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error("[sync-auto] échec inattendu :", err instanceof Error ? err.message : err);
+        });
     };
     lancerSyncAutomatique();
     setInterval(lancerSyncAutomatique, INTERVALLE_SYNC_AUTOMATIQUE_MS).unref();
+
+    // Synchronisation quasi instantanée — système multiposte fiable
+    // (2026-10-28), Phase F. Réutilise EXACTEMENT `lancerSyncAutomatique`
+    // ci-dessus comme déclencheur (même gestion de posteBloque/session) —
+    // jamais une seconde logique. Le minuteur de 5 minutes ci-dessus
+    // reste actif tel quel en filet de sécurité (signal manqué, poste
+    // resté fermé pendant l'émission...) — jamais remplacé par ce flux.
+    const syncStreamClient = new SyncStreamClient(lancerSyncAutomatique);
+    syncStreamClient.demarrer();
 
     // Demandes (Phase 4.1) — Administrateur et Gérant, aucune restriction artificielle (Partie 15).
     registerDemandeIpcHandlers(demandeService, notificationRepository, sessionManager);

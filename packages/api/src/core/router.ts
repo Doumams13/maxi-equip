@@ -1,7 +1,6 @@
 import type { ApiRequest, ApiResponse, Route } from "./types.js";
-import { errorToResponse, NotFoundError, UnauthorizedError } from "./errors.js";
-import { verifierJwt } from "./jwt.js";
-import { getJwtSecret } from "./config.js";
+import { errorToResponse, NotFoundError, UnauthorizedError, ForbiddenError, ServiceUnavailableError } from "./errors.js";
+import { verifierAutorisationPoste } from "./autorisationPoste.js";
 
 const API_VERSION_PREFIX = "/v1";
 
@@ -22,23 +21,20 @@ const API_VERSION_PREFIX = "/v1";
  * échouées, pour limiter une attaque par force brute sur un jeton).
  *
  * ═══════════════════════════════════════════════════════════════════
- * RÉVOCATION DE JWT — Partie 8
- * ═══════════════════════════════════════════════════════════════════
- * ANALYSE : aucune révocation n'existe ni n'est nécessaire aujourd'hui —
- * aucun système de session réelle, aucun utilisateur distant connecté,
- * un seul jeton d'installation émis manuellement à la fois (voir
- * `emissionJetonApplication.ts`). Une liste de révocation (blacklist)
- * ajouterait une complexité et un état supplémentaire à synchroniser
- * sans bénéfice réel tant que ce contexte reste vrai.
+ * RÉVOCATION DE JWT — Partie 8 — IMPLÉMENTÉE (système multiposte
+ * fiable, 2026-10-28), exactement comme anticipé ci-dessus
+ * historiquement : plusieurs postes existent désormais (voir
+ * serverStorage.ts/PosteRow, Phase C), chacun identifié par le `sub` de
+ * son jeton applicatif. Plutôt qu'une table `jetons_revoques` séparée
+ * (solution alors envisagée), la vérification se fait directement sur
+ * `postes.statut` — un jeton révoqué EST un jeton dont le poste est
+ * `bloque`, jamais une notion distincte à synchroniser en plus.
  *
- * RÉVOCATION À PRÉVOIR LORSQUE : plusieurs installations existeront ET
- * qu'il faudra pouvoir désactiver l'une d'elles individuellement ; OU
- * que de vraies sessions utilisateur distantes existeront ; OU qu'une
- * compromission de jeton devra être traitée avant son expiration
- * naturelle. Solution la plus simple envisageable le moment venu : une
- * table `jetons_revoques` (identifiant + date de révocation), vérifiée
- * par le middleware avant d'accepter un jeton par ailleurs valide —
- * jamais implémentée maintenant.
+ * `authentifier()` reste purement cryptographique pour le format/la
+ * signature/l'expiration (401 inchangé pour ces cas) ; la vérification
+ * d'AUTORISATION (poste bloqué → 403) est une étape SUPPLÉMENTAIRE,
+ * après coup — c'est exactement la distinction 401/403 déjà documentée
+ * ci-dessous, préparée à l'avance pour ce cas précis.
  */
 
 /**
@@ -62,27 +58,26 @@ const API_VERSION_PREFIX = "/v1";
  * la raison précise restant disponible côté serveur pour du diagnostic
  * futur si nécessaire (jamais journalisée ici pour l'instant, aucun
  * système de journalisation n'existe encore dans ce package).
+ *
+ * Système multiposte fiable (2026-10-28) — la vérification elle-même
+ * (JWT puis statut du poste) vit désormais dans
+ * `core/autorisationPoste.ts`, réutilisée À L'IDENTIQUE par
+ * `httpAdapter.ts` (flux SSE, Phase F, qui ne passe jamais par
+ * `Router.dispatch()`) — jamais une seconde logique inventée pour ce
+ * second chemin. Cette fonction ne fait plus que traduire le résultat
+ * en l'exception HTTP attendue par `dispatch()` ci-dessous.
  */
-function authentifier(req: ApiRequest): { sub: string; role?: string } {
-  const authHeader = req.headers["authorization"];
-  if (!authHeader || typeof authHeader !== "string") {
+async function authentifier(req: ApiRequest): Promise<{ sub: string; role?: string }> {
+  const resultat = await verifierAutorisationPoste(req.headers["authorization"]);
+  if (!resultat.ok) {
+    if (resultat.status === 403) throw new ForbiddenError(resultat.message);
+    if (resultat.status === 503) throw new ServiceUnavailableError(resultat.message);
+    // Message générique par défaut (jamais resultat.message pour ce cas
+    // précis) — aucun indice utile à quelqu'un qui tenterait de deviner
+    // un jeton valide, exactement le comportement historique ci-dessus.
     throw new UnauthorizedError();
   }
-  const [schema, token] = authHeader.split(" ");
-  if (schema !== "Bearer" || !token) {
-    throw new UnauthorizedError();
-  }
-
-  const resultat = verifierJwt(token, getJwtSecret());
-  if (!resultat.valide) {
-    // La raison précise (format/signature/expire/payload) n'est
-    // jamais renvoyée au client — un message générique unique pour
-    // toutes les causes de refus, afin de ne jamais donner d'indice
-    // utile à quelqu'un qui tenterait de deviner un jeton valide.
-    throw new UnauthorizedError();
-  }
-
-  return { sub: resultat.payload.sub, role: resultat.payload.role };
+  return { sub: resultat.sub, role: resultat.role };
 }
 
 export class Router {
@@ -116,7 +111,7 @@ export class Router {
       }
 
       if (route.trustLevel === "app") {
-        req.auth = authentifier(req);
+        req.auth = await authentifier(req);
       }
 
       return await route.handler(req);

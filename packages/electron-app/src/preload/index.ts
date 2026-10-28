@@ -360,6 +360,35 @@ const maxiEquipApi = {
   notificationsCompterNonLues: (): Promise<number> => ipcRenderer.invoke("notifications:compter-non-lues"),
   notificationsMarquerLue: (id: string): Promise<void> => ipcRenderer.invoke("notifications:marquer-lue", id),
   notificationsMarquerToutesLues: (): Promise<void> => ipcRenderer.invoke("notifications:marquer-toutes-lues"),
+
+  // --- Identité et registre des postes (2026-10-28) — voir ipc/postes.ts. ---
+  posteObtenirMoi: (): Promise<import("../main/services/posteSyncService.js").ResultatLectureMoi> => ipcRenderer.invoke("postes:obtenir-moi"),
+  posteDefinirNom: (nom: string): Promise<import("../main/services/posteSyncService.js").ResultatAction> =>
+    ipcRenderer.invoke("postes:definir-nom", nom),
+  posteLister: (): Promise<import("../main/services/posteSyncService.js").ResultatLectureListe> => ipcRenderer.invoke("postes:lister"),
+  posteBloquer: (posteId: string): Promise<import("../main/services/posteSyncService.js").ResultatAction> =>
+    ipcRenderer.invoke("postes:bloquer", posteId),
+  posteReautoriser: (posteId: string): Promise<import("../main/services/posteSyncService.js").ResultatAction> =>
+    ipcRenderer.invoke("postes:reautoriser", posteId),
+  posteRetirer: (posteId: string): Promise<import("../main/services/posteSyncService.js").ResultatAction> =>
+    ipcRenderer.invoke("postes:retirer", posteId),
+  posteRejoindreRegistre: (): Promise<import("../main/services/posteSyncService.js").ResultatAction> =>
+    ipcRenderer.invoke("postes:rejoindre-registre"),
+  /**
+   * Blocage à distance (2026-10-28) — canal PUSH (main → Renderer),
+   * même convention que `onInstallationRecuperationProgression` :
+   * déclenché par le cycle de synchro automatique (main/index.ts),
+   * jamais par un appel du Renderer — ce poste peut être bloqué sans
+   * qu'aucun écran n'ait rien demandé. Abonnement permanent (pas de
+   * désabonnement systématique attendu, contrairement à la progression
+   * de récupération, ponctuelle) — retourne néanmoins la fonction de
+   * désabonnement, par cohérence.
+   */
+  onSessionRevoquee: (callback: (message: string) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, message: string) => callback(message);
+    ipcRenderer.on("session:revoquee", listener);
+    return () => ipcRenderer.removeListener("session:revoquee", listener);
+  },
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
   genererFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>

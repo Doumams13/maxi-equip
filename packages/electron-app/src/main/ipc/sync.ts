@@ -1,5 +1,5 @@
 import { ipcMain } from "electron";
-import { SyncService } from "../services/syncService.js";
+import { SyncService, type ResultatSynchronisation } from "../services/syncService.js";
 import { getConfigurationSync } from "../services/syncConfig.js";
 import type { SessionManager } from "../auth/sessionManager.js";
 
@@ -22,13 +22,31 @@ import type { SessionManager } from "../auth/sessionManager.js";
  * sensible renvoyée, PUSH/PULL déjà protégés en amont par le JWT
  * d'installation), mais corrigé par cohérence avec le reste de l'audit.
  */
+/**
+ * Logique réelle de "sync:run", extraite en fonction pure (jamais
+ * `ipcMain` dans ce fichier — convention de ce projet, voir
+ * initialisationStockCentral.ts) pour rester testable sans runtime
+ * Electron. Système multiposte fiable (2026-10-28) : un poste bloqué
+ * doit voir sa session locale fermée IMMÉDIATEMENT à la réception du
+ * refus serveur, jamais seulement au prochain cycle automatique (voir
+ * main/index.ts pour ce second cas, la synchronisation périodique).
+ */
+export async function executerSyncRun(
+  syncService: Pick<SyncService, "executerSynchronisation">,
+  sessionManager: Pick<SessionManager, "isAuthenticated" | "clear">
+): Promise<ResultatSynchronisation> {
+  if (!sessionManager.isAuthenticated()) {
+    return { success: false, etape: "push" as const, message: "Non authentifié." };
+  }
+  const resultat = await syncService.executerSynchronisation();
+  if (resultat.posteBloque) {
+    sessionManager.clear();
+  }
+  return resultat;
+}
+
 export function registerSyncIpcHandlers(syncService: SyncService, sessionManager: SessionManager): void {
-  ipcMain.handle("sync:run", async () => {
-    if (!sessionManager.isAuthenticated()) {
-      return { success: false, etape: "push" as const, message: "Non authentifié." };
-    }
-    return syncService.executerSynchronisation();
-  });
+  ipcMain.handle("sync:run", () => executerSyncRun(syncService, sessionManager));
 
   ipcMain.handle("sync:estEnCours", () => {
     return syncService.estEnCours();

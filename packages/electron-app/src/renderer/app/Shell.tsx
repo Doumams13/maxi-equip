@@ -18,10 +18,11 @@ import {
   Users,
   Tag,
   ClipboardList,
+  Server,
 } from "lucide-react";
 import logoUrl from "../assets/maxi-equip-logo.png";
 
-export type ScreenId = "dashboard" | "produits" | "stock" | "transferts" | "ventes" | "factures" | "demandes" | "historique" | "promotions" | "parametres" | "utilisateurs" | "bilan";
+export type ScreenId = "dashboard" | "produits" | "stock" | "transferts" | "ventes" | "factures" | "demandes" | "historique" | "promotions" | "parametres" | "utilisateurs" | "postes" | "bilan";
 
 export interface NavItem {
   id: ScreenId;
@@ -40,6 +41,8 @@ export interface ShellProps {
   onLogout: () => void;
   /** Correction "Workflow réel des demandes", Partie 15/16 : clic sur une notification de demande — redirige ET met en évidence la demande concernée, jamais une simple ouverture de modal isolée. */
   onOuvrirDemande: (demandeId: string) => void;
+  /** Système multiposte fiable (2026-10-28) — voir IndicateurNotifications.tsx. */
+  onOuvrirEntite?: (entityType: string, entityId: string) => void;
   children: ReactNode;
 }
 
@@ -55,6 +58,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
   promotions: Tag,
   parametres: Settings,
   utilisateurs: Users,
+  postes: Server,
   bilan: ClipboardList,
 };
 
@@ -65,7 +69,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
  * présentée comme disponible ») — la protection réelle reste néanmoins
  * assurée côté IPC/services, jamais uniquement ici.
  */
-export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, onOuvrirDemande, children }: ShellProps) {
+export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, onOuvrirDemande, onOuvrirEntite, children }: ShellProps) {
   const [logoutLoading, setLogoutLoading] = useState(false);
 
   async function handleLogout() {
@@ -180,7 +184,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, o
           }}
         >
           <IndicateurMiseAJour />
-          <IndicateurNotifications onOuvrirDemande={onOuvrirDemande} />
+          <IndicateurNotifications onOuvrirDemande={onOuvrirDemande} onOuvrirEntite={onOuvrirEntite} />
           <IndicateurSynchronisation />
         </div>
 

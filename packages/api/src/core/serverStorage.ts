@@ -343,6 +343,40 @@ export interface PromotionRow {
 }
 
 /**
+ * Identité et autorisation d'un poste — système multiposte fiable
+ * (2026-10-28). Le `id` d'un `PosteRow` EST le `sub` du JWT applicatif
+ * (voir emissionJetonApplication.ts) : avant cette correction, `sub`
+ * était une valeur jetée, jamais persistée (voir
+ * verifier-recuperation.ts, désormais modifié pour créer la ligne
+ * correspondante AVANT de signer le jeton) — c'est ce lien qui rend un
+ * blocage distant possible (voir router.ts, future vérification dans
+ * `authentifier()`).
+ *
+ * `role: 'shop'` : le poste de référence, unique par installation (voir
+ * `obtenirOuCreerPosteShop`). `role: 'pcx'` : un poste annexe, au
+ * maximum 5 par installation, vérifié de façon atomique à la création
+ * (voir `creerPosteAnnexeSiLimiteNonAtteinte`) — jamais seulement côté
+ * client, qui pourrait être contourné.
+ *
+ * `nom: null` tant que l'utilisateur n'a pas choisi un nom pour ce
+ * poste (ex. juste après une restauration) — jamais un nom généré
+ * automatiquement, qui masquerait cette étape nécessaire.
+ */
+export interface PosteRow {
+  id: string;
+  nom: string | null;
+  role: "shop" | "pcx";
+  statut: "actif" | "bloque";
+  enregistreLe: string;
+  dernierContactLe: string | null;
+  updatedAt: string;
+}
+
+export type ResultatCreationPosteAnnexe =
+  | { success: true; poste: PosteRow }
+  | { success: false; raison: "limite_atteinte" };
+
+/**
  * Contrat commun — TOUTES les méthodes sont asynchrones (même
  * l'implémentation SQLite, synchrone en interne) pour que les deux
  * implémentations soient interchangeables sans jamais toucher aux routes
@@ -409,6 +443,16 @@ export interface ServerStorage {
   getRecuperationHash(): Promise<string | null>;
   getRecuperationCleChiffree(): Promise<string | null>;
   getRecuperationCleChiffreeCloudBackup(): Promise<string | null>;
+
+  /** Voir PosteRow — identité et autorisation des postes (système multiposte fiable, 2026-10-28). */
+  getPoste(id: string): Promise<PosteRow | null>;
+  listerPostes(): Promise<PosteRow[]>;
+  creerPosteAnnexeSiLimiteNonAtteinte(maintenant: string): Promise<ResultatCreationPosteAnnexe>;
+  obtenirOuCreerPosteShop(maintenant: string): Promise<PosteRow>;
+  definirNomPoste(id: string, nom: string, maintenant: string): Promise<{ applique: boolean }>;
+  bloquerPoste(id: string, maintenant: string): Promise<{ applique: boolean }>;
+  reautoriserPoste(id: string, maintenant: string): Promise<{ applique: boolean }>;
+  retirerPoste(id: string): Promise<{ applique: boolean }>;
 }
 
 /** Convertit un texte libre en slug URL déterministe (minuscules, sans accents, séparé par des tirets) — identique pour les deux implémentations. */

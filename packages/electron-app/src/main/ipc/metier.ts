@@ -609,23 +609,36 @@ export function registerMetierIpcHandlers(
     return { success: true as const, ...calculerBilan(input.debut, input.fin) };
   });
 
-  ipcMain.handle("bilan:genererPdf", async (_e, input: { debut: string; fin: string; periodeLibelle: string }) => {
+  /**
+   * CORRECTION (2026-10-28, "le bilan dans l'appli ne correspond pas au
+   * bilan sur le PDF") : `bilan:genererPdf` ne recalcule PLUS jamais le
+   * bilan lui-même — il reçoit désormais EXACTEMENT les données déjà
+   * affichées à l'écran (`donnees`, renvoyées par `bilan:generer` et
+   * conservées dans l'état de BilanScreen.tsx) et se contente de les
+   * mettre en page. Avant cette correction, chaque bouton relançait sa
+   * propre requête en direct (ventes/mouvements/stock) ; toute activité
+   * survenue entre les deux clics (une vente, ou désormais une
+   * synchronisation quasi instantanée depuis un autre poste) faisait
+   * diverger le PDF de ce qui restait affiché à l'écran — jamais un bug
+   * aléatoire, mais une conséquence directe de deux requêtes prises à
+   * deux instants différents.
+   */
+  ipcMain.handle("bilan:genererPdf", async (_e, input: { debut: string; fin: string; periodeLibelle: string; donnees: ReturnType<typeof calculerBilan> }) => {
     const guard = checkAdminGuard(sessionManager);
     if (!guard.ok) return { success: false, message: guard.message };
     try {
-      const bilan = calculerBilan(input.debut, input.fin);
       const identite = parametresRepository.getIdentite();
       const chemin = await genererBilanPdf({
         identite,
         periodeLibelle: input.periodeLibelle,
-        ventes: bilan.ventes,
-        topProduits: bilan.topProduits,
-        mouvements: bilan.mouvements,
-        stockParEmplacement: bilan.stockParEmplacement,
-        produitsSousSeuilCount: bilan.produitsSousSeuilCount,
-        promotionsActivesPendantPeriode: bilan.promotionsActivesPendantPeriode,
-        depots: bilan.depots,
-        detailProduits: bilan.detailProduits,
+        ventes: input.donnees.ventes,
+        topProduits: input.donnees.topProduits,
+        mouvements: input.donnees.mouvements,
+        stockParEmplacement: input.donnees.stockParEmplacement,
+        produitsSousSeuilCount: input.donnees.produitsSousSeuilCount,
+        promotionsActivesPendantPeriode: input.donnees.promotionsActivesPendantPeriode,
+        depots: input.donnees.depots,
+        detailProduits: input.donnees.detailProduits,
       });
       return { success: true, chemin, nomSuggere: `bilan-${input.debut.slice(0, 10)}-au-${input.fin.slice(0, 10)}.pdf` };
     } catch (err) {

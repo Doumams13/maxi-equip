@@ -104,9 +104,14 @@ export function BilanScreen() {
   }
 
   async function genererPdf() {
+    if (!donnees) return;
     setGenerationPdf(true);
     try {
-      const resultat = await window.maxiEquip.genererBilanPdf(debutISO, finISO, periodeLibelle);
+      // CORRECTION (2026-10-28, "le bilan dans l'appli ne correspond pas
+      // au bilan sur le PDF") : on exporte EXACTEMENT ce qui est déjà
+      // affiché à l'écran (`donnees`), jamais une nouvelle requête — voir
+      // le commentaire de bilan:genererPdf côté Main pour la raison.
+      const resultat = await window.maxiEquip.genererBilanPdf(debutISO, finISO, periodeLibelle, donnees);
       if (!resultat.success || !resultat.chemin) {
         showError("Génération impossible", resultat.message ?? "Une erreur inattendue s'est produite.");
         return;

@@ -421,12 +421,36 @@ const maxiEquipApi = {
       }
     | { success: false; message: string }
   > => ipcRenderer.invoke("bilan:generer", { debut, fin }),
+  /**
+   * CORRECTION (2026-10-28) : `donnees` est désormais le bilan déjà
+   * affiché à l'écran (renvoyé par `genererBilan` ci-dessus) — jamais
+   * recalculé une seconde fois côté Main, pour que le PDF corresponde
+   * toujours exactement à ce que l'utilisateur voit au moment du clic.
+   */
   genererBilanPdf: (
     debut: string,
     fin: string,
-    periodeLibelle: string
+    periodeLibelle: string,
+    donnees: {
+      ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
+      topProduits: { label: string; quantite: number }[];
+      mouvements: { totalEntrees: number; totalSorties: number };
+      stockParEmplacement: { emplacementId: string; nom: string; cartons: number }[];
+      produitsSousSeuilCount: number;
+      promotionsActivesPendantPeriode: number;
+      depots: { id: string; nom: string }[];
+      detailProduits: {
+        produitId: string;
+        motif: string;
+        taille: string;
+        reference: string;
+        stockParEmplacement: { emplacementId: string; cartons: number }[];
+        vendu: number;
+        sortie: number;
+      }[];
+    }
   ): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
-    ipcRenderer.invoke("bilan:genererPdf", { debut, fin, periodeLibelle }),
+    ipcRenderer.invoke("bilan:genererPdf", { debut, fin, periodeLibelle, donnees }),
   lireDocumentBase64: (chemin: string): Promise<{ success: boolean; base64?: string; message?: string }> =>
     ipcRenderer.invoke("documents:lireBase64", chemin),
   telechargerDocument: (chemin: string, nomSuggere: string): Promise<{ success: boolean; canceled?: boolean; chemin?: string; message?: string }> =>

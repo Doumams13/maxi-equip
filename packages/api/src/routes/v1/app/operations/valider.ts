@@ -22,8 +22,18 @@ import type { DemandeValidationStock } from "../../../../core/serverStorage.js";
  */
 function validerDemande(body: unknown): DemandeValidationStock {
   const b = body as { deltas?: unknown; demandeNumeroFacture?: unknown } | undefined;
-  if (!b || !Array.isArray(b.deltas) || b.deltas.length === 0) {
-    throw new ValidationError("deltas (tableau non vide) est requis.");
+  if (!b || !Array.isArray(b.deltas)) {
+    throw new ValidationError("deltas (tableau) est requis.");
+  }
+  // Correction "UNIQUE constraint failed: factures.numero récurrent"
+  // (2026-11-13) : `deltas` peut désormais être vide — une vente 100%
+  // couverte par "Fournisseur externe" n'a aucun stock à décrémenter mais
+  // doit quand même recevoir un numéro de facture unique (voir
+  // venteService.ts, qui appelle désormais cette route dès que la synchro
+  // est configurée, même sans delta). Un tableau vide SANS demande de
+  // numéro n'a en revanche aucune raison d'appeler cette route.
+  if (b.deltas.length === 0 && b.demandeNumeroFacture === undefined) {
+    throw new ValidationError("deltas vide doit être accompagné de demandeNumeroFacture.");
   }
   const deltas = b.deltas.map((d, i) => {
     const o = d as { produitId?: unknown; emplacementId?: unknown; delta?: unknown } | undefined;

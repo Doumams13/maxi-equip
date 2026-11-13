@@ -137,6 +137,38 @@ describe("VenteService/StockService — validation en ligne du stock partagé (b
     });
   });
 
+  /**
+   * Correction "UNIQUE constraint failed: factures.numero récurrent"
+   * (2026-11-13) — reproduit l'incident réel : une vente 100% couverte
+   * par "Fournisseur externe" (aucune répartition par dépôt) doit quand
+   * même demander un numéro au serveur dès que la synchro est configurée,
+   * jamais retomber sur `nextNumero()` local. Avant cette correction,
+   * `deltas.length === 0` sautait entièrement l'appel au service distant.
+   */
+  describe("VenteService.enregistrerVente — synchro configurée, vente 100% 'fournisseur externe' (aucun delta de stock)", () => {
+    it("appelle quand même le service distant pour obtenir un numéro, jamais la numérotation locale", async () => {
+      const faux = new FauxValidationDistante(true, { success: true, numero: "FAC-2099-0077", stockApres: [] });
+      const service = new VenteService(db, produitRepository, stockRepository, mouvementRepository, factureRepository, boiteEnvoiRepository, undefined, undefined, faux as never);
+
+      const resultat = await service.enregistrerVente({
+        pointDeVenteId: shopId,
+        clientNom: "Client Test",
+        clientTelephone: null,
+        clientAdresse: null,
+        vendeurUtilisateurId: "u1",
+        vendeurCompteConnecteNom: "Admin",
+        vendeurNomManuel: null,
+        modeReglement: null,
+        remise: 0,
+        lignes: [{ produitId, quantite: 3, prixUnitaire: 10000, allocationsDepots: [], fournisseurExterne: "Grossiste X", prixAchatExterne: 8000 }],
+      });
+
+      expect(faux.appelsRecus).toHaveLength(1);
+      expect(faux.appelsRecus[0]).toEqual([]); // aucun dépôt décrémenté, mais l'appel a quand même eu lieu
+      expect(resultat.numero).toBe("FAC-2099-0077"); // numéro SERVEUR, jamais FAC-xxxx-0001 local
+    });
+  });
+
   describe("VenteService.enregistrerVente — synchro configurée, stock insuffisant côté serveur", () => {
     it("bloque la vente, AUCUNE facture ni mouvement créé, stock local jamais touché", async () => {
       stockRepository.applyDelta({ emplacementId: depotId, delta: 10, produitId });

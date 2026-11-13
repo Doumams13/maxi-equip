@@ -681,7 +681,28 @@ export class PostgresServerStorage implements ServerStorage {
            RETURNING dernier`,
           [prefix]
         );
-        const prochain = (res.rows[0] as { dernier: number }).dernier + 1;
+        let prochain = (res.rows[0] as { dernier: number }).dernier + 1;
+        // Défense en profondeur (correction "UNIQUE constraint failed:
+        // factures.numero récurrent", 2026-11-13) : si `dernier` a pris du
+        // retard sur l'historique réellement déjà poussé par un poste
+        // quelconque (ex. une correction manuelle du compteur mal
+        // calculée, voir l'incident documenté — exactement reproduit par
+        // le test "saute au prochain numéro RÉELLEMENT libre"), on saute
+        // directement au prochain numéro absent de `operations_synchronisees`
+        // plutôt que de réémettre un numéro déjà utilisé. Toujours tenu
+        // par le même verrou de ligne que ci-dessus (une seule transaction
+        // ouverte, jamais une boucle d'intervalle entre deux requêtes
+        // concurrentes). Bornée pour ne jamais tenir indéfiniment la
+        // transaction en cas d'anomalie extrême.
+        const MAX_TENTATIVES = 10_000;
+        for (let tentative = 0; tentative < MAX_TENTATIVES; tentative++) {
+          const dejaUtilise = await client.query(
+            `SELECT 1 FROM operations_synchronisees WHERE entity_type = 'vente' AND payload_json::json->>'numero' = $1 LIMIT 1`,
+            [`${prefix}${String(prochain).padStart(4, "0")}`]
+          );
+          if ((dejaUtilise.rowCount ?? 0) === 0) break;
+          prochain++;
+        }
         await client.query(`UPDATE compteurs_facture SET dernier = $1 WHERE prefix = $2`, [prochain, prefix]);
         numero = `${prefix}${String(prochain).padStart(4, "0")}`;
       }

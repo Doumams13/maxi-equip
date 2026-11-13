@@ -182,13 +182,21 @@ export class VenteService {
           deltas.push({ produitId: produit.id, emplacementId: allocation.emplacementId, delta: -allocation.quantite });
         }
       }
-      if (deltas.length > 0) {
-        const resultat = await this.validationStockDistanteService.valider(deltas, { prefix: this.factureRepository.prefixNumeroCourant() });
-        if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
-        stockApresServeur = resultat.stockApres;
-        numeroServeur = resultat.numero;
-        deltasValidesEnLigne = deltas;
-      }
+      // CORRECTION "UNIQUE constraint failed: factures.numero récurrent"
+      // (2026-11-13) : appelée désormais MÊME quand `deltas` est vide
+      // (vente 100% couverte par "Fournisseur externe", donc sans aucun
+      // dépôt à décrémenter) — avant cette correction, ce cas sautait
+      // entièrement ce bloc et retombait sur la numérotation locale
+      // (`nextNumero()`), non protégée entre postes. Le serveur (voir
+      // valider.ts/operationsStockStore.ts) accepte maintenant un tableau
+      // de deltas vide tant qu'un numéro est demandé — il n'y a alors
+      // simplement aucun stock à vérifier/décrémenter, seul le numéro est
+      // attribué.
+      const resultat = await this.validationStockDistanteService.valider(deltas, { prefix: this.factureRepository.prefixNumeroCourant() });
+      if (!resultat.success) throw erreurDepuisEchecValidationDistante(resultat);
+      stockApresServeur = resultat.stockApres;
+      numeroServeur = resultat.numero;
+      deltasValidesEnLigne = deltas;
     }
 
     const executer = this.db.transaction(() => {

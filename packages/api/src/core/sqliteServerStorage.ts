@@ -644,7 +644,17 @@ export class SqliteServerStorage implements ServerStorage {
       if (demande.demandeNumeroFacture) {
         const prefix = demande.demandeNumeroFacture.prefix;
         const ligne = db.prepare("SELECT dernier FROM compteurs_facture WHERE prefix = ?").get(prefix) as { dernier: number } | undefined;
-        const prochain = (ligne?.dernier ?? 0) + 1;
+        let prochain = (ligne?.dernier ?? 0) + 1;
+        // Défense en profondeur — même correction que PostgresServerStorage
+        // (voir son commentaire, "UNIQUE constraint failed: factures.numero
+        // récurrent", 2026-11-13) : ne réémet jamais un numéro déjà présent
+        // dans le journal, même si `dernier` a pris du retard.
+        const dejaUtilise = db.prepare("SELECT 1 FROM operations_synchronisees WHERE entity_type = 'vente' AND json_extract(payload_json, '$.numero') = ?");
+        const MAX_TENTATIVES = 10_000;
+        for (let tentative = 0; tentative < MAX_TENTATIVES; tentative++) {
+          if (!dejaUtilise.get(`${prefix}${String(prochain).padStart(4, "0")}`)) break;
+          prochain++;
+        }
         db.prepare(
           `INSERT INTO compteurs_facture (prefix, dernier) VALUES (?, ?)
            ON CONFLICT(prefix) DO UPDATE SET dernier = excluded.dernier`

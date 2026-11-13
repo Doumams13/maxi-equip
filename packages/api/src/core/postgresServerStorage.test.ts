@@ -644,6 +644,56 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
       expect(r2.success && r2.numero).toBe(`${prefix}0002`);
     });
 
+    /**
+     * Correction "UNIQUE constraint failed: factures.numero récurrent"
+     * (2026-11-13) — reproduit exactement le contournement observé sur
+     * PC Shop : une vente 100% couverte par "Fournisseur externe" n'a
+     * AUCUN delta de stock à valider, mais doit quand même recevoir un
+     * numéro unique attribué par le serveur. Avant cette correction,
+     * `deltas: []` empêchait tout simplement d'atteindre ce code (voir
+     * venteService.ts/`if (deltas.length > 0)`, supprimé) — la vente
+     * retombait alors sur la numérotation locale non protégée.
+     */
+    it("demandeNumeroFacture attribue un numéro même SANS aucun delta de stock (vente 100% 'fournisseur externe')", async () => {
+      const prefix = "F-TEST-EXTERNE-";
+      const resultat = await storage.validerEtAppliquerOperationStock({ deltas: [], demandeNumeroFacture: { prefix } });
+      expect(resultat).toMatchObject({ success: true, numero: `${prefix}0001`, stockApres: [] });
+
+      const suivant = await storage.validerEtAppliquerOperationStock({ deltas: [], demandeNumeroFacture: { prefix } });
+      expect(suivant).toMatchObject({ success: true, numero: `${prefix}0002` });
+    });
+
+    /**
+     * Correction "UNIQUE constraint failed: factures.numero récurrent"
+     * (2026-11-13) — incident réel : `compteurs_facture.dernier` a été
+     * remis à une valeur (62) déjà dépassée par l'historique réellement
+     * poussé par d'autres postes (jusqu'à FAC-2026-0083), provoquant des
+     * doublons en chaîne pendant plusieurs semaines. Défense en
+     * profondeur : avant d'attribuer un numéro, on vérifie qu'il n'existe
+     * pas déjà dans le journal `operations_synchronisees` — si c'est le
+     * cas, on saute directement au prochain numéro réellement libre,
+     * jamais en réémettre un déjà utilisé.
+     */
+    it("si le compteur a pris du retard sur l'historique déjà poussé, saute au prochain numéro RÉELLEMENT libre (ne réémet jamais un doublon)", async () => {
+      const prefix = "F-TEST-RETARD-";
+      // Le compteur est à 0 (jamais utilisé), mais 0001 à 0003 existent
+      // déjà dans l'historique — simulant un compteur mal recalculé après
+      // une restauration, exactement comme l'incident réel documenté.
+      await storage.enregistrerOperations([
+        { entityType: "vente", entityId: uuidDeterministe("901"), payload: { numero: `${prefix}0001` } },
+        { entityType: "vente", entityId: uuidDeterministe("902"), payload: { numero: `${prefix}0002` } },
+        { entityType: "vente", entityId: uuidDeterministe("903"), payload: { numero: `${prefix}0003` } },
+      ]);
+
+      const resultat = await storage.validerEtAppliquerOperationStock({ deltas: [], demandeNumeroFacture: { prefix } });
+      expect(resultat).toMatchObject({ success: true, numero: `${prefix}0004` });
+
+      // Le compteur est désormais correctement positionné à 4, pas 1 —
+      // l'appel suivant continue normalement à partir de là.
+      const suivant = await storage.validerEtAppliquerOperationStock({ deltas: [], demandeNumeroFacture: { prefix } });
+      expect(suivant).toMatchObject({ success: true, numero: `${prefix}0005` });
+    });
+
     it("PREUVE DE SÉRIALISATION RÉELLE : deux ventes concurrentes sur le DERNIER article du même produit/dépôt — une seule réussit, jamais les deux (pas de survente)", async () => {
       const produitConcurrence = uuidDeterministe("701");
       const depot = uuidDeterministe("702");

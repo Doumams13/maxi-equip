@@ -180,6 +180,28 @@ describe("Validation atomique du stock partagé — route /app/operations/valide
     expect(res.status).toBe(400);
   });
 
+  /**
+   * Correction "UNIQUE constraint failed: factures.numero récurrent"
+   * (2026-11-13) : `deltas: []` est désormais ACCEPTÉ, mais seulement
+   * accompagné de `demandeNumeroFacture` — une vente 100% "Fournisseur
+   * externe" n'a aucun delta de stock à valider mais doit quand même
+   * recevoir un numéro unique (voir venteService.ts). Un tableau vide
+   * sans aucune demande de numéro reste rejeté : cet appel n'aurait
+   * alors aucune raison d'exister.
+   */
+  it("deltas vide SANS demandeNumeroFacture → 400 (appel sans objet)", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req(validerStock({ deltas: [] })));
+    expect(res.status).toBe(400);
+  });
+
+  it("deltas vide AVEC demandeNumeroFacture → succès, numéro attribué, aucun stock touché", async () => {
+    const router = createRouter();
+    const res = await router.dispatch(req(validerStock({ deltas: [], demandeNumeroFacture: { prefix: "F-2026-" } })));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ success: true, numero: "F-2026-0001", stockApres: [] });
+  });
+
   it("delta à 0 est rejeté (toujours une variation réelle, jamais une opération sans effet)", async () => {
     const router = createRouter();
     const res = await router.dispatch(req(validerStock({ deltas: [{ produitId: PRODUIT, emplacementId: DEPOT, delta: 0 }] })));

@@ -183,6 +183,9 @@ export interface VentesScreenProps {
   /** Correction "Workflow réel des demandes", Partie 9/10 : demande du site à partir de laquelle préremplir une vente — jamais une seconde logique de vente, uniquement une source de données pour ce même formulaire. */
   demandeAPreRemplir?: string | null;
   onPreRemplissageDemandeConsomme?: () => void;
+  /** Correction "ajouter les devis pro-forma" (2026-11-13) — même principe que demandeAPreRemplir : un devis alimente ce même formulaire, jamais une seconde logique de vente. */
+  devisAPreRemplir?: string | null;
+  onPreRemplissageDevisConsomme?: () => void;
 }
 
 /** Calcule le prix effectif côté UI (preview — la source de vérité reste VenteService au moment de la validation). */
@@ -211,7 +214,15 @@ function getPrixEffectif(prixNormal: number, promos: Promotion[], produitId: str
  * vérification par dépôt vient de VenteService, qui appelle lui-même
  * domain.stock.applySortie.
  */
-export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageConsomme, demandeAPreRemplir, onPreRemplissageDemandeConsomme }: VentesScreenProps) {
+export function VentesScreen({
+  session,
+  factureAPreRemplir,
+  onPreRemplissageConsomme,
+  demandeAPreRemplir,
+  onPreRemplissageDemandeConsomme,
+  devisAPreRemplir,
+  onPreRemplissageDevisConsomme,
+}: VentesScreenProps) {
   const { showSuccess, showWarning, showError } = useToast();
   const [produits, setProduits] = useState<Produit[]>([]);
   const [depots, setDepots] = useState<Emplacement[]>([]);
@@ -233,6 +244,7 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
   const [showConfirm, setShowConfirm] = useState(false);
   const [factureOrigineId, setFactureOrigineId] = useState<string | null>(null);
   const [demandeOrigineId, setDemandeOrigineId] = useState<string | null>(null);
+  const [devisOrigineId, setDevisOrigineId] = useState<string | null>(null);
   const [snapshotInitial, setSnapshotInitial] = useState<{
     clientNom: string;
     clientTelephone: string;
@@ -393,6 +405,53 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
       }
     })();
   }, [demandeAPreRemplir]);
+
+  /**
+   * Correction "ajouter les devis pro-forma" (2026-11-13) — préremplit le
+   * formulaire à partir d'un devis, même principe que demandeAPreRemplir
+   * ci-dessus : le devis ne connaît aucune allocation de dépôt (il n'a
+   * jamais touché le stock), l'utilisateur choisit librement le sourcing
+   * ici. Le prix indicatif du devis est repris tel quel (contrairement à
+   * une demande du site, un devis est déjà une estimation interne établie
+   * par un vendeur de ce magasin — pas une donnée potentiellement périmée
+   * venant de l'extérieur), l'utilisateur reste libre de l'ajuster avant
+   * de valider.
+   */
+  useEffect(() => {
+    if (!devisAPreRemplir) return;
+    void (async () => {
+      try {
+        const devis = await window.maxiEquip.devisObtenir(devisAPreRemplir);
+        if (!devis) {
+          showError("Devis introuvable", "Impossible de récupérer les données de ce devis.");
+          onPreRemplissageDevisConsomme?.();
+          return;
+        }
+        setClientNom(devis.clientNom);
+        setClientTelephone(devis.clientTelephone ?? "");
+        if (devis.modeReglement) setModeReglement(devis.modeReglement);
+        setRemise(String(devis.remise));
+        setDevisOrigineId(devisAPreRemplir);
+        const lignesChargees = devis.lignes.map((l) => ({
+          produitId: l.produitId ?? "",
+          quantite: String(l.quantite),
+          prixUnitaire: String(l.prixUnitaire),
+          allocations: {},
+          fournisseurExterne: "",
+          prixAchatExterne: "",
+          surfaceSouhaitee: "",
+        }));
+        setLignes(lignesChargees.length > 0 ? lignesChargees : [ligneVide()]);
+        showSuccess("Devis chargé", "Complétez le sourcing puis validez pour créer la vente et la facture.");
+        onPreRemplissageDevisConsomme?.();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[ventes] préremplissage depuis un devis impossible :", err);
+        showError("Préremplissage impossible", err instanceof Error ? err.message : "Une erreur inattendue s'est produite en récupérant le devis.");
+        onPreRemplissageDevisConsomme?.();
+      }
+    })();
+  }, [devisAPreRemplir]);
 
   /**
    * Réinitialise complètement le formulaire (§1 de la correction) —
@@ -573,6 +632,18 @@ export function VentesScreen({ session, factureAPreRemplir, onPreRemplissageCons
             showError("Vente créée, mais liaison à la demande impossible", err instanceof Error ? err.message : "Erreur inconnue.");
           }
           setDemandeOrigineId(null);
+        }
+        // Correction "ajouter les devis pro-forma" (2026-11-13) — même
+        // principe que demandeOrigineId ci-dessus : liaison réelle
+        // UNIQUEMENT après le succès de la vente, jamais avant ; un échec
+        // de la liaison ne remet jamais en cause la vente déjà créée.
+        if (devisOrigineId && result.factureId) {
+          try {
+            await window.maxiEquip.devisMarquerConvertie(devisOrigineId, result.factureId);
+          } catch (err) {
+            showError("Vente créée, mais liaison au devis impossible", err instanceof Error ? err.message : "Erreur inconnue.");
+          }
+          setDevisOrigineId(null);
         }
         setClientNom("");
         setClientTelephone("");

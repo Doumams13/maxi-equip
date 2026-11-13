@@ -1,5 +1,5 @@
 import { app, ipcMain, BrowserWindow, dialog } from "electron";
-import { copyFile, readFile } from "node:fs/promises";
+import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProduitRepository } from "../repositories/produitRepository.js";
@@ -508,7 +508,10 @@ export function registerMetierIpcHandlers(
     return facture.vendeurNom ?? "—";
   }
 
-  ipcMain.handle("factures:genererPdf", async (_e, factureId: string) => {
+  // Correction "choix du modèle d'impression" (2026-11-13) — "a5" par
+  // défaut si l'appelant n'en précise pas (décision utilisateur), voir
+  // FacturesScreen.tsx (sélecteur A5/A4).
+  ipcMain.handle("factures:genererPdf", async (_e, factureId: string, format?: "a4" | "a5") => {
     const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
     // Correction Phase Finale, Bloc 6 — l'identité HISTORIQUE (capturée à
@@ -524,6 +527,7 @@ export function registerMetierIpcHandlers(
         facture,
         identite,
         vendeurNomAffiche,
+        format,
       });
       return { success: true, chemin, nomSuggere: `${facture.numero}.pdf` };
     } catch (err) {
@@ -539,9 +543,10 @@ export function registerMetierIpcHandlers(
     if (!facture) return { success: false, message: "Facture introuvable." };
     try {
       const lignes = factureRepository.getDocumentInterne(factureId);
+      const repartitionDepots = factureRepository.getRepartitionDepots(factureId);
       const identite = facture.identiteSnapshot ?? parametresRepository.getIdentite();
       const vendeurNomAffiche = resoudreVendeurAffiche(facture, identite);
-      const chemin = await genererDocumentInternePdf({ facture, identite, vendeurNomAffiche, lignes });
+      const chemin = await genererDocumentInternePdf({ facture, identite, vendeurNomAffiche, lignes, repartitionDepots });
       return { success: true, chemin, nomSuggere: `${facture.numero}-document-interne.pdf` };
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -575,9 +580,9 @@ export function registerMetierIpcHandlers(
       const activite = ventesSortiesParProduit.get(p.id);
       return {
         produitId: p.id,
-        motif: p.motif,
         taille: p.taille,
         reference: p.reference,
+        carreauxParCarton: p.carreauxParCarton,
         stockParEmplacement: depots.map((e) => ({ emplacementId: e.id, cartons: stockParDepot.get(e.id)?.get(p.id) ?? 0 })),
         vendu: activite?.vendu ?? 0,
         sortie: activite?.sortie ?? 0,
@@ -1130,6 +1135,69 @@ export function registerMetierIpcHandlers(
       mesSorties: mouvementRepository.sommeQuantiteParType("sortie", userId),
     };
   });
+
+  /**
+   * Écran "Alertes de stock" cliquable (correction TB, 2026-11-13) — même
+   * liste que `produitsSousSeuilListe` ci-dessus (même garde : session
+   * requise, aucun rôle spécifique, comme `dashboard:summary`), enrichie
+   * des dernières dates de vente/entrée/sortie par produit pour l'export
+   * demandé. Toujours recalculée en direct, jamais mise en cache — la
+   * liste peut changer entre l'ouverture du dashboard et le clic.
+   */
+  ipcMain.handle("alertesStock:list", () => {
+    const session = sessionManager.get();
+    if (!session) return [];
+    const emplacements = emplacementRepository.list();
+    const depots = emplacements.filter((e) => !e.estPointDeVente);
+    const depotIds = depots.map((e) => e.id);
+    const produits = produitRepository.listSousSeuilDepots(depotIds);
+    const dates = mouvementRepository.dernieresDatesParProduit(produits.map((p) => p.id));
+    return produits.map((p) => ({
+      ...p,
+      derniereVente: dates.get(p.id)?.derniereVente ?? null,
+      derniereEntree: dates.get(p.id)?.derniereEntree ?? null,
+      derniereSortie: dates.get(p.id)?.derniereSortie ?? null,
+    }));
+  });
+
+  /**
+   * Export CSV des alertes de stock — reçoit EXACTEMENT les lignes déjà
+   * affichées à l'écran (même principe que `bilan:genererPdf`, voir son
+   * commentaire : jamais une nouvelle requête qui pourrait diverger de ce
+   * que l'utilisateur voit au moment du clic).
+   */
+  ipcMain.handle(
+    "alertesStock:exporterCsv",
+    async (
+      _e,
+      lignes: { reference: string; taille: string; type: string; stock: number; seuilAlerte: number; derniereVente: string | null; derniereEntree: string | null; derniereSortie: string | null }[]
+    ) => {
+      const fenetre = BrowserWindow.getFocusedWindow();
+      const nomSuggere = `alertes-stock-${new Date().toISOString().slice(0, 10)}.csv`;
+      const options = { title: "Exporter les alertes de stock", defaultPath: nomSuggere, filters: [{ name: "CSV", extensions: ["csv"] }] };
+      const result = fenetre ? await dialog.showSaveDialog(fenetre, options) : await dialog.showSaveDialog(options);
+      if (result.canceled || !result.filePath) return { success: false, canceled: true };
+      try {
+        const echapper = (v: string) => `"${v.replace(/"/g, '""')}"`;
+        const entetes = ["Référence", "Type", "Taille", "Stock (cartons)", "Seuil d'alerte", "Dernière vente", "Dernière entrée", "Dernière sortie"];
+        const corps = lignes.map((l) =>
+          [l.reference, l.type, l.taille, String(l.stock), String(l.seuilAlerte), l.derniereVente ?? "", l.derniereEntree ?? "", l.derniereSortie ?? ""]
+            .map(echapper)
+            .join(";")
+        );
+        // BOM UTF-8 : sans lui, Excel (Windows) affiche les accents de
+        // l'en-tête ("Référence", "Dernière…") comme des caractères
+        // corrompus — comportement déjà connu de ce tableur, pas une
+        // erreur d'encodage de notre côté.
+        await writeFile(result.filePath, "﻿" + [entetes.map(echapper).join(";"), ...corps].join("\r\n"), "utf-8");
+        return { success: true, chemin: result.filePath };
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[alertesStock] export CSV impossible :", err);
+        return { success: false, message: "Impossible d'exporter le fichier CSV." };
+      }
+    }
+  );
 }
 
 /**

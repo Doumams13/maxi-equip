@@ -50,9 +50,9 @@ export interface BilanPdfInput {
    */
   detailProduits: {
     produitId: string;
-    motif: string;
     taille: string;
     reference: string;
+    carreauxParCarton: number | null;
     stockParEmplacement: { emplacementId: string; cartons: number }[];
     vendu: number;
     sortie: number;
@@ -104,12 +104,12 @@ interface ColonneDetailProduit {
   valeur: (p: BilanPdfInput["detailProduits"][number]) => string;
 }
 
-/** Colonnes fixes (Motif/Taille/Référence/Vendu/Sortie) + une colonne par dépôt, largeur répartie sur l'espace restant — jamais un nombre de colonnes figé (dépend du nombre réel de dépôts). */
+/** Colonnes fixes (Taille/Référence/Pièces-carton/Vendu/Sortie) + une colonne par dépôt, largeur répartie sur l'espace restant — jamais un nombre de colonnes figé (dépend du nombre réel de dépôts). */
 function construireColonnesDetailProduits(depots: BilanPdfInput["depots"]): ColonneDetailProduit[] {
   const colonnesFixesAvant: ColonneDetailProduit[] = [
-    { label: "Motif", largeur: 148, align: "left", valeur: (p) => p.motif },
-    { label: "Taille", largeur: 58, align: "left", valeur: (p) => p.taille },
-    { label: "Référence", largeur: 88, align: "left", valeur: (p) => p.reference },
+    { label: "Taille", largeur: 90, align: "left", valeur: (p) => p.taille },
+    { label: "Référence", largeur: 110, align: "left", valeur: (p) => p.reference },
+    { label: "Pièces/carton", largeur: 70, align: "center", valeur: (p) => (p.carreauxParCarton != null ? String(p.carreauxParCarton) : "—") },
   ];
   const colonnesFixesApres: ColonneDetailProduit[] = [
     { label: "Vendu", largeur: 50, align: "center", valeur: (p) => String(p.vendu) },

@@ -323,7 +323,13 @@ function DashboardAdmin({
           tone="success"
           onClick={() => onNaviguerVersEcran("factures")}
         />
-        <KpiCard icon={AlertTriangle} label="Alertes de stock (global)" value={summary.produitsSousSeuilGlobal} tone="warning" />
+        <KpiCard
+          icon={AlertTriangle}
+          label="Alertes de stock (global)"
+          value={summary.produitsSousSeuilGlobal}
+          tone="warning"
+          onClick={() => onNaviguerVersEcran("alertesStock")}
+        />
         <KpiCard
           icon={Receipt}
           label="Factures émises"
@@ -403,7 +409,17 @@ function DashboardAdmin({
         </Card>
 
         <Card style={{ flex: 1, minWidth: 340 }}>
-          <TitreBloc>Produits en stock faible (global)</TitreBloc>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <TitreBloc>Produits en stock faible (global)</TitreBloc>
+            <button
+              type="button"
+              onClick={() => onNaviguerVersEcran("alertesStock")}
+              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: defaultTokens.colors.accent, fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 14 }}
+            >
+              Tableau complet
+              <ChevronRight size={14} />
+            </button>
+          </div>
           <ListeAlertesStock liste={summary.produitsSousSeuilListe} onNaviguer={onNaviguer} />
         </Card>
       </div>
@@ -429,12 +445,14 @@ function DashboardVendeur({
   summary,
   userId,
   onNaviguer,
+  onNaviguerVersEcran,
   nomMagasin,
 }: {
   nom: string;
   summary: Summary;
   userId: string;
   onNaviguer: (c: CibleOperation) => void;
+  onNaviguerVersEcran: (ecran: ScreenId) => void;
   nomMagasin: string;
 }) {
   return (
@@ -462,7 +480,17 @@ function DashboardVendeur({
       {/* Correction "liste des alertes incomplète" (2026-10-22) — absente
           jusqu'ici du tableau de bord Gérant/Vendeur, alors que la donnée
           était déjà transmise par le backend. */}
-      <TitreBloc>Produits en stock faible (global)</TitreBloc>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <TitreBloc>Produits en stock faible (global)</TitreBloc>
+        <button
+          type="button"
+          onClick={() => onNaviguerVersEcran("alertesStock")}
+          style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: defaultTokens.colors.accent, fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 14 }}
+        >
+          Tableau complet
+          <ChevronRight size={14} />
+        </button>
+      </div>
       <Card style={{ marginBottom: 20 }}>
         <ListeAlertesStock liste={summary.produitsSousSeuilListe} onNaviguer={onNaviguer} />
       </Card>
@@ -541,6 +569,13 @@ export function DashboardScreen({ session, onNaviguerVersOperation, onNaviguerVe
       nomMagasin={nomMagasin}
     />
   ) : (
-    <DashboardVendeur nom={session.nom} summary={summary} userId={session.userId} onNaviguer={onNaviguerVersOperation} nomMagasin={nomMagasin} />
+    <DashboardVendeur
+      nom={session.nom}
+      summary={summary}
+      userId={session.userId}
+      onNaviguer={onNaviguerVersOperation}
+      onNaviguerVersEcran={onNaviguerVersEcran}
+      nomMagasin={nomMagasin}
+    />
   );
 }

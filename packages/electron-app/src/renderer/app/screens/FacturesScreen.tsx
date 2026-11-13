@@ -7,7 +7,7 @@ import { PdfPreviewModal } from "../components/PdfPreviewModal.js";
 import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
 import { imprimerPdf } from "../lib/imprimerPdf.js";
 
-type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean };
+type FactureAvecVendeur = Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean; aRepartitionDepot: boolean };
 
 type ColonneTriable = "numero" | "date" | "client" | "vendeur" | "montant" | "statut";
 type Direction = "asc" | "desc";
@@ -255,6 +255,9 @@ export function FacturesScreen({
   const [chargementAction, setChargementAction] = useState<string | null>(null);
   const [apercu, setApercu] = useState<{ chemin: string; nomSuggere: string; titre: string } | null>(null);
   const [factureAAnnuler, setFactureAAnnuler] = useState<FactureAvecVendeur | null>(null);
+  // Correction "choix du modèle d'impression" (2026-11-13) — A5 par
+  // défaut (décision utilisateur), appliqué à Voir/Imprimer/Télécharger.
+  const [formatImpression, setFormatImpression] = useState<"a5" | "a4">("a5");
 
   const [page, setPage] = useState(1);
 
@@ -375,7 +378,7 @@ export function FacturesScreen({
   async function handleVoir(factureId: string, numero: string) {
     setChargementAction(factureId);
     try {
-      const genere = await window.maxiEquip.genererFacturePdf(factureId);
+      const genere = await window.maxiEquip.genererFacturePdf(factureId, formatImpression);
       if (genere.success && genere.chemin) {
         setApercu({ chemin: genere.chemin, nomSuggere: genere.nomSuggere ?? `${numero}.pdf`, titre: `Facture ${numero}` });
       } else {
@@ -389,7 +392,7 @@ export function FacturesScreen({
   async function handleImprimer(factureId: string) {
     setChargementAction(factureId);
     try {
-      const genere = await window.maxiEquip.genererFacturePdf(factureId);
+      const genere = await window.maxiEquip.genererFacturePdf(factureId, formatImpression);
       if (!genere.success || !genere.chemin) {
         showError("Impression impossible", genere.message ?? "Impossible de générer la facture.");
         return;
@@ -404,7 +407,7 @@ export function FacturesScreen({
   async function handleTelecharger(factureId: string, numero: string) {
     setChargementAction(factureId);
     try {
-      const genere = await window.maxiEquip.genererFacturePdf(factureId);
+      const genere = await window.maxiEquip.genererFacturePdf(factureId, formatImpression);
       if (!genere.success || !genere.chemin) {
         showError("Enregistrement impossible", genere.message ?? "Impossible de générer la facture.");
         return;
@@ -495,7 +498,7 @@ export function FacturesScreen({
             <Search size={15} color={defaultTokens.colors.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
             <input
               style={{ ...inputStyle, width: "100%", boxSizing: "border-box", paddingLeft: 34 }}
-              placeholder={session.role === "administrateur" ? "Rechercher par numéro, client ou vendeur…" : "Rechercher par numéro ou client…"}
+              placeholder={session.role === "administrateur" ? "Rechercher par numéro, client, référence ou vendeur…" : "Rechercher par numéro, client ou référence…"}
               value={recherche}
               onChange={(e) => { setRecherche(e.target.value); setPage(1); }}
             />
@@ -527,6 +530,15 @@ export function FacturesScreen({
                 {v.nom}
               </option>
             ))}
+          </select>
+          <select
+            style={inputStyle}
+            value={formatImpression}
+            onChange={(e) => setFormatImpression(e.target.value as "a5" | "a4")}
+            title="Format utilisé pour Voir / Imprimer / Télécharger"
+          >
+            <option value="a5">Modèle A5 (compact)</option>
+            <option value="a4">Modèle A4 (complet)</option>
           </select>
           {(recherche || statutFiltre !== "tous" || vendeurFiltreId !== null) && (
             <Button
@@ -622,12 +634,15 @@ export function FacturesScreen({
                           <Download size={15} />
                         </Button>
                         {/* Correction "Document interne — réservé aux
-                            achats extérieurs" §1 : n'apparaît que si
-                            cette facture a réellement un relevé
-                            d'approvisionnement externe associé — plus
-                            jamais affiché sans condition. */}
-                        {f.aAchatExterieur && (
-                          <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Document interne — Achat extérieur">
+                            achats extérieurs" §1, étendue par "facture
+                            détaillée pour le dépôt" (2026-11-13) :
+                            n'apparaît que si cette facture a réellement
+                            quelque chose à montrer dans ce document (un
+                            achat extérieur ET/OU une répartition réelle
+                            par dépôt) — plus jamais affiché sans
+                            condition. */}
+                        {f.aRepartitionDepot && (
+                          <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Document interne — Achat extérieur / détail dépôt">
                             <FileText size={15} />
                           </Button>
                         )}

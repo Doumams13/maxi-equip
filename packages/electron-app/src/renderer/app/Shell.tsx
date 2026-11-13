@@ -19,10 +19,30 @@ import {
   Tag,
   ClipboardList,
   Server,
+  AlertTriangle,
+  FileSignature,
 } from "lucide-react";
 import logoUrl from "../assets/maxi-equip-logo.png";
 
-export type ScreenId = "dashboard" | "produits" | "stock" | "transferts" | "ventes" | "factures" | "demandes" | "historique" | "promotions" | "parametres" | "utilisateurs" | "postes" | "bilan";
+export type ScreenId =
+  | "dashboard"
+  | "produits"
+  | "stock"
+  | "transferts"
+  | "ventes"
+  | "factures"
+  | "devis"
+  | "demandes"
+  | "historique"
+  | "promotions"
+  | "parametres"
+  | "utilisateurs"
+  | "postes"
+  | "bilan"
+  // Correction TB "alertes de stock cliquable" (2026-11-13) — jamais une
+  // entrée de menu (atteint uniquement en cliquant la section du
+  // Dashboard), voir AppRoot.tsx (absent de `navItems`).
+  | "alertesStock";
 
 export interface NavItem {
   id: ScreenId;
@@ -53,6 +73,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
   transferts: ArrowLeftRight,
   ventes: ShoppingCart,
   factures: Receipt,
+  devis: FileSignature,
   demandes: MessageSquareText,
   historique: History,
   promotions: Tag,
@@ -60,6 +81,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
   utilisateurs: Users,
   postes: Server,
   bilan: ClipboardList,
+  alertesStock: AlertTriangle,
 };
 
 /**

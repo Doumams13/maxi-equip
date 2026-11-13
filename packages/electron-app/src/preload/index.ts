@@ -42,6 +42,47 @@ interface UtilisateurPublic {
   updatedAt: string;
 }
 
+/**
+ * Devis pro-forma (2026-11-13) — même principe que UtilisateurPublic
+ * ci-dessus : défini localement, jamais dans shared-types (un devis ne
+ * traverse jamais la frontière process/réseau, voir devisRepository.ts
+ * côté Main). Doit rester synchronisé avec Devis/LigneDevis là-bas.
+ */
+interface LigneDevisIpc {
+  produitId: string | null;
+  motif: string;
+  reference: string | null;
+  taille: string;
+  quantite: number;
+  prixUnitaire: number;
+}
+interface DevisIpc {
+  id: string;
+  numero: string;
+  date: string;
+  clientNom: string;
+  clientTelephone: string | null;
+  clientAdresse: string | null;
+  modeReglement: string | null;
+  total: number;
+  remise: number;
+  statut: "brouillon" | "convertie" | "annulee";
+  factureId: string | null;
+  utilisateurId: string | null;
+  lignes: LigneDevisIpc[];
+  createdAt: string;
+  updatedAt: string;
+}
+interface NouveauDevisIpc {
+  clientNom: string;
+  clientTelephone?: string | null;
+  clientAdresse?: string | null;
+  modeReglement?: string | null;
+  total: number;
+  remise?: number;
+  lignes: LigneDevisIpc[];
+}
+
 type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "CONNEXION_REQUISE" | "UNKNOWN";
 type StockOperationResult =
   | { success: true; [key: string]: unknown }
@@ -266,7 +307,7 @@ const maxiEquipApi = {
     page: number;
     tailleParPage: number;
   }): Promise<{
-    resultats: (Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean })[];
+    resultats: (Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean; aRepartitionDepot: boolean })[];
     totalResultats: number;
     page: number;
     totalPages: number;
@@ -356,6 +397,19 @@ const maxiEquipApi = {
   demandesRefuser: (id: string, motif: string): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:refuser", id, motif),
   demandesAnnuler: (id: string): Promise<import("@maxi-equip/shared-types").Demande> => ipcRenderer.invoke("demandes:annuler", id),
 
+  // --- Devis pro-forma (2026-11-13) — purement local à ce poste, voir
+  // devisRepository.ts (jamais ajouté à shared-types : type dupliqué ici
+  // intentionnellement, même principe que les types inline déjà utilisés
+  // ailleurs dans ce fichier pour une donnée qui ne traverse jamais le
+  // réseau). La conversion en facture passe par VentesScreen (préremplie,
+  // même mécanisme qu'une demande) puis `devisMarquerConvertie` — jamais
+  // une seconde logique de vente ici. ---
+  devisLister: (): Promise<DevisIpc[]> => ipcRenderer.invoke("devis:lister"),
+  devisObtenir: (id: string): Promise<DevisIpc | null> => ipcRenderer.invoke("devis:obtenir", id),
+  devisCreer: (input: NouveauDevisIpc): Promise<DevisIpc> => ipcRenderer.invoke("devis:creer", input),
+  devisMarquerConvertie: (id: string, factureId: string): Promise<DevisIpc> => ipcRenderer.invoke("devis:marquer-convertie", id, factureId),
+  devisAnnuler: (id: string): Promise<DevisIpc> => ipcRenderer.invoke("devis:annuler", id),
+
   notificationsLister: (): Promise<import("@maxi-equip/shared-types").Notification[]> => ipcRenderer.invoke("notifications:lister"),
   notificationsCompterNonLues: (): Promise<number> => ipcRenderer.invoke("notifications:compter-non-lues"),
   notificationsMarquerLue: (id: string): Promise<void> => ipcRenderer.invoke("notifications:marquer-lue", id),
@@ -391,8 +445,8 @@ const maxiEquipApi = {
   },
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
-  genererFacturePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
-    ipcRenderer.invoke("factures:genererPdf", factureId),
+  genererFacturePdf: (factureId: string, format?: "a4" | "a5"): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
+    ipcRenderer.invoke("factures:genererPdf", factureId, format),
   genererDocumentInternePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererDocumentInternePdf", factureId),
   // --- Bilan d'activité (2026-10-21) — réservé à l'Administrateur, voir checkAdminGuard côté Main. ---
@@ -411,9 +465,9 @@ const maxiEquipApi = {
         depots: { id: string; nom: string }[];
         detailProduits: {
           produitId: string;
-          motif: string;
           taille: string;
           reference: string;
+          carreauxParCarton: number | null;
           stockParEmplacement: { emplacementId: string; cartons: number }[];
           vendu: number;
           sortie: number;
@@ -441,9 +495,9 @@ const maxiEquipApi = {
       depots: { id: string; nom: string }[];
       detailProduits: {
         produitId: string;
-        motif: string;
         taille: string;
         reference: string;
+        carreauxParCarton: number | null;
         stockParEmplacement: { emplacementId: string; cartons: number }[];
         vendu: number;
         sortie: number;
@@ -451,6 +505,34 @@ const maxiEquipApi = {
     }
   ): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("bilan:genererPdf", { debut, fin, periodeLibelle, donnees }),
+  // --- Alertes de stock cliquables (correction TB, 2026-11-13) ---
+  listAlertesStock: (): Promise<
+    {
+      id: string;
+      modeleId: string | null;
+      motif: string;
+      type: string;
+      taille: string;
+      reference: string;
+      stock: number;
+      seuilAlerte: number;
+      derniereVente: string | null;
+      derniereEntree: string | null;
+      derniereSortie: string | null;
+    }[]
+  > => ipcRenderer.invoke("alertesStock:list"),
+  exporterAlertesStockCsv: (
+    lignes: {
+      reference: string;
+      type: string;
+      taille: string;
+      stock: number;
+      seuilAlerte: number;
+      derniereVente: string | null;
+      derniereEntree: string | null;
+      derniereSortie: string | null;
+    }[]
+  ): Promise<{ success: boolean; canceled?: boolean; chemin?: string; message?: string }> => ipcRenderer.invoke("alertesStock:exporterCsv", lignes),
   lireDocumentBase64: (chemin: string): Promise<{ success: boolean; base64?: string; message?: string }> =>
     ipcRenderer.invoke("documents:lireBase64", chemin),
   telechargerDocument: (chemin: string, nomSuggere: string): Promise<{ success: boolean; canceled?: boolean; chemin?: string; message?: string }> =>

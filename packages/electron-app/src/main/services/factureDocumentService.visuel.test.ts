@@ -86,6 +86,7 @@ describe("genererFacturePdf — tableau, positions réelles du texte extraites d
       facture: construireFacture(),
       identite: IDENTITE_TEST,
       vendeurNomAffiche: "Jean Dupont",
+      format: "a4", // ce test vérifie spécifiquement la géométrie du tableau A4 — jamais le format par défaut (A5 depuis la correction "choix du modèle d'impression", 2026-11-13).
     });
 
     const data = new Uint8Array(readFileSync(chemin));

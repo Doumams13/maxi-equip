@@ -226,6 +226,46 @@ CREATE TABLE IF NOT EXISTS lignes_releve_interne (
   prix_vente        INTEGER NOT NULL
 );
 
+-- Devis pro-forma (correction "ajouter les devis pro-forma", 2026-11-13)
+-- — brouillon LOCAL à ce poste, jamais synchronisé/validé en stock
+-- (décision de portée : un devis n'engage aucun mouvement, c'est la
+-- conversion en facture — écran Vente préremplie, même mécanisme déjà
+-- utilisé pour une "demande" du site — qui applique réellement le
+-- stock, via le circuit normal, jamais une seconde logique). Numérotation
+-- purement locale et séquentielle (devisRepository.nextNumero), sans
+-- aucun rapport avec compteurs_facture : un devis n'a pas besoin d'un
+-- numéro unique multiposte, contrairement à une facture.
+CREATE TABLE IF NOT EXISTS devis (
+  id               TEXT PRIMARY KEY,
+  numero           TEXT NOT NULL,
+  date             TEXT NOT NULL,
+  client_nom       TEXT NOT NULL,
+  client_telephone TEXT,
+  client_adresse   TEXT,
+  mode_reglement   TEXT,
+  total            INTEGER NOT NULL,
+  remise           INTEGER NOT NULL DEFAULT 0,
+  -- "brouillon" = devis actif, pas encore transformé. "convertie" = a
+  -- donné lieu à une facture réelle (facture_id renseigné). "annulee" =
+  -- abandonné sans suite, jamais supprimé (trace conservée).
+  statut           TEXT NOT NULL DEFAULT 'brouillon' CHECK (statut IN ('brouillon', 'convertie', 'annulee')),
+  facture_id       TEXT REFERENCES factures (id),
+  utilisateur_id   TEXT REFERENCES utilisateurs (id),
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS lignes_devis (
+  id            TEXT PRIMARY KEY,
+  devis_id      TEXT NOT NULL REFERENCES devis (id),
+  produit_id    TEXT REFERENCES produits (id),
+  motif         TEXT NOT NULL,
+  reference     TEXT,
+  taille        TEXT NOT NULL,
+  quantite      INTEGER NOT NULL CHECK (quantite > 0),
+  prix_unitaire INTEGER NOT NULL
+);
+
 -- ==========================================================
 -- Demandes du site + notifications
 -- ==========================================================

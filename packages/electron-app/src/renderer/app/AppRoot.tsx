@@ -15,6 +15,8 @@ import { UtilisateursScreen } from "./screens/UtilisateursScreen.js";
 import { PostesScreen } from "./screens/PostesScreen.js";
 import { PromotionsScreen } from "./screens/PromotionsScreen.js";
 import { BilanScreen } from "./screens/BilanScreen.js";
+import { AlertesStockScreen } from "./screens/AlertesStockScreen.js";
+import { DevisScreen } from "./screens/DevisScreen.js";
 
 type Session = { userId: string; identifiant: string; nom: string; role: string };
 
@@ -55,6 +57,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   const [cibleSurbrillance, setCibleSurbrillance] = useState<CibleOperation | null>(null);
   const [factureAPreRemplir, setFactureAPreRemplir] = useState<string | null>(null);
   const [demandeAPreRemplir, setDemandeAPreRemplir] = useState<string | null>(null);
+  const [devisAPreRemplir, setDevisAPreRemplir] = useState<string | null>(null);
   const [demandesActives, setDemandesActives] = useState(0);
   const [nomPosteRequis, setNomPosteRequis] = useState(false);
 
@@ -158,6 +161,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     { id: "transferts", label: "Transferts", autorise: permissions.canOperateStock },
     { id: "ventes", label: "Vente", autorise: permissions.canOperateSales },
     { id: "factures", label: "Factures", autorise: permissions.canAccessHistory },
+    { id: "devis", label: "Devis", autorise: permissions.canOperateSales },
     { id: "demandes", label: "Demandes", autorise: permissions.canHandleSiteRequests, badge: demandesActives > 0 ? demandesActives : undefined },
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
     { id: "promotions", label: "Promotions", autorise: permissions.canManagePromotions },
@@ -218,8 +222,12 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
               setDemandeAPreRemplir(null);
               void rafraichirCompteurDemandes();
             }}
+            devisAPreRemplir={devisAPreRemplir}
+            onPreRemplissageDevisConsomme={() => setDevisAPreRemplir(null)}
           />
         );
+      case "devis":
+        return <DevisScreen onConvertirEnVente={(devisId) => { setDevisAPreRemplir(devisId); setActiveScreen("ventes"); }} />;
       case "factures":
         return (
           <FacturesScreen
@@ -269,6 +277,8 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       case "bilan":
         if (session!.role !== "administrateur") return null;
         return <BilanScreen />;
+      case "alertesStock":
+        return <AlertesStockScreen onRetour={() => setActiveScreen("dashboard")} />;
       default:
         return null;
     }

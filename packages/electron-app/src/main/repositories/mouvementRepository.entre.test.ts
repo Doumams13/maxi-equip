@@ -182,3 +182,101 @@ describe("MouvementRepository.detailVenteSortieParProduitEntre — base réelle"
     expect(detail.size).toBe(0);
   });
 });
+
+/**
+ * Écran "Alertes de stock" cliquable (correction TB, 2026-11-13) — même
+ * base réelle que les deux describe ci-dessus, réutilisées via les mêmes
+ * helpers (creerFacture/insererMouvement redéfinis ici par souci
+ * d'indépendance entre les describe, même style que le reste du fichier).
+ */
+describe("MouvementRepository.dernieresDatesParProduit — base réelle", () => {
+  let db: Database.Database;
+  let repository: MouvementRepository;
+  const DEPOT_ID = "depot-test-3";
+  const PRODUIT_A = "produit-test-dates-a";
+  const PRODUIT_B = "produit-test-dates-b";
+
+  beforeEach(() => {
+    db = ouvrirBaseDeTest();
+    repository = new MouvementRepository(db);
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO emplacements (id, nom, type, ville, est_point_de_vente, created_at, updated_at) VALUES (?, 'Akébé', 'depot', 'Libreville', 0, ?, ?)"
+    ).run(DEPOT_ID, maintenant, maintenant);
+    for (const id of [PRODUIT_A, PRODUIT_B]) {
+      db.prepare(
+        "INSERT INTO produits (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, created_at, updated_at) VALUES (?, 'X', 'Y', 'Z', 1, ?, 1000, 0, ?, ?)"
+      ).run(id, `REF-${id}`, maintenant, maintenant);
+    }
+    db.prepare(
+      "INSERT INTO utilisateurs (id, nom, identifiant, password_hash, role, created_at, updated_at) VALUES ('u1', 'T', 't', 'x', 'administrateur', ?, ?)"
+    ).run(maintenant, maintenant);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  afterAll(() => {
+    if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
+  });
+
+  function creerFacture(id: string, numero: string, annulee: boolean): void {
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO factures (id, numero, date, emplacement_id, client_nom, vendeur_utilisateur_id, total, remise, statut_paiement, montant_paye, statut_livraison, created_at, updated_at) VALUES (?, ?, '2026-01-05T00:00:00.000Z', ?, 'Client', 'u1', 1000, 0, 'payee', 1000, 'en_attente', ?, ?)"
+    ).run(id, numero, DEPOT_ID, maintenant, maintenant);
+    if (annulee) db.prepare("UPDATE factures SET annulee_le = ? WHERE id = ?").run(maintenant, id);
+  }
+
+  function insererMouvement(
+    produitId: string,
+    type: "entree" | "sortie",
+    date: string,
+    options: { factureId?: string; annuleLe?: string } = {}
+  ): void {
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO mouvements (id, type, produit_id, emplacement_id, quantite, date, facture_id, annule_le, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)"
+    ).run(`mvt-${Math.random()}`, type, produitId, DEPOT_ID, date, options.factureId ?? null, options.annuleLe ?? null, maintenant, maintenant);
+  }
+
+  it("renvoie, par produit, la date la PLUS RÉCENTE de chaque type — vente (facture non NULL) distincte de la sortie manuelle", () => {
+    creerFacture("f1", "FAC-1", false);
+    insererMouvement(PRODUIT_A, "sortie", "2026-01-05T00:00:00.000Z", { factureId: "f1" }); // vente la plus ancienne
+    creerFacture("f2", "FAC-2", false);
+    insererMouvement(PRODUIT_A, "sortie", "2026-01-20T00:00:00.000Z", { factureId: "f2" }); // vente la plus récente
+    insererMouvement(PRODUIT_A, "entree", "2026-01-02T00:00:00.000Z");
+    insererMouvement(PRODUIT_A, "entree", "2026-01-15T00:00:00.000Z"); // entrée la plus récente
+    insererMouvement(PRODUIT_A, "sortie", "2026-01-10T00:00:00.000Z"); // sortie manuelle (sans facture)
+
+    const dates = repository.dernieresDatesParProduit([PRODUIT_A, PRODUIT_B]);
+
+    expect(dates.get(PRODUIT_A)).toEqual({
+      derniereVente: "2026-01-20T00:00:00.000Z",
+      derniereEntree: "2026-01-15T00:00:00.000Z",
+      derniereSortie: "2026-01-10T00:00:00.000Z",
+    });
+    // PRODUIT_B n'a AUCUN mouvement : absent de la Map (même principe que
+    // detailVenteSortieParProduitEntre — jamais une ligne à zéro/null
+    // superflue), à l'appelant (voir metier.ts, `?? null`) de retomber sur
+    // null via l'optional chaining.
+    expect(dates.get(PRODUIT_B)).toBeUndefined();
+  });
+
+  it("exclut une vente liée à une facture ANNULÉE, et un mouvement manuel lui-même annulé — même règle que detailVenteSortieParProduitEntre", () => {
+    creerFacture("f3", "FAC-3", true);
+    insererMouvement(PRODUIT_A, "sortie", "2026-01-05T00:00:00.000Z", { factureId: "f3" }); // facture annulée → exclu
+    insererMouvement(PRODUIT_A, "sortie", "2026-01-06T00:00:00.000Z", { annuleLe: new Date().toISOString() }); // manuel annulé → exclu
+
+    const dates = repository.dernieresDatesParProduit([PRODUIT_A]);
+
+    // Plus aucune ligne ne correspond pour PRODUIT_A une fois les deux
+    // mouvements exclus → absent de la Map, pas une ligne à null.
+    expect(dates.get(PRODUIT_A)).toBeUndefined();
+  });
+
+  it("avec un tableau de produits vide, ne touche jamais la base et renvoie une Map vide", () => {
+    expect(repository.dernieresDatesParProduit([])).toEqual(new Map());
+  });
+});

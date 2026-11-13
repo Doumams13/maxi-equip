@@ -7,9 +7,9 @@ type Preset = "jour" | "semaine" | "mois" | "personnalise";
 
 interface BilanDetailProduit {
   produitId: string;
-  motif: string;
   taille: string;
   reference: string;
+  carreauxParCarton: number | null;
   stockParEmplacement: { emplacementId: string; cartons: number }[];
   vendu: number;
   sortie: number;
@@ -258,7 +258,7 @@ export function BilanScreen() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
                   <thead>
                     <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left", position: "sticky", top: 0 }}>
-                      {["Motif", "Taille", "Référence", ...donnees.depots.map((d) => `Stock ${d.nom}`), "Vendu", "Sortie"].map((h) => (
+                      {["Taille", "Référence", "Pièces/carton", ...donnees.depots.map((d) => `Stock ${d.nom}`), "Vendu", "Sortie"].map((h) => (
                         <th
                           key={h}
                           style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12, whiteSpace: "nowrap", background: defaultTokens.colors.surfaceAlt }}
@@ -271,9 +271,9 @@ export function BilanScreen() {
                   <tbody>
                     {donnees.detailProduits.map((p) => (
                       <tr key={p.produitId} style={{ borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
-                        <td style={{ padding: "10px 16px" }}>{p.motif}</td>
                         <td style={{ padding: "10px 16px", fontWeight: 700 }}>{p.taille}</td>
                         <td style={{ padding: "10px 16px", color: defaultTokens.colors.textFaint }}>{p.reference}</td>
+                        <td style={{ padding: "10px 16px", textAlign: "center" }}>{p.carreauxParCarton ?? "—"}</td>
                         {donnees.depots.map((d) => (
                           <td key={d.id} style={{ padding: "10px 16px", textAlign: "center" }}>
                             {p.stockParEmplacement.find((s) => s.emplacementId === d.id)?.cartons ?? 0}

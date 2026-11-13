@@ -307,4 +307,119 @@ describe("FactureRepository.listAvecVendeurPagine — recherche texte, y compris
     expect(rechercher("FAC-UNIQUE", false).totalResultats).toBe(1);
     expect(rechercher("FAC-UNIQUE", true).totalResultats).toBe(1);
   });
+
+  // Correction "rechercher une référence vendue dans les factures" (2026-11-13).
+  it("trouve une facture par la référence d'un produit vendu, même sans privilège vendeur (Gérant inclus)", () => {
+    creerFactureVendeur("FAC-REF", "u1", null); // ligne avec reference "R1"
+    creerFactureVendeur("FAC-AUTRE", "u1", null);
+
+    const { totalResultats } = rechercher("R1", false);
+    expect(totalResultats).toBe(2); // les deux factures de la fixture partagent la référence "R1"
+
+    expect(rechercher("REFERENCE-INEXISTANTE", false).totalResultats).toBe(0);
+  });
+});
+
+// Correction "facture détaillée pour le dépôt" (2026-11-13).
+describe("FactureRepository.getRepartitionDepots / aRepartitionDepot — base réelle", () => {
+  let db: Database.Database;
+  let repository: FactureRepository;
+  const DEPOT_ID = "depot-akebe-repartition";
+
+  beforeEach(() => {
+    db = ouvrirBaseDeTest();
+    repository = new FactureRepository(db);
+    creerEmplacementShop(db);
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO emplacements (id, nom, type, ville, est_point_de_vente, created_at, updated_at) VALUES (?, 'Akébé', 'depot', 'Libreville', 0, ?, ?)"
+    ).run(DEPOT_ID, maintenant, maintenant);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  afterAll(() => {
+    if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
+  });
+
+  function insererMouvementSortie(factureId: string, produitId: string, emplacementId: string | null, quantite: number): void {
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO mouvements (id, type, produit_id, emplacement_id, quantite, date, facture_id, created_at, updated_at) VALUES (?, 'sortie', ?, ?, ?, ?, ?, ?, ?)"
+    ).run(`mvt-${Math.random()}`, produitId, emplacementId, quantite, maintenant, factureId, maintenant, maintenant);
+  }
+
+  function creerProduit(id: string, reference: string): void {
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO produits (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, created_at, updated_at) VALUES (?, 'X', 'Y', 'Z', 1, ?, 1000, 0, ?, ?)"
+    ).run(id, reference, maintenant, maintenant);
+  }
+
+  it("getRepartitionDepots renvoie le motif/taille/référence (snapshot de la ligne facture) pour chaque mouvement réel de dépôt, jamais le complément 'Fournisseur externe' (emplacement_id NULL)", () => {
+    creerProduit("p1", "MB-6060");
+    const factureId = creerFacture(repository, {
+      numero: "FAC-DEP-1",
+      date: "2026-01-01T00:00:00.000Z",
+      total: 10000,
+      lignes: [ligne({ produitId: "p1", reference: "MB-6060", motif: "Marbre Blanc", taille: "60x60", quantite: 10, prixUnitaire: 1000 })],
+    });
+    insererMouvementSortie(factureId, "p1", DEPOT_ID, 6); // réel, dépôt
+    insererMouvementSortie(factureId, "p1", null, 4); // complément externe — jamais inclus ici
+
+    const repartition = repository.getRepartitionDepots(factureId);
+    expect(repartition).toEqual([{ motif: "Marbre Blanc", taille: "60x60", reference: "MB-6060", emplacementId: DEPOT_ID, emplacementNom: "Akébé", quantite: 6 }]);
+  });
+
+  it("aRepartitionDepot est vrai pour une vente 100% dépôt réel, MÊME SANS relevé d'approvisionnement externe", () => {
+    creerProduit("p2", "MB-3030");
+    const factureId = creerFacture(repository, {
+      numero: "FAC-DEP-2",
+      date: "2026-01-01T00:00:00.000Z",
+      total: 10000,
+      lignes: [ligne({ produitId: "p2", reference: "MB-3030", motif: "Marbre Blanc", taille: "30x30", quantite: 10, prixUnitaire: 1000 })],
+    });
+    insererMouvementSortie(factureId, "p2", DEPOT_ID, 10);
+
+    const { resultats } = repository.listAvecVendeurPagine({
+      recherche: "",
+      statutFiltre: "tous",
+      vendeurUtilisateurId: null,
+      inclureVendeurDansRecherche: false,
+      colonneTri: null,
+      direction: "desc",
+      page: 1,
+      tailleParPage: 20,
+    });
+    const facture = resultats.find((f) => f.id === factureId)!;
+    expect(facture.aAchatExterieur).toBe(false);
+    expect(facture.aRepartitionDepot).toBe(true);
+  });
+
+  it("aRepartitionDepot est faux pour une vente 100% achat extérieur (emplacement_id NULL uniquement, aucun relevé)", () => {
+    creerProduit("p3", "MB-4040");
+    const factureId = creerFacture(repository, {
+      numero: "FAC-DEP-3",
+      date: "2026-01-01T00:00:00.000Z",
+      total: 10000,
+      lignes: [ligne({ produitId: "p3", reference: "MB-4040", motif: "Marbre Blanc", taille: "40x40", quantite: 10, prixUnitaire: 1000 })],
+    });
+    insererMouvementSortie(factureId, "p3", null, 10);
+
+    const { resultats } = repository.listAvecVendeurPagine({
+      recherche: "",
+      statutFiltre: "tous",
+      vendeurUtilisateurId: null,
+      inclureVendeurDansRecherche: false,
+      colonneTri: null,
+      direction: "desc",
+      page: 1,
+      tailleParPage: 20,
+    });
+    const facture = resultats.find((f) => f.id === factureId)!;
+    expect(facture.aAchatExterieur).toBe(false);
+    expect(facture.aRepartitionDepot).toBe(false);
+  });
 });

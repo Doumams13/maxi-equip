@@ -26,6 +26,18 @@ export const PAGE_HEIGHT = 841.92;
 export const MARGE_GAUCHE = 45.5;
 export const MARGE_DROITE = 576;
 
+/**
+ * Format A5 (correction "choix du modèle d'impression — A5 par défaut",
+ * 2026-11-13) — décision utilisateur : une VRAIE mise en page dédiée,
+ * jamais un A4 réduit à l'échelle (l'A5 fait environ la moitié de la
+ * surface de l'A4, un simple scale aurait rendu le texte illisible).
+ * Dimensions ISO A5 réelles (148 × 210 mm), jamais approximées.
+ */
+export const PAGE_WIDTH_A5 = 419.53;
+export const PAGE_HEIGHT_A5 = 595.28;
+export const MARGE_GAUCHE_A5 = 28;
+export const MARGE_DROITE_A5 = 391.5;
+
 export const VERT = "#6ca545";
 export const GRIS_LABEL = "#8a8574";
 export const FOND_BOITE = "#f3f2ee";
@@ -81,6 +93,8 @@ export interface FactureDocumentInput {
   facture: Facture;
   identite: IdentiteEntrepriseSnapshot;
   vendeurNomAffiche: string;
+  /** "a5" par défaut (décision utilisateur) — "a4" reproduit le modèle officiel existant à l'identique, jamais modifié par cette correction. */
+  format?: "a4" | "a5";
 }
 
 /**
@@ -191,16 +205,19 @@ export function dessinerPiedDePage(doc: PDFKit.PDFDocument, identite: IdentiteEn
  * créer plusieurs factures/numéros").
  */
 export async function genererFacturePdf(input: FactureDocumentInput): Promise<string> {
+  const format = input.format ?? "a5";
   const dossier = join(app.getPath("userData"), "factures-generees");
   if (!existsSync(dossier)) mkdirSync(dossier, { recursive: true });
   const chemin = join(dossier, `${input.facture.numero}.pdf`);
 
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: [PAGE_WIDTH, PAGE_HEIGHT], margin: 0 });
+    const taille: [number, number] = format === "a4" ? [PAGE_WIDTH, PAGE_HEIGHT] : [PAGE_WIDTH_A5, PAGE_HEIGHT_A5];
+    const doc = new PDFDocument({ size: taille, margin: 0 });
     const flux = createWriteStream(chemin);
     doc.pipe(flux);
 
-    dessinerFacture(doc, input);
+    if (format === "a4") dessinerFacture(doc, input);
+    else dessinerFactureA5(doc, input);
 
     doc.end();
     flux.on("finish", () => resolve(chemin));
@@ -411,4 +428,153 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   );
 
   dessinerPiedDePage(doc, identite);
+}
+
+/**
+ * Pied de page compact — format A5. Jamais les coordonnées absolues de
+ * dessinerPiedDePage (calées sur la hauteur A4, 841.92pt) : l'A5 ne fait
+ * que 595.28pt de haut, ces coordonnées tomberaient hors-page.
+ */
+function dessinerPiedDePageA5(doc: PDFKit.PDFDocument, identite: IdentiteEntrepriseSnapshot): void {
+  const telephonesAffiches = identite.telephones.length > 0 ? identite.telephones.join(" - ") : "—";
+  const largeur = MARGE_DROITE_A5 - MARGE_GAUCHE_A5;
+  doc.moveTo(MARGE_GAUCHE_A5, 552).lineTo(MARGE_DROITE_A5, 552).lineWidth(0.5).strokeColor("#999999").stroke();
+  doc.font("Helvetica-Oblique").fontSize(5.8).fillColor(NOIR);
+  doc.text("Société à responsabilité limitée, Siège Social : Libreville", MARGE_GAUCHE_A5, 560, { width: largeur, align: "center" });
+  doc.text(`BP : 22103, Tél : ${telephonesAffiches}`, MARGE_GAUCHE_A5, 569, { width: largeur, align: "center" });
+  doc.text("N° RCCM : GA-LBV-01-2025-B13-00187, NIF : 2025 0100 6503 M", MARGE_GAUCHE_A5, 578, { width: largeur, align: "center" });
+}
+
+/**
+ * Format A5 (correction "choix du modèle d'impression", 2026-11-13) —
+ * VRAIE redesign, jamais un A4 réduit (décision utilisateur, voir le
+ * commentaire sur PAGE_WIDTH_A5). Contenu volontairement plus dense/
+ * compact que l'A4 (pas de filigrane, boîtes réduites, tableau à 4
+ * colonnes au lieu de 8 — PRIX/M² et M²/CTN omis ici, toujours
+ * disponibles sur le format A4) : un ticket de caisse condensé, pas une
+ * reproduction miniature du document officiel. Mêmes DONNÉES (aucune
+ * perte d'information métier que le client doit connaître — quantité,
+ * référence, taille, prix, total, remise), uniquement moins de
+ * colonnes/texte décoratif pour tenir sur une demi-page.
+ */
+export function dessinerFactureA5(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche }: FactureDocumentInput): void {
+  const dateAffichee = new Date(facture.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+  const mentionStatut = facture.statutPaiement === "reservation" ? "Statut : Réservation" : "Statut : Payée";
+
+  // --- En-tête compact ---
+  chargerImage(doc, assetPath("facture-logo.jpg"), MARGE_GAUCHE_A5, 20, { width: 130, height: 34 });
+  doc.font("Helvetica-Bold").fontSize(15).fillColor(VERT).text("FACTURE", 200, 22, { width: MARGE_DROITE_A5 - 200, align: "right" });
+  doc.font("Helvetica").fontSize(7.5).fillColor(NOIR).text(facture.numero, 200, 40, { width: MARGE_DROITE_A5 - 200, align: "right" });
+  doc.text(`Date : ${dateAffichee}`, 200, 49, { width: MARGE_DROITE_A5 - 200, align: "right" });
+  doc.font("Helvetica-Oblique").fontSize(7).text(mentionStatut, 200, 58, { width: MARGE_DROITE_A5 - 200, align: "right" });
+
+  doc.font("Helvetica").fontSize(6).fillColor(GRIS_LABEL);
+  doc.text("Quincaillerie et Vente de Matériaux de Construction — Import et Export", MARGE_GAUCHE_A5, 60);
+
+  doc.moveTo(MARGE_GAUCHE_A5, 72).lineTo(MARGE_DROITE_A5, 72).lineWidth(1).strokeColor(VERT).stroke();
+
+  // --- Boîtes FACTURÉ À / DÉTAILS DE VENTE — côte à côte, réduites ---
+  const boiteY = 78;
+  const boiteHauteur = 58;
+  doc.rect(MARGE_GAUCHE_A5, boiteY, 172, boiteHauteur).fill(FOND_BOITE);
+  doc.rect(MARGE_GAUCHE_A5 + 180, boiteY, 183.5, boiteHauteur).fill(FOND_BOITE);
+
+  doc.font("Helvetica-Bold").fontSize(6.5).fillColor(GRIS_LABEL);
+  doc.text("FACTURÉ À", MARGE_GAUCHE_A5 + 8, boiteY + 6);
+  doc.text("DÉTAILS DE VENTE", MARGE_GAUCHE_A5 + 188, boiteY + 6);
+
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(NOIR);
+  doc.text(facture.clientNom, MARGE_GAUCHE_A5 + 8, boiteY + 17, { width: 156 });
+  doc.font("Helvetica").fontSize(7.5);
+  doc.text(facture.clientTelephone ?? "—", MARGE_GAUCHE_A5 + 8, boiteY + 29, { width: 156 });
+  doc.text(facture.clientAdresse ?? "—", MARGE_GAUCHE_A5 + 8, boiteY + 40, { width: 156 });
+
+  doc.font("Helvetica").fontSize(7.5).fillColor(NOIR);
+  doc.text(`Magasin : ${identite.nom}`, MARGE_GAUCHE_A5 + 188, boiteY + 17, { width: 168 });
+  doc.text(`Articles : ${facture.lignes.length}`, MARGE_GAUCHE_A5 + 188, boiteY + 28, { width: 168 });
+  doc.text(`Règlement : ${facture.modeReglement ?? "—"}`, MARGE_GAUCHE_A5 + 188, boiteY + 39, { width: 168 });
+  doc.text(`Vendeur : ${vendeurNomAffiche}`, MARGE_GAUCHE_A5 + 188, boiteY + 50, { width: 168 });
+
+  // --- Tableau compact (4 colonnes) ---
+  const colonnes = [
+    { x: MARGE_GAUCHE_A5, largeur: 28, titre: "QTÉ" },
+    { x: MARGE_GAUCHE_A5 + 28, largeur: 140, titre: "DÉSIGNATION" },
+    { x: MARGE_GAUCHE_A5 + 168, largeur: 80, titre: "PRIX/CTN" },
+    { x: MARGE_GAUCHE_A5 + 248, largeur: 115.5, titre: "TOTAL" },
+  ];
+  const tableTop = boiteY + boiteHauteur + 10;
+  const headerHeight = 15;
+  const rowHeight = 15;
+
+  doc.rect(MARGE_GAUCHE_A5, tableTop, 363.5, headerHeight).fillAndStroke("#ffffff", "#cccccc");
+  doc.font("Helvetica-Bold").fontSize(6.5).fillColor(NOIR);
+  for (const col of colonnes) {
+    doc.text(col.titre, col.x + 4, tableTop + 4, { width: col.largeur - 6 });
+  }
+
+  let ligneY = tableTop + headerHeight;
+  const nombreLignesAffichees = Math.max(facture.lignes.length, 6);
+  doc.font("Helvetica").fontSize(7.3);
+  for (let i = 0; i < nombreLignesAffichees; i++) {
+    const ligne = facture.lignes[i];
+    doc.rect(MARGE_GAUCHE_A5, ligneY, 363.5, rowHeight).strokeColor("#cccccc").lineWidth(0.4).stroke();
+    for (const col of colonnes) {
+      doc
+        .moveTo(col.x - 0.3, ligneY)
+        .lineTo(col.x - 0.3, ligneY + rowHeight)
+        .strokeColor("#cccccc")
+        .lineWidth(0.4)
+        .stroke();
+    }
+    if (ligne) {
+      doc.fillColor(NOIR).font("Helvetica").fontSize(7.3);
+      doc.text(`${ligne.quantite}`, colonnes[0]!.x + 4, ligneY + 4, { width: colonnes[0]!.largeur - 6 });
+      doc.text(`${ligne.reference ?? "—"} — ${ligne.taille}`, colonnes[1]!.x + 4, ligneY + 4, { width: colonnes[1]!.largeur - 6 });
+      doc.text(`${formaterMontant(ligne.prixUnitaire)} FCFA`, colonnes[2]!.x + 4, ligneY + 4, { width: colonnes[2]!.largeur - 6 });
+      doc.text(`${formaterMontant(ligne.quantite * ligne.prixUnitaire)} FCFA`, colonnes[3]!.x + 4, ligneY + 4, { width: colonnes[3]!.largeur - 6 });
+    }
+    ligneY += rowHeight;
+  }
+
+  // --- Total / Remise / Total Net ---
+  const totalNet = domainInvoicing.calculerTotalNet(facture.total, facture.remise);
+  const labelX = MARGE_GAUCHE_A5 + 200;
+  const valeurX = MARGE_GAUCHE_A5 + 280;
+  const valeurLargeur = MARGE_DROITE_A5 - valeurX;
+
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(NOIR);
+  doc.text("Total", labelX, ligneY + 12);
+  doc.text(`${formaterMontant(facture.total)} FCFA`, valeurX, ligneY + 12, { width: valeurLargeur, align: "right" });
+  doc.font("Helvetica").fontSize(7.5);
+  doc.text("Remise", labelX, ligneY + 24);
+  doc.text(`${formaterMontant(facture.remise)} FCFA`, valeurX, ligneY + 24, { width: valeurLargeur, align: "right" });
+
+  let decalageApres = 0;
+  if (facture.statutPaiement === "reservation") {
+    const soldeRestant = domainInvoicing.calculerSoldeRestant(totalNet, facture.montantPaye);
+    doc.font("Helvetica-Bold").fontSize(7.8).fillColor(VERT);
+    doc.text("Acompte versé", labelX, ligneY + 36);
+    doc.text(`${formaterMontant(facture.montantPaye)} FCFA`, valeurX, ligneY + 36, { width: valeurLargeur, align: "right" });
+    doc.fillColor(NOIR);
+    doc.text("Solde restant", labelX, ligneY + 48);
+    doc.text(`${formaterMontant(soldeRestant)} FCFA`, valeurX, ligneY + 48, { width: valeurLargeur, align: "right" });
+    decalageApres = 12;
+  } else {
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(VERT);
+    doc.text("Total Net à payer", labelX, ligneY + 36);
+    doc.text(`${formaterMontant(totalNet)} FCFA`, valeurX, ligneY + 36, { width: valeurLargeur, align: "right" });
+  }
+
+  // --- Mention CGV condensée — renvoi, jamais le texte complet (place
+  // insuffisante sur une demi-page) : décision de simplification propre
+  // à ce format, l'A4 reste la référence pour le texte intégral. ---
+  doc.font("Helvetica-Oblique").fontSize(6).fillColor(GRIS_LABEL);
+  doc.text(
+    "Conditions générales de vente (réservation, délais de livraison et de retrait) disponibles en magasin ou sur le format A4 de ce document.",
+    MARGE_GAUCHE_A5,
+    ligneY + 48 + decalageApres,
+    { width: MARGE_DROITE_A5 - MARGE_GAUCHE_A5, align: "justify" }
+  );
+
+  dessinerPiedDePageA5(doc, identite);
 }

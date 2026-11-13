@@ -405,7 +405,7 @@ export function HistoriqueScreen({
                             </div>
                           ) : (
                             <div>
-                              <span style={{ fontWeight: 600, textDecoration: e.annuleLe ? "line-through" : undefined }}>{e.produitMotif}</span>
+                              <span style={{ fontWeight: 600, textDecoration: e.annuleLe ? "line-through" : undefined }}>{e.produitReference}</span>
                               <span style={{ color: defaultTokens.colors.textSoft }}>
                                 {" "}
                                 ({e.produitTaille}) · {nomEmplacement(e)} · {e.quantite} ct.

@@ -27,11 +27,27 @@ export interface LigneDocumentInterne {
   prixAchat: number | null;
 }
 
+export interface LigneRepartitionDepot {
+  motif: string;
+  taille: string;
+  emplacementNom: string;
+  quantite: number;
+}
+
 export interface DocumentInterneInput {
   facture: Facture;
   identite: IdentiteEntrepriseSnapshot;
   vendeurNomAffiche: string;
   lignes: LigneDocumentInterne[];
+  /**
+   * Répartition réelle par dépôt des quantités vendues (correction
+   * "facture détaillée pour le dépôt", 2026-11-13) — vide si aucune
+   * ligne de cette vente n'a été couverte par du stock réel (100% achat
+   * extérieur). Affichée même si `lignes` (achat extérieur) est vide —
+   * ce document sert désormais aux deux cas, voir FacturesScreen.tsx
+   * (`aRepartitionDepot`).
+   */
+  repartitionDepots: LigneRepartitionDepot[];
 }
 
 /**
@@ -132,7 +148,7 @@ function calculerLignes(facture: Facture, lignes: LigneDocumentInterne[]): Ligne
   });
 }
 
-function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche, lignes }: DocumentInterneInput): void {
+function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche, lignes, repartitionDepots }: DocumentInterneInput): void {
   const dateAffichee = new Date(facture.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
   dessinerEnTeteEtIdentite(doc, identite, {
     titre: "DOCUMENT INTERNE",
@@ -161,88 +177,151 @@ function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, v
   doc.text(`Mode de règlement : ${facture.modeReglement ?? "—"}`, 314.7, 304.0 + DECALAGE_EN_TETE);
   doc.text(`Vendeur : ${vendeurNomAffiche}`, 314.7, 316.1 + DECALAGE_EN_TETE);
 
-  // --- Tableau — même style visuel que la facture (bordures, en-tête,
-  // hauteur de ligne). Colonnes EXACTEMENT celles demandées (§5) : une
-  // seule ligne par produit, quantité interne ET externe sur la même
-  // ligne — jamais scindées en lignes séparées cette fois. ---
-  const colonnes = [
-    { x: 45.5, largeur: 78, titre: "DÉSIGNATION" },
-    { x: 123.5, largeur: 38, titre: "TAILLE" },
-    { x: 161.5, largeur: 33, titre: "QTÉ VENDUE" },
-    { x: 194.5, largeur: 33, titre: "QTÉ INT." },
-    { x: 227.5, largeur: 33, titre: "QTÉ EXT." },
-    { x: 260.5, largeur: 51, titre: "PRIX VENTE" },
-    { x: 311.5, largeur: 54, titre: "PRIX ACHAT EXT." },
-    { x: 365.5, largeur: 56, titre: "TOTAL VENTE" },
-    { x: 421.5, largeur: 56, titre: "DÉPENSE EXT." },
-    { x: 477.5, largeur: 58.6, titre: "MARGE EXT." },
-  ];
   const tableTop = 369.9 + DECALAGE_EN_TETE;
-  const headerHeight = 24; // en-tête plus haut : 10 colonnes nécessitent des libellés sur deux lignes
-  const rowHeight = 21;
+  // Position Y disponible après les deux boîtes d'en-tête — point de
+  // départ de la section "achat extérieur" SI elle existe, sinon point de
+  // départ direct de "répartition par dépôt" ci-dessous (correction
+  // "facture détaillée pour le dépôt", 2026-11-13 : ce document sert
+  // désormais à deux cas qui peuvent survenir indépendamment l'un de
+  // l'autre, jamais les deux sections dessinées à un endroit fixe qui
+  // laisserait un grand vide si l'une des deux est absente).
+  let y = tableTop;
+
+  if (lignes.length > 0) {
+    // --- Tableau — même style visuel que la facture (bordures, en-tête,
+    // hauteur de ligne). Colonnes EXACTEMENT celles demandées (§5) : une
+    // seule ligne par produit, quantité interne ET externe sur la même
+    // ligne — jamais scindées en lignes séparées cette fois. ---
+    const colonnes = [
+      { x: 45.5, largeur: 78, titre: "DÉSIGNATION" },
+      { x: 123.5, largeur: 38, titre: "TAILLE" },
+      { x: 161.5, largeur: 33, titre: "QTÉ VENDUE" },
+      { x: 194.5, largeur: 33, titre: "QTÉ INT." },
+      { x: 227.5, largeur: 33, titre: "QTÉ EXT." },
+      { x: 260.5, largeur: 51, titre: "PRIX VENTE" },
+      { x: 311.5, largeur: 54, titre: "PRIX ACHAT EXT." },
+      { x: 365.5, largeur: 56, titre: "TOTAL VENTE" },
+      { x: 421.5, largeur: 56, titre: "DÉPENSE EXT." },
+      { x: 477.5, largeur: 58.6, titre: "MARGE EXT." },
+    ];
+    const headerHeight = 24; // en-tête plus haut : 10 colonnes nécessitent des libellés sur deux lignes
+    const rowHeight = 21;
+
+    doc.rect(45, y, 531.1, headerHeight).fillAndStroke("#ffffff", "#cccccc");
+    doc.font("Helvetica-Bold").fontSize(6.6).fillColor(NOIR);
+    for (const col of colonnes) {
+      doc.text(col.titre, col.x + 3, y + 4, { width: col.largeur - 5, align: "left" });
+    }
+
+    const lignesCalculees = calculerLignes(facture, lignes);
+    let ligneY = y + headerHeight;
+    const nombreLignesAffichees = Math.max(lignesCalculees.length, 6);
+    doc.font("Helvetica").fontSize(7.6);
+    for (let i = 0; i < nombreLignesAffichees; i++) {
+      const ligne = lignesCalculees[i];
+      doc.rect(45, ligneY, 531.1, rowHeight).strokeColor("#cccccc").lineWidth(0.5).stroke();
+      for (const col of colonnes) {
+        doc
+          .moveTo(col.x - 0.3, ligneY)
+          .lineTo(col.x - 0.3, ligneY + rowHeight)
+          .strokeColor("#cccccc")
+          .lineWidth(0.5)
+          .stroke();
+      }
+      if (ligne) {
+        doc.fillColor(NOIR).font("Helvetica").fontSize(7.6);
+        doc.text(ligne.motif, colonnes[0]!.x + 3, ligneY + 6.5, { width: colonnes[0]!.largeur - 5 });
+        doc.text(ligne.taille, colonnes[1]!.x + 3, ligneY + 6.5, { width: colonnes[1]!.largeur - 5 });
+        doc.text(String(ligne.quantiteVendue), colonnes[2]!.x + 3, ligneY + 6.5, { width: colonnes[2]!.largeur - 5 });
+        doc.text(String(ligne.quantiteInterne), colonnes[3]!.x + 3, ligneY + 6.5, { width: colonnes[3]!.largeur - 5 });
+        // La quantité extérieure reste mise en évidence (couleur d'accent) —
+        // jamais visible sur la facture client.
+        doc.fillColor("#b8860b");
+        doc.text(String(ligne.quantiteExterne), colonnes[4]!.x + 3, ligneY + 6.5, { width: colonnes[4]!.largeur - 5 });
+        doc.fillColor(NOIR);
+        doc.text(`${formaterMontant(ligne.prixVente)}`, colonnes[5]!.x + 3, ligneY + 6.5, { width: colonnes[5]!.largeur - 5 });
+        doc.text(ligne.prixAchatExterieur !== null ? formaterMontant(ligne.prixAchatExterieur) : "—", colonnes[6]!.x + 3, ligneY + 6.5, {
+          width: colonnes[6]!.largeur - 5,
+        });
+        doc.text(formaterMontant(ligne.totalVente), colonnes[7]!.x + 3, ligneY + 6.5, { width: colonnes[7]!.largeur - 5 });
+        doc.text(formaterMontant(ligne.depenseExterieure), colonnes[8]!.x + 3, ligneY + 6.5, { width: colonnes[8]!.largeur - 5 });
+        doc.font("Helvetica-Bold");
+        doc.text(formaterMontant(ligne.margeExterieure), colonnes[9]!.x + 3, ligneY + 6.5, { width: colonnes[9]!.largeur - 5 });
+      }
+      ligneY += rowHeight;
+    }
+
+    // --- Résumé financier (§11) — même présentation visuelle que "Total à
+    // payer" de la facture, trois lignes empilées. Jamais appelé
+    // "bénéfice" (§12) : uniquement la marge sur la partie achetée à
+    // l'extérieur, le coût d'acquisition du stock MAXI EQUIP n'étant pas
+    // connu du système. ---
+    const totalVenteGeneral = lignesCalculees.reduce((s, l) => s + l.totalVente, 0);
+    const depenseExterieureGenerale = lignesCalculees.reduce((s, l) => s + l.depenseExterieure, 0);
+    const margeExterieureGenerale = lignesCalculees.reduce((s, l) => s + l.margeExterieure, 0);
+
+    const resumeY = ligneY + 16;
+    doc.font("Helvetica-Bold").fontSize(9.5).fillColor(NOIR);
+    doc.text("TOTAL DE LA VENTE", 300, resumeY, { width: 170 });
+    doc.text(`${formaterMontant(totalVenteGeneral)} FCFA`, 470, resumeY, { width: MARGE_DROITE - 470, align: "right" });
+    doc.text("DÉPENSE EXTÉRIEURE", 300, resumeY + 15, { width: 170 });
+    doc.text(`${formaterMontant(depenseExterieureGenerale)} FCFA`, 470, resumeY + 15, { width: MARGE_DROITE - 470, align: "right" });
+    doc.fillColor(VERT);
+    doc.text("MARGE SUR ACHAT EXTÉRIEUR", 300, resumeY + 30, { width: 170 });
+    doc.text(`${formaterMontant(margeExterieureGenerale)} FCFA`, 470, resumeY + 30, { width: MARGE_DROITE - 470, align: "right" });
+
+    y = resumeY + 48;
+  }
+
+  if (repartitionDepots.length > 0) {
+    y = dessinerRepartitionDepots(doc, repartitionDepots, y);
+  }
+
+  dessinerPiedDePage(doc, identite);
+}
+
+/**
+ * Répartition par dépôt (2026-11-13) — tableau compact, même style que le
+ * tableau "achat extérieur" ci-dessus. LIMITE CONNUE, signalée pour
+ * transparence (même principe que la limite "un seul fournisseur externe
+ * par ligne" documentée en tête de ce fichier) : ce document reste une
+ * page physique UNIQUE, sans pagination (contrairement au Bilan) — une
+ * vente avec un très grand nombre de lignes × dépôts pourrait déborder
+ * sous le pied de page. Acceptable au vu du volume réel de lignes par
+ * vente dans ce commerce ; jamais une troncature silencieuse en
+ * attendant une éventuelle révision future.
+ */
+function dessinerRepartitionDepots(doc: PDFKit.PDFDocument, lignes: LigneRepartitionDepot[], yInitial: number): number {
+  const colonnes = [
+    { x: 45.5, largeur: 180, titre: "DÉSIGNATION" },
+    { x: 225.5, largeur: 70, titre: "TAILLE" },
+    { x: 295.5, largeur: 150, titre: "DÉPÔT" },
+    { x: 445.5, largeur: 90.6, titre: "QUANTITÉ" },
+  ];
+  const headerHeight = 16;
+  const rowHeight = 16;
+
+  doc.font("Helvetica-Bold").fontSize(9).fillColor(VERT).text("RÉPARTITION PAR DÉPÔT", 45, yInitial);
+  const tableTop = yInitial + 16;
 
   doc.rect(45, tableTop, 531.1, headerHeight).fillAndStroke("#ffffff", "#cccccc");
-  doc.font("Helvetica-Bold").fontSize(6.6).fillColor(NOIR);
+  doc.font("Helvetica-Bold").fontSize(7).fillColor(NOIR);
   for (const col of colonnes) {
     doc.text(col.titre, col.x + 3, tableTop + 4, { width: col.largeur - 5, align: "left" });
   }
 
-  const lignesCalculees = calculerLignes(facture, lignes);
   let ligneY = tableTop + headerHeight;
-  const nombreLignesAffichees = Math.max(lignesCalculees.length, 6);
   doc.font("Helvetica").fontSize(7.6);
-  for (let i = 0; i < nombreLignesAffichees; i++) {
-    const ligne = lignesCalculees[i];
+  for (const ligne of lignes) {
     doc.rect(45, ligneY, 531.1, rowHeight).strokeColor("#cccccc").lineWidth(0.5).stroke();
-    for (const col of colonnes) {
-      doc
-        .moveTo(col.x - 0.3, ligneY)
-        .lineTo(col.x - 0.3, ligneY + rowHeight)
-        .strokeColor("#cccccc")
-        .lineWidth(0.5)
-        .stroke();
-    }
-    if (ligne) {
-      doc.fillColor(NOIR).font("Helvetica").fontSize(7.6);
-      doc.text(ligne.motif, colonnes[0]!.x + 3, ligneY + 6.5, { width: colonnes[0]!.largeur - 5 });
-      doc.text(ligne.taille, colonnes[1]!.x + 3, ligneY + 6.5, { width: colonnes[1]!.largeur - 5 });
-      doc.text(String(ligne.quantiteVendue), colonnes[2]!.x + 3, ligneY + 6.5, { width: colonnes[2]!.largeur - 5 });
-      doc.text(String(ligne.quantiteInterne), colonnes[3]!.x + 3, ligneY + 6.5, { width: colonnes[3]!.largeur - 5 });
-      // La quantité extérieure reste mise en évidence (couleur d'accent) —
-      // jamais visible sur la facture client.
-      doc.fillColor("#b8860b");
-      doc.text(String(ligne.quantiteExterne), colonnes[4]!.x + 3, ligneY + 6.5, { width: colonnes[4]!.largeur - 5 });
-      doc.fillColor(NOIR);
-      doc.text(`${formaterMontant(ligne.prixVente)}`, colonnes[5]!.x + 3, ligneY + 6.5, { width: colonnes[5]!.largeur - 5 });
-      doc.text(ligne.prixAchatExterieur !== null ? formaterMontant(ligne.prixAchatExterieur) : "—", colonnes[6]!.x + 3, ligneY + 6.5, {
-        width: colonnes[6]!.largeur - 5,
-      });
-      doc.text(formaterMontant(ligne.totalVente), colonnes[7]!.x + 3, ligneY + 6.5, { width: colonnes[7]!.largeur - 5 });
-      doc.text(formaterMontant(ligne.depenseExterieure), colonnes[8]!.x + 3, ligneY + 6.5, { width: colonnes[8]!.largeur - 5 });
-      doc.font("Helvetica-Bold");
-      doc.text(formaterMontant(ligne.margeExterieure), colonnes[9]!.x + 3, ligneY + 6.5, { width: colonnes[9]!.largeur - 5 });
-    }
+    doc.fillColor(NOIR);
+    doc.text(ligne.motif, colonnes[0]!.x + 3, ligneY + 4, { width: colonnes[0]!.largeur - 5 });
+    doc.text(ligne.taille, colonnes[1]!.x + 3, ligneY + 4, { width: colonnes[1]!.largeur - 5 });
+    doc.text(ligne.emplacementNom, colonnes[2]!.x + 3, ligneY + 4, { width: colonnes[2]!.largeur - 5 });
+    doc.font("Helvetica-Bold").text(String(ligne.quantite), colonnes[3]!.x + 3, ligneY + 4, { width: colonnes[3]!.largeur - 5 });
+    doc.font("Helvetica");
     ligneY += rowHeight;
   }
 
-  // --- Résumé financier (§11) — même présentation visuelle que "Total à
-  // payer" de la facture, trois lignes empilées. Jamais appelé
-  // "bénéfice" (§12) : uniquement la marge sur la partie achetée à
-  // l'extérieur, le coût d'acquisition du stock MAXI EQUIP n'étant pas
-  // connu du système. ---
-  const totalVenteGeneral = lignesCalculees.reduce((s, l) => s + l.totalVente, 0);
-  const depenseExterieureGenerale = lignesCalculees.reduce((s, l) => s + l.depenseExterieure, 0);
-  const margeExterieureGenerale = lignesCalculees.reduce((s, l) => s + l.margeExterieure, 0);
-
-  const resumeY = ligneY + 16;
-  doc.font("Helvetica-Bold").fontSize(9.5).fillColor(NOIR);
-  doc.text("TOTAL DE LA VENTE", 300, resumeY, { width: 170 });
-  doc.text(`${formaterMontant(totalVenteGeneral)} FCFA`, 470, resumeY, { width: MARGE_DROITE - 470, align: "right" });
-  doc.text("DÉPENSE EXTÉRIEURE", 300, resumeY + 15, { width: 170 });
-  doc.text(`${formaterMontant(depenseExterieureGenerale)} FCFA`, 470, resumeY + 15, { width: MARGE_DROITE - 470, align: "right" });
-  doc.fillColor(VERT);
-  doc.text("MARGE SUR ACHAT EXTÉRIEUR", 300, resumeY + 30, { width: 170 });
-  doc.text(`${formaterMontant(margeExterieureGenerale)} FCFA`, 470, resumeY + 30, { width: MARGE_DROITE - 470, align: "right" });
-
-  dessinerPiedDePage(doc, identite);
+  return ligneY + 10;
 }

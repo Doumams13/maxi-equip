@@ -153,9 +153,9 @@ describe("genererBilanPdf — positions réelles du texte extraites du PDF gén�
     ];
     const detailProduits = Array.from({ length: 60 }, (_, i) => ({
       produitId: `p${i}`,
-      motif: `Motif ${i}`,
       taille: "60x60",
       reference: `DET-${i}`,
+      carreauxParCarton: 4,
       stockParEmplacement: [
         { emplacementId: "d1", cartons: i },
         { emplacementId: "d2", cartons: i * 2 },

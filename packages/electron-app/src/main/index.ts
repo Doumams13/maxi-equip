@@ -37,6 +37,8 @@ import { DemandeRepository } from "./repositories/demandeRepository.js";
 import { NotificationRepository } from "./repositories/notificationRepository.js";
 import { DemandeService } from "./services/demandeService.js";
 import { registerDemandeIpcHandlers } from "./ipc/demandes.js";
+import { DevisRepository } from "./repositories/devisRepository.js";
+import { registerDevisIpcHandlers } from "./ipc/devis.js";
 import { injecterDemandeTest } from "./maintenance/injecterDemandeTest.js";
 import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
@@ -361,6 +363,8 @@ app.whenReady().then(async () => {
     // couplage inverse, DemandeService ne connaît jamais SyncService.
     const demandeRepository = new DemandeRepository(db);
     const notificationRepository = new NotificationRepository(db);
+    // Devis pro-forma (2026-11-13) — purement local, voir devisRepository.ts.
+    const devisRepository = new DevisRepository(db);
     // Correction "Workflow réel des demandes" : venteService n'est plus une dépendance de DemandeService — la demande alimente Vente, jamais l'inverse.
     const demandeService = new DemandeService(demandeRepository, notificationRepository, stockRepository);
 
@@ -512,6 +516,8 @@ app.whenReady().then(async () => {
 
     // Demandes (Phase 4.1) — Administrateur et Gérant, aucune restriction artificielle (Partie 15).
     registerDemandeIpcHandlers(demandeService, notificationRepository, sessionManager);
+    // Devis pro-forma (2026-11-13) — même politique d'accès.
+    registerDevisIpcHandlers(devisRepository, sessionManager);
     // Purge (Partie 13/14) : au démarrage, jamais une tâche planifiée fragile — protégée par try/catch comme la sauvegarde automatique, un échec ne doit jamais empêcher le démarrage.
     try {
       demandeService.purgerDemandesAnciennes();

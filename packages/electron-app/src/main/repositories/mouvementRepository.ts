@@ -339,6 +339,36 @@ export class MouvementRepository {
   }
 
   /**
+   * Écran "Alertes de stock" cliquable (correction TB, 2026-11-13) —
+   * dernière date de vente / entrée / sortie manuelle, TOUTES PÉRIODES
+   * confondues, pour chaque produit demandé. Même distinction vente vs
+   * sortie manuelle que `detailVenteSortieParProduitEntre` ci-dessus
+   * (facture_id non NULL = vente, NULL = manuel), mais `MAX(date)` plutôt
+   * qu'une somme bornée — un produit jamais mouvementé d'un type donné
+   * renvoie `null` pour cette colonne, jamais une date inventée.
+   */
+  dernieresDatesParProduit(
+    produitIds: string[]
+  ): Map<string, { derniereVente: string | null; derniereEntree: string | null; derniereSortie: string | null }> {
+    if (produitIds.length === 0) return new Map();
+    const placeholders = produitIds.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT m.produit_id as produitId,
+           MAX(CASE WHEN m.type = 'sortie' AND m.facture_id IS NOT NULL THEN m.date ELSE NULL END) as derniereVente,
+           MAX(CASE WHEN m.type = 'entree' THEN m.date ELSE NULL END) as derniereEntree,
+           MAX(CASE WHEN m.type = 'sortie' AND m.facture_id IS NULL THEN m.date ELSE NULL END) as derniereSortie
+         FROM mouvements m
+         LEFT JOIN factures f ON f.id = m.facture_id
+         WHERE m.produit_id IN (${placeholders})
+           AND (m.facture_id IS NULL OR f.annulee_le IS NULL) AND m.annule_le IS NULL
+         GROUP BY m.produit_id`
+      )
+      .all(...produitIds) as { produitId: string; derniereVente: string | null; derniereEntree: string | null; derniereSortie: string | null }[];
+    return new Map(rows.map((r) => [r.produitId, { derniereVente: r.derniereVente, derniereEntree: r.derniereEntree, derniereSortie: r.derniereSortie }]));
+  }
+
+  /**
    * Série Entrées/Sorties des 7 derniers jours, un point par jour
    * (§5 de la correction — graphique du dashboard). Un jour sans
    * mouvement retourne explicitement 0, jamais une valeur inventée.

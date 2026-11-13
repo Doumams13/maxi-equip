@@ -585,18 +585,27 @@ export class FactureRepository {
     direction: "asc" | "desc";
     page: number;
     tailleParPage: number;
-  }): { resultats: (Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean })[]; totalResultats: number } {
+  }): {
+    resultats: (Facture & { vendeurNom: string | null; vendeurRole: string | null; aAchatExterieur: boolean; aRepartitionDepot: boolean })[];
+    totalResultats: number;
+  } {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
 
     const q = filtres.recherche.trim();
     if (q) {
+      // Correction "rechercher une référence vendue dans les factures"
+      // (2026-11-13) : même barre de recherche unifiée (jamais un filtre
+      // séparé, décision utilisateur) — EXISTS sur lignes_facture.reference
+      // plutôt qu'un JOIN, pour ne jamais dupliquer une facture ayant
+      // plusieurs lignes correspondantes.
+      const existsReference = "EXISTS (SELECT 1 FROM lignes_facture lf WHERE lf.facture_id = f.id AND lf.reference LIKE ?)";
       if (filtres.inclureVendeurDansRecherche) {
-        conditions.push("(f.numero LIKE ? OR f.client_nom LIKE ? OR u.nom LIKE ? OR f.vendeur_nom_manuel LIKE ?)");
-        params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+        conditions.push(`(f.numero LIKE ? OR f.client_nom LIKE ? OR u.nom LIKE ? OR f.vendeur_nom_manuel LIKE ? OR ${existsReference})`);
+        params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
       } else {
-        conditions.push("(f.numero LIKE ? OR f.client_nom LIKE ?)");
-        params.push(`%${q}%`, `%${q}%`);
+        conditions.push(`(f.numero LIKE ? OR f.client_nom LIKE ? OR ${existsReference})`);
+        params.push(`%${q}%`, `%${q}%`, `%${q}%`);
       }
     }
     if (filtres.statutFiltre === "annulee") {
@@ -651,19 +660,40 @@ export class FactureRepository {
     // appliquée uniquement aux factures de LA PAGE (10 au maximum),
     // jamais à l'ensemble de la base.
     let facturesAvecReleve = new Set<string>();
+    // Correction "facture détaillée pour le dépôt" (2026-11-13) — même
+    // principe, mais détecte une répartition RÉELLE par dépôt (jamais
+    // uniquement un achat extérieur) : le bouton "Document interne" doit
+    // rester proposé pour toute facture ayant QUELQUE CHOSE à montrer
+    // dans ce document (achat extérieur ET/OU détail dépôt), voir
+    // FacturesScreen.tsx.
+    let facturesAvecMouvementDepot = new Set<string>();
     if (factures.length > 0) {
       const placeholders = factures.map(() => "?").join(",");
+      const ids = factures.map((f) => f.id);
       facturesAvecReleve = new Set(
         (
           this.db
             .prepare(`SELECT DISTINCT facture_id as factureId FROM releves_internes_approvisionnement WHERE facture_id IN (${placeholders})`)
-            .all(...factures.map((f) => f.id)) as { factureId: string }[]
+            .all(...ids) as { factureId: string }[]
+        ).map((r) => r.factureId)
+      );
+      facturesAvecMouvementDepot = new Set(
+        (
+          this.db
+            .prepare(
+              `SELECT DISTINCT facture_id as factureId FROM mouvements WHERE facture_id IN (${placeholders}) AND type = 'sortie' AND emplacement_id IS NOT NULL`
+            )
+            .all(...ids) as { factureId: string }[]
         ).map((r) => r.factureId)
       );
     }
 
     return {
-      resultats: factures.map((f) => ({ ...f, aAchatExterieur: facturesAvecReleve.has(f.id) })),
+      resultats: factures.map((f) => ({
+        ...f,
+        aAchatExterieur: facturesAvecReleve.has(f.id),
+        aRepartitionDepot: facturesAvecReleve.has(f.id) || facturesAvecMouvementDepot.has(f.id),
+      })),
       totalResultats,
     };
   }
@@ -735,6 +765,34 @@ export class FactureRepository {
         prixAchat: externe?.prixAchat ?? null,
       };
     });
+  }
+
+  /**
+   * Répartition RÉELLE par dépôt des quantités vendues sur une facture —
+   * correction "facture détaillée pour le dépôt" (2026-11-13), ajoutée au
+   * document interne existant (décision utilisateur : jamais un document
+   * séparé — la facture client reste inchangée). Dérivée des mouvements
+   * réellement enregistrés pour cette facture (`type='sortie'`,
+   * `emplacement_id` renseigné — jamais le complément "Fournisseur
+   * externe", qui a `emplacement_id` NULL et est déjà couvert par
+   * getDocumentInterne ci-dessus), jamais stockée séparément. motif/
+   * taille/référence viennent de `lignes_facture` (le SNAPSHOT réel de la
+   * vente), jamais du catalogue courant, qui peut avoir changé depuis —
+   * même principe que getDocumentInterne.
+   */
+  getRepartitionDepots(
+    factureId: string
+  ): { motif: string; taille: string; reference: string | null; emplacementId: string; emplacementNom: string; quantite: number }[] {
+    return this.db
+      .prepare(
+        `SELECT lf.motif, lf.taille, lf.reference, m.emplacement_id as emplacementId, e.nom as emplacementNom, m.quantite
+         FROM mouvements m
+         JOIN lignes_facture lf ON lf.facture_id = m.facture_id AND lf.produit_id = m.produit_id
+         JOIN emplacements e ON e.id = m.emplacement_id
+         WHERE m.facture_id = ? AND m.type = 'sortie' AND m.emplacement_id IS NOT NULL
+         ORDER BY e.nom, lf.motif, lf.taille`
+      )
+      .all(factureId) as { motif: string; taille: string; reference: string | null; emplacementId: string; emplacementNom: string; quantite: number }[];
   }
 
   /**

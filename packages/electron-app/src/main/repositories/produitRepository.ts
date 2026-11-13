@@ -83,7 +83,7 @@ export class ProduitRepository {
    * par variante) — `null` pour une variante antérieure à la migration
    * multi-format, jamais reconstruit rétroactivement.
    */
-  listSousSeuilDepots(depotIds: string[]): { id: string; modeleId: string | null; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[] {
+  listSousSeuilDepots(depotIds: string[]): { id: string; modeleId: string | null; motif: string; type: string; taille: string; reference: string; stock: number; seuilAlerte: number }[] {
     if (depotIds.length === 0) return [];
     const placeholders = depotIds.map(() => "?").join(",");
     // IMPORTANT : HAVING sans GROUP BY n'est pas valide en SQLite sur une
@@ -94,7 +94,7 @@ export class ProduitRepository {
     const rows = this.db
       .prepare(
         `SELECT * FROM (
-           SELECT p.id, p.modele_id as modeleId, p.motif, p.type, p.taille, p.seuil_alerte as seuilAlerte,
+           SELECT p.id, p.modele_id as modeleId, p.motif, p.type, p.taille, p.reference, p.seuil_alerte as seuilAlerte,
                   COALESCE((SELECT SUM(s.quantite) FROM stocks s WHERE s.produit_id = p.id AND s.emplacement_id IN (${placeholders})), 0) as stock
            FROM produits p
            WHERE p.deleted_at IS NULL AND p.seuil_alerte > 0
@@ -102,7 +102,7 @@ export class ProduitRepository {
          WHERE stock <= seuilAlerte
          ORDER BY stock ASC`
       )
-      .all(...depotIds) as { id: string; modeleId: string | null; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
+      .all(...depotIds) as { id: string; modeleId: string | null; motif: string; type: string; taille: string; reference: string; stock: number; seuilAlerte: number }[];
     return rows;
   }
 

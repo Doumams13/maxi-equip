@@ -3,7 +3,7 @@ import type { auth } from "@maxi-equip/domain";
 import { useToast, Card, Button, defaultTokens } from "@maxi-equip/design-system";
 import { Shell, type NavItem, type ScreenId } from "./Shell.js";
 import { DashboardScreen } from "./screens/DashboardScreen.js";
-import { ProduitsScreen } from "./screens/ProduitsScreen.js";
+import { CatalogueScreen } from "./screens/CatalogueScreen.js";
 import { StockScreen } from "./screens/StockScreen.js";
 import { TransfertsScreen } from "./screens/TransfertsScreen.js";
 import { VentesScreen } from "./screens/VentesScreen.js";
@@ -156,7 +156,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
 
   const navItems: NavItem[] = [
     { id: "dashboard", label: "Tableau de bord", autorise: permissions.canAccessOperationalDashboard },
-    { id: "produits", label: "Carreaux", autorise: permissions.canOperateStock },
+    { id: "produits", label: "Catalogue", autorise: permissions.canOperateStock },
     { id: "stock", label: "Entrée de stock", autorise: permissions.canOperateStock },
     { id: "transferts", label: "Transferts", autorise: permissions.canOperateStock },
     { id: "ventes", label: "Vente", autorise: permissions.canOperateSales },
@@ -189,7 +189,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
         );
       case "produits":
         return (
-          <ProduitsScreen
+          <CatalogueScreen
             session={{ userId: session!.userId }}
             cibleSurbrillance={cibleSurbrillance?.type === "produit" ? cibleSurbrillance.id : null}
             onSurbrillanceAppliquee={() => setCibleSurbrillance(null)}

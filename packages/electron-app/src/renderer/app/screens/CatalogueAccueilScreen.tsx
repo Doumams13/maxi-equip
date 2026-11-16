@@ -1,67 +1,40 @@
 import { useEffect, useMemo, useState } from "react";
-import { defaultTokens, useToast } from "@maxi-equip/design-system";
-import { Search, ArrowRight, Package, Grid3x3, List } from "lucide-react";
-
-import accessoiresPose from "../assets/categories/accessoires_pose.png";
-import boisMenuiserie from "../assets/categories/bois_menuiserie.png";
-import carrelageRevetements from "../assets/categories/carrelage_revetements.png";
-import chimieBatiment from "../assets/categories/chimie_batiment.png";
-import climatisationVentilation from "../assets/categories/climatisation_ventilation.png";
-import couvertureToiture from "../assets/categories/couverture_toiture.png";
-import divers from "../assets/categories/divers.png";
-import eclairage from "../assets/categories/eclairage.png";
-import electricite from "../assets/categories/electricite.png";
-import equipementsProtection from "../assets/categories/equipements_protection.png";
-import etancheiteIsolation from "../assets/categories/etancheite_isolation.png";
-import jardinageExterieur from "../assets/categories/jardinage_exterieur.png";
-import materiauxConstruction from "../assets/categories/materiaux_construction.png";
-import outillageElectrique from "../assets/categories/outillage_electrique.png";
-import outillageManuel from "../assets/categories/outillage_manuel.png";
-import peintureDecoration from "../assets/categories/peinture_decoration.png";
-import plomberieEvacuation from "../assets/categories/plomberie_evacuation.png";
-import portesFenetres from "../assets/categories/portes_fenetres.png";
-import sanitairesToilettes from "../assets/categories/sanitaires_toilettes.png";
-import visserieFixation from "../assets/categories/visserie_fixation.png";
+import { Button, defaultTokens, useToast } from "@maxi-equip/design-system";
+import { Search, X, ArrowRight, Package, Grid3x3, List } from "lucide-react";
+import type { Categorie, RechercheGlobaleResultat } from "../../../preload/index.js";
+import { CategoriesModal } from "./CategoriesModal.js";
+import { CATEGORIES_INITIALES, illustrationCategorie, normaliserNomCategorie } from "./catalogueImages.js";
 
 /**
- * Accueil du Catalogue — demande du 2026-11-14 : reprendre l'apparence de
- * la page d'accueil catégories de la version test (CatalogueAccueil.tsx,
- * D:\Devellopement\Test\maxi-equip), avec UNE seule carte réellement
- * branchée ("Carrelage et revêtements" → l'écran Carreaux existant,
- * inchangé, voir CatalogueScreen.tsx). Les 19 autres cartes n'ont encore
- * aucun écran réel derrière (voir le rapport de faisabilité du
- * 2026-10-21) — décision explicite : jamais de faux nombre de produits
- * pour ne pas laisser croire à du vrai stock, et un message "Bientôt
- * disponible" plutôt qu'une navigation ou un silence qui ressemblerait à
- * un bug. La barre de recherche est volontairement décorative pour
- * l'instant (pas de backend de recherche catégories/produits ici).
+ * Accueil du Catalogue — fondations quincaillerie (Phase 2). Remplace la
+ * façade visuelle du 2026-11-14 (20 catégories codées en dur, une seule
+ * carte branchée, recherche décorative) par le véritable système :
+ * catégories chargées depuis SQLite (CategorieRepository), compteurs de
+ * produits réels, recherche globale fonctionnelle, gestion des
+ * catégories/sous-catégories (CategoriesModal.tsx).
+ *
+ * Correction "retrouver les 20 catégories visuelles de la 0.11.1"
+ * (2026-11-15) : les 20 catégories de cette version (voir
+ * CATEGORIES_INITIALES) sont TOUJOURS affichées, fusionnées par nom avec
+ * les catégories réellement présentes en base — jamais créées en base
+ * pour autant (voir `cartes` ci-dessous). Une catégorie réelle dont le
+ * nom ne correspond à aucune des 20 (ex. "Divers", ou toute catégorie
+ * ajoutée librement par l'utilisateur) reste affichée et fonctionnelle,
+ * ajoutée après les 20 initiales.
  */
-const NOM_CARRELAGE = "Carrelage et revêtements";
 
-const CATEGORIES: { nom: string; image: string }[] = [
-  { nom: NOM_CARRELAGE, image: carrelageRevetements },
-  { nom: "Matériaux de construction", image: materiauxConstruction },
-  { nom: "Sanitaires et toilettes", image: sanitairesToilettes },
-  { nom: "Plomberie et évacuation", image: plomberieEvacuation },
-  { nom: "Électricité", image: electricite },
-  { nom: "Éclairage", image: eclairage },
-  { nom: "Peinture et décoration", image: peintureDecoration },
-  { nom: "Bois et menuiserie", image: boisMenuiserie },
-  { nom: "Couverture et toiture", image: couvertureToiture },
-  { nom: "Visserie et fixation", image: visserieFixation },
-  { nom: "Outillage manuel", image: outillageManuel },
-  { nom: "Outillage électrique", image: outillageElectrique },
-  { nom: "Accessoires de pose", image: accessoiresPose },
-  { nom: "Étanchéité et isolation", image: etancheiteIsolation },
-  { nom: "Équipements de protection", image: equipementsProtection },
-  { nom: "Jardinage et espaces extérieurs", image: jardinageExterieur },
-  { nom: "Portes et fenêtres", image: portesFenetres },
-  { nom: "Chimie du bâtiment", image: chimieBatiment },
-  { nom: "Climatisation et ventilation", image: climatisationVentilation },
-  { nom: "Divers", image: divers },
-];
+/**
+ * Une carte de l'accueil Catalogue : soit une catégorie réelle
+ * (fonctionnelle, cliquable, compteur réel), soit une des 20 catégories
+ * initiales qui n'a pas encore de catégorie correspondante en base
+ * (illustration affichée, mais "à configurer" — jamais de compteur
+ * fictif, jamais de navigation vers des produits qui n'existent pas).
+ */
+type CarteCatalogue =
+  | { statut: "reelle"; id: string; nom: string; nombreProduits: number; illustration: string | null }
+  | { statut: "aConfigurer"; nom: string; illustration: string };
 
-/** Palette cyclique — même principe que la version test : une rotation déterministe par position, jamais une couleur figée par nom de catégorie. */
+/** Palette cyclique — jamais une couleur figée par nom de catégorie (une catégorie créée par l'utilisateur n'a pas de couleur "connue" à l'avance), simplement une rotation déterministe par position. */
 const PALETTE = [
   { bg: "#E8F5E9", fg: "#2E7D32" },
   { bg: "#FDECE3", fg: "#C0652E" },
@@ -76,110 +49,231 @@ const PALETTE = [
 ];
 
 export interface CatalogueAccueilScreenProps {
-  onOuvrirCarrelage: () => void;
+  onOuvrirCategorie: (categorieId: string, categorieNom: string) => void;
+  onOuvrirProduit: (produitId: string, modeleId: string | null) => void;
 }
 
-export function CatalogueAccueilScreen({ onOuvrirCarrelage }: CatalogueAccueilScreenProps) {
+export function CatalogueAccueilScreen({ onOuvrirCategorie, onOuvrirProduit }: CatalogueAccueilScreenProps) {
   const { showInfo } = useToast();
+  const [categories, setCategories] = useState<Categorie[]>([]);
+  const [loading, setLoading] = useState(true);
   const [vue, setVue] = useState<"grille" | "liste">("grille");
-  const [nombreCarreaux, setNombreCarreaux] = useState<number | null>(null);
+  const [showCategoriesModal, setShowCategoriesModal] = useState(false);
+  const [recherche, setRecherche] = useState("");
+  const [resultats, setResultats] = useState<RechercheGlobaleResultat | null>(null);
+  const [recherchant, setRecherchant] = useState(false);
+  const [categorieSurvolee, setCategorieSurvolee] = useState<string | null>(null);
+
+  async function recharger() {
+    const cats = await window.maxiEquip.listerCategories();
+    setCategories(cats);
+    setLoading(false);
+  }
 
   useEffect(() => {
-    let annule = false;
-    void window.maxiEquip.listModelesProduits().then((modeles) => {
-      if (annule) return;
-      const total = modeles.reduce((somme, m) => somme + m.variantes.length, 0);
-      setNombreCarreaux(total);
-    });
-    return () => {
-      annule = true;
-    };
+    void recharger();
   }, []);
 
-  const categories = useMemo(
-    () =>
-      CATEGORIES.map((c) => ({
-        ...c,
-        nombreProduits: c.nom === NOM_CARRELAGE ? nombreCarreaux : null,
-        implementee: c.nom === NOM_CARRELAGE,
-      })),
-    [nombreCarreaux]
-  );
+  /**
+   * Fusionne les 20 catégories initiales (toujours affichées) avec les
+   * catégories réelles de la base (par nom, insensible à la casse) —
+   * jamais l'inverse : on ne crée jamais ici de catégorie en base, on
+   * fusionne seulement l'affichage. Une catégorie réelle consommée par
+   * une correspondance initiale n'apparaît pas une seconde fois dans les
+   * "supplémentaires".
+   */
+  const cartes = useMemo<CarteCatalogue[]>(() => {
+    const restantes = new Map(categories.map((c) => [normaliserNomCategorie(c.nom), c]));
+    const initiales: CarteCatalogue[] = CATEGORIES_INITIALES.map((init) => {
+      const cle = normaliserNomCategorie(init.nom);
+      const reelle = restantes.get(cle);
+      if (reelle) {
+        restantes.delete(cle);
+        return { statut: "reelle", id: reelle.id, nom: reelle.nom, nombreProduits: reelle.nombreProduits, illustration: illustrationCategorie(reelle) };
+      }
+      return { statut: "aConfigurer", nom: init.nom, illustration: init.image };
+    });
+    const supplementaires: CarteCatalogue[] = [...restantes.values()]
+      .sort((a, b) => a.ordre - b.ordre || a.nom.localeCompare(b.nom))
+      .map((c) => ({ statut: "reelle", id: c.id, nom: c.nom, nombreProduits: c.nombreProduits, illustration: illustrationCategorie(c) }));
+    return [...initiales, ...supplementaires];
+  }, [categories]);
 
-  function handleOuvrirCategorie(categorie: (typeof categories)[number]) {
-    if (categorie.implementee) {
-      onOuvrirCarrelage();
+  function handleOuvrirCarte(carte: CarteCatalogue) {
+    if (carte.statut === "reelle") {
+      onOuvrirCategorie(carte.id, carte.nom);
     } else {
-      showInfo("Bientôt disponible", `"${categorie.nom}" n'est pas encore activé dans le catalogue.`);
+      showInfo("Bientôt disponible", `"${carte.nom}" n'est pas encore configurée — crée-la depuis "Gérer les catégories" pour l'activer.`);
+    }
+  }
+
+  async function lancerRecherche(terme: string) {
+    setRecherche(terme);
+    const t = terme.trim();
+    if (!t) {
+      setResultats(null);
+      return;
+    }
+    setRecherchant(true);
+    try {
+      const r = await window.maxiEquip.rechercherGlobalCatalogue(t);
+      setResultats(r);
+    } finally {
+      setRecherchant(false);
     }
   }
 
   return (
     <div style={{ padding: 28 }}>
-      <div style={{ marginBottom: 18 }}>
-        <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 24, color: defaultTokens.colors.text, margin: 0 }}>Catalogue des produits</h1>
-        <p style={{ margin: "4px 0 0", fontSize: 13, color: defaultTokens.colors.textSoft }}>Recherchez une catégorie ou un produit pour commencer</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+        <div>
+          <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 24, color: defaultTokens.colors.text, margin: 0 }}>Catalogue des produits</h1>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: defaultTokens.colors.textSoft }}>Recherchez une catégorie ou un produit pour commencer</p>
+        </div>
+        <Button variant="secondary" onClick={() => setShowCategoriesModal(true)}>
+          Gérer les catégories
+        </Button>
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
-        <div style={{ position: "relative", flex: 1 }}>
-          <Search size={16} color={defaultTokens.colors.textFaint} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
-          <input
+      <div style={{ position: "relative", marginBottom: 24 }}>
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ position: "relative", flex: 1 }}>
+            <Search size={16} color={defaultTokens.colors.textFaint} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
+            <input
+              style={{
+                width: "100%", boxSizing: "border-box", padding: "12px 40px", borderRadius: defaultTokens.radius.sm,
+                border: `1px solid ${defaultTokens.colors.border}`, fontFamily: defaultTokens.typography.body, fontSize: 14,
+              }}
+              value={recherche}
+              onChange={(e) => void lancerRecherche(e.target.value)}
+              placeholder="Rechercher une catégorie, un produit... (ex : Tuyau, Ciment, Peinture, Vis, ...)"
+            />
+            {recherche && (
+              <button
+                onClick={() => void lancerRecherche("")}
+                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer" }}
+                aria-label="Effacer"
+              >
+                <X size={15} color={defaultTokens.colors.textFaint} />
+              </button>
+            )}
+          </div>
+          <div style={{ display: "flex", borderRadius: defaultTokens.radius.sm, border: `1px solid ${defaultTokens.colors.border}`, overflow: "hidden" }}>
+            <button
+              onClick={() => setVue("grille")}
+              style={{ padding: "0 12px", border: "none", cursor: "pointer", background: vue === "grille" ? defaultTokens.colors.accent : defaultTokens.colors.surface, color: vue === "grille" ? "#fff" : defaultTokens.colors.textSoft }}
+              aria-label="Vue grille"
+            >
+              <Grid3x3 size={16} />
+            </button>
+            <button
+              onClick={() => setVue("liste")}
+              style={{ padding: "0 12px", border: "none", cursor: "pointer", background: vue === "liste" ? defaultTokens.colors.accent : defaultTokens.colors.surface, color: vue === "liste" ? "#fff" : defaultTokens.colors.textSoft }}
+              aria-label="Vue liste"
+            >
+              <List size={16} />
+            </button>
+          </div>
+        </div>
+
+        {recherche.trim() && (
+          <div
             style={{
-              width: "100%",
-              boxSizing: "border-box",
-              padding: "12px 40px",
-              borderRadius: defaultTokens.radius.sm,
-              border: `1px solid ${defaultTokens.colors.border}`,
-              fontFamily: defaultTokens.typography.body,
-              fontSize: 14,
+              position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 20,
+              background: defaultTokens.colors.surface, border: `1px solid ${defaultTokens.colors.border}`, borderRadius: defaultTokens.radius.md,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 14, maxHeight: 360, overflowY: "auto",
             }}
-            placeholder="Rechercher une catégorie, un produit... (ex : Tuyau, Ciment, Peinture, Vis, ...)"
-            disabled
-            title="Recherche à venir"
-          />
-        </div>
-        <div style={{ display: "flex", borderRadius: defaultTokens.radius.sm, border: `1px solid ${defaultTokens.colors.border}`, overflow: "hidden" }}>
-          <button
-            onClick={() => setVue("grille")}
-            style={{ padding: "0 12px", border: "none", cursor: "pointer", background: vue === "grille" ? defaultTokens.colors.accent : defaultTokens.colors.surface, color: vue === "grille" ? "#fff" : defaultTokens.colors.textSoft }}
-            aria-label="Vue grille"
           >
-            <Grid3x3 size={16} />
-          </button>
-          <button
-            onClick={() => setVue("liste")}
-            style={{ padding: "0 12px", border: "none", cursor: "pointer", background: vue === "liste" ? defaultTokens.colors.accent : defaultTokens.colors.surface, color: vue === "liste" ? "#fff" : defaultTokens.colors.textSoft }}
-            aria-label="Vue liste"
-          >
-            <List size={16} />
-          </button>
-        </div>
+            {recherchant ? (
+              <p style={{ fontSize: 13, color: defaultTokens.colors.textSoft, margin: 0 }}>Recherche…</p>
+            ) : !resultats || (resultats.categories.length === 0 && resultats.produits.length === 0) ? (
+              <p style={{ fontSize: 13, color: defaultTokens.colors.textFaint, margin: 0 }}>Aucun résultat pour "{recherche}".</p>
+            ) : (
+              <>
+                {resultats.categories.length > 0 && (
+                  <div style={{ marginBottom: resultats.produits.length > 0 ? 12 : 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>
+                      Catégories ({resultats.categories.length})
+                    </div>
+                    {resultats.categories.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => { setRecherche(""); setResultats(null); onOuvrirCategorie(c.id, c.nom); }}
+                        style={{ display: "flex", width: "100%", textAlign: "left", alignItems: "center", gap: 8, padding: "8px 6px", border: "none", background: "none", cursor: "pointer", borderRadius: defaultTokens.radius.sm }}
+                      >
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{c.nom}</span>
+                        <ArrowRight size={13} color={defaultTokens.colors.textFaint} style={{ marginLeft: "auto" }} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {resultats.produits.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: defaultTokens.colors.textFaint, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>
+                      Produits ({resultats.produits.length})
+                    </div>
+                    {resultats.produits.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => { setRecherche(""); setResultats(null); onOuvrirProduit(p.id, p.modeleId); }}
+                        style={{ display: "flex", width: "100%", textAlign: "left", alignItems: "center", gap: 8, padding: "8px 6px", border: "none", background: "none", cursor: "pointer", borderRadius: defaultTokens.radius.sm }}
+                      >
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{p.motif}</span>
+                        <span style={{ fontSize: 12, color: defaultTokens.colors.textFaint }}>{p.reference} · {p.taille}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      {vue === "grille" ? (
+      {loading ? (
+        <p style={{ fontSize: 13.5, color: defaultTokens.colors.textFaint }}>Chargement…</p>
+      ) : vue === "grille" ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
-          {categories.map((c, i) => {
+          {cartes.map((c, i) => {
             const couleur = PALETTE[i % PALETTE.length]!;
+            const aConfigurer = c.statut === "aConfigurer";
+            const cleCarte = aConfigurer ? `init:${c.nom}` : c.id;
             return (
               <div
-                key={c.nom}
-                onClick={() => handleOuvrirCategorie(c)}
-                style={{ position: "relative", borderRadius: defaultTokens.radius.md, background: couleur.bg, padding: 18, minHeight: 170, cursor: "pointer", display: "flex", flexDirection: "column", justifyContent: "space-between" }}
+                key={cleCarte}
+                onClick={() => handleOuvrirCarte(c)}
+                onMouseEnter={() => setCategorieSurvolee(cleCarte)}
+                onMouseLeave={() => setCategorieSurvolee(null)}
+                style={{
+                  position: "relative", borderRadius: defaultTokens.radius.md, background: couleur.bg, padding: 18, minHeight: 170,
+                  cursor: "pointer", display: "flex", flexDirection: "column", justifyContent: "space-between", opacity: aConfigurer ? 0.6 : 1,
+                }}
               >
                 <div>
                   <div style={{ fontFamily: defaultTokens.typography.display, fontSize: 16, fontWeight: 700, color: couleur.fg, lineHeight: 1.25 }}>{c.nom}</div>
-                  {c.nombreProduits !== null && (
-                    <div style={{ fontSize: 12.5, color: couleur.fg, opacity: 0.75, marginTop: 4 }}>
-                      {c.nombreProduits} produit{c.nombreProduits !== 1 ? "s" : ""}
-                    </div>
+                  <div style={{ fontSize: 12.5, color: couleur.fg, opacity: 0.75, marginTop: 4 }}>
+                    {aConfigurer ? "À configurer" : `${c.nombreProduits} produit${c.nombreProduits !== 1 ? "s" : ""}`}
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1, margin: "10px 0", overflow: "hidden", borderRadius: defaultTokens.radius.sm }}>
+                  {c.illustration ? (
+                    <img
+                      src={c.illustration}
+                      alt={c.nom}
+                      style={{
+                        maxHeight: 76,
+                        maxWidth: "100%",
+                        objectFit: "contain",
+                        transform: categorieSurvolee === cleCarte ? "scale(1.12)" : "scale(1)",
+                        transition: "transform 0.2s ease",
+                      }}
+                    />
+                  ) : (
+                    <Package size={40} color={couleur.fg} opacity={0.35} />
                   )}
                 </div>
-                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1, margin: "10px 0" }}>
-                  <img src={c.image} alt={c.nom} style={{ maxHeight: 76, maxWidth: "100%", objectFit: "contain" }} />
-                </div>
                 <button
-                  onClick={(e) => { e.stopPropagation(); handleOuvrirCategorie(c); }}
+                  onClick={(e) => { e.stopPropagation(); handleOuvrirCarte(c); }}
                   style={{
                     position: "absolute", right: 14, bottom: 14, width: 32, height: 32, borderRadius: "50%", border: "none",
                     background: defaultTokens.colors.surface, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
@@ -195,31 +289,53 @@ export function CatalogueAccueilScreen({ onOuvrirCarrelage }: CatalogueAccueilSc
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {categories.map((c, i) => {
+          {cartes.map((c, i) => {
             const couleur = PALETTE[i % PALETTE.length]!;
+            const aConfigurer = c.statut === "aConfigurer";
+            const cleCarte = aConfigurer ? `init:${c.nom}` : c.id;
             return (
               <div
-                key={c.nom}
-                onClick={() => handleOuvrirCategorie(c)}
-                style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", borderRadius: defaultTokens.radius.sm, border: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: "pointer" }}
+                key={cleCarte}
+                onClick={() => handleOuvrirCarte(c)}
+                onMouseEnter={() => setCategorieSurvolee(cleCarte)}
+                onMouseLeave={() => setCategorieSurvolee(null)}
+                style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", borderRadius: defaultTokens.radius.sm, border: `1px solid ${defaultTokens.colors.borderSoft}`, cursor: "pointer", opacity: aConfigurer ? 0.6 : 1 }}
               >
-                <div style={{ width: 44, height: 44, borderRadius: defaultTokens.radius.sm, background: couleur.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <img src={c.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: defaultTokens.radius.sm }} />
+                <div style={{ width: 44, height: 44, borderRadius: defaultTokens.radius.sm, background: couleur.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+                  {c.illustration ? (
+                    <img
+                      src={c.illustration}
+                      alt=""
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        transform: categorieSurvolee === cleCarte ? "scale(1.12)" : "scale(1)",
+                        transition: "transform 0.2s ease",
+                      }}
+                    />
+                  ) : (
+                    <Package size={20} color={couleur.fg} />
+                  )}
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{c.nom}</div>
-                  {c.nombreProduits !== null && (
-                    <div style={{ fontSize: 12, color: defaultTokens.colors.textFaint }}>
-                      {c.nombreProduits} produit{c.nombreProduits !== 1 ? "s" : ""}
-                    </div>
-                  )}
+                  <div style={{ fontSize: 12, color: defaultTokens.colors.textFaint }}>
+                    {aConfigurer ? "À configurer" : `${c.nombreProduits} produit${c.nombreProduits !== 1 ? "s" : ""}`}
+                  </div>
                 </div>
-                <Package size={16} color={defaultTokens.colors.textFaint} />
                 <ArrowRight size={16} color={defaultTokens.colors.textFaint} />
               </div>
             );
           })}
         </div>
+      )}
+
+      {showCategoriesModal && (
+        <CategoriesModal
+          onClose={() => setShowCategoriesModal(false)}
+          onSaved={() => void recharger()}
+        />
       )}
     </div>
   );

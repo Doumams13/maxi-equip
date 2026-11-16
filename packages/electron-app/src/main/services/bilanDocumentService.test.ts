@@ -43,10 +43,10 @@ describe("genererBilanPdf — positions réelles du texte extraites du PDF gén�
       periodeLibelle: "du 01/10/2026 au 21/10/2026",
       ventes: { caTotal: 1234567, nombreFactures: 12, remiseTotale: 10000 },
       topProduits: Array.from({ length: 10 }, (_, i) => ({ label: `REF-${i}`, quantite: 100 - i })),
-      mouvements: { totalEntrees: 500, totalSorties: 300 },
+      mouvements: { entrees: [{ unite: "carton", quantite: 500 }], sorties: [{ unite: "carton", quantite: 300 }] },
       stockParEmplacement: [
-        { nom: "Akébé", cartons: 100 },
-        { nom: "Akanda", cartons: 50 },
+        { nom: "Akébé", parUnite: [{ unite: "carton", quantite: 100 }] },
+        { nom: "Akanda", parUnite: [{ unite: "carton", quantite: 50 }] },
       ],
       produitsSousSeuilCount: 3,
       promotionsActivesPendantPeriode: 2,
@@ -105,7 +105,7 @@ describe("genererBilanPdf — positions réelles du texte extraites du PDF gén�
       periodeLibelle: "du 01/10/2026 au 21/10/2026",
       ventes: { caTotal: 0, nombreFactures: 0, remiseTotale: 0 },
       topProduits: [],
-      mouvements: { totalEntrees: 0, totalSorties: 0 },
+      mouvements: { entrees: [], sorties: [] },
       stockParEmplacement: [],
       produitsSousSeuilCount: 0,
       promotionsActivesPendantPeriode: 0,
@@ -127,7 +127,7 @@ describe("genererBilanPdf — positions réelles du texte extraites du PDF gén�
       periodeLibelle: "du 01/10/2026 au 21/10/2026",
       ventes: { caTotal: 0, nombreFactures: 0, remiseTotale: 0 },
       topProduits: [],
-      mouvements: { totalEntrees: 0, totalSorties: 0 },
+      mouvements: { entrees: [], sorties: [] },
       stockParEmplacement: [],
       produitsSousSeuilCount: 0,
       promotionsActivesPendantPeriode: 0,
@@ -169,7 +169,7 @@ describe("genererBilanPdf — positions réelles du texte extraites du PDF gén�
       periodeLibelle: "du 01/10/2026 au 21/10/2026",
       ventes: { caTotal: 0, nombreFactures: 0, remiseTotale: 0 },
       topProduits: [],
-      mouvements: { totalEntrees: 0, totalSorties: 0 },
+      mouvements: { entrees: [], sorties: [] },
       stockParEmplacement: [],
       produitsSousSeuilCount: 0,
       promotionsActivesPendantPeriode: 0,
@@ -204,5 +204,76 @@ describe("genererBilanPdf — positions réelles du texte extraites du PDF gén�
     // Les 60 références apparaissent EXACTEMENT une fois chacune, dans
     // l'ordre d'origine — ni perte, ni doublon, ni réordonnancement.
     expect(referencesTrouvees).toEqual(Array.from({ length: 60 }, (_, i) => i));
+  });
+
+  // Fondations quincaillerie (Phase 4) — correction "le bilan additionne
+  // des quantités d'unités différentes" (40 cartons + 12 sacs = 52,
+  // résultat faux). Vérifie le PDF réellement généré, pas une relecture
+  // du code.
+  it("ventile le stock par unité — jamais un total qui mélange des unités différentes", async () => {
+    const chemin = await genererBilanPdf({
+      identite: IDENTITE_TEST,
+      periodeLibelle: "du 01/10/2026 au 21/10/2026",
+      ventes: { caTotal: 0, nombreFactures: 0, remiseTotale: 0 },
+      topProduits: [],
+      mouvements: { entrees: [], sorties: [] },
+      stockParEmplacement: [
+        {
+          nom: "Akébé",
+          parUnite: [
+            { unite: "carton", quantite: 40 },
+            { unite: "sac", quantite: 12 },
+          ],
+        },
+        { nom: "Akanda", parUnite: [{ unite: "piece", quantite: 7 }] },
+      ],
+      produitsSousSeuilCount: 0,
+      promotionsActivesPendantPeriode: 0,
+      depots: [],
+      detailProduits: [],
+    });
+
+    const data = new Uint8Array(readFileSync(chemin));
+    const doc = await pdfjsLib.getDocument({ data }).promise;
+    const page = await doc.getPage(1);
+    const contenu = await page.getTextContent();
+    const texteComplet = (contenu.items as { str: string }[]).map((i) => i.str).join(" ");
+
+    // Les deux unités d'Akébé apparaissent séparément — jamais fusionnées en "52".
+    expect(texteComplet).toContain("40 cartons");
+    expect(texteComplet).toContain("12 sacs");
+    expect(texteComplet).not.toContain("52");
+    expect(texteComplet).toContain("7 pièces");
+  });
+
+  it("ventile les entrées/sorties par unité, et affiche un libellé explicite quand il n'y a aucun mouvement", async () => {
+    const chemin = await genererBilanPdf({
+      identite: IDENTITE_TEST,
+      periodeLibelle: "du 01/10/2026 au 21/10/2026",
+      ventes: { caTotal: 0, nombreFactures: 0, remiseTotale: 0 },
+      topProduits: [],
+      mouvements: {
+        entrees: [
+          { unite: "carton", quantite: 30 },
+          { unite: "metre", quantite: 15 },
+        ],
+        sorties: [],
+      },
+      stockParEmplacement: [],
+      produitsSousSeuilCount: 0,
+      promotionsActivesPendantPeriode: 0,
+      depots: [],
+      detailProduits: [],
+    });
+
+    const data = new Uint8Array(readFileSync(chemin));
+    const doc = await pdfjsLib.getDocument({ data }).promise;
+    const page = await doc.getPage(1);
+    const contenu = await page.getTextContent();
+    const texteComplet = (contenu.items as { str: string }[]).map((i) => i.str).join(" ");
+
+    expect(texteComplet).toContain("30 cartons");
+    expect(texteComplet).toContain("15 mètres");
+    expect(texteComplet).toContain("Aucune sortie");
   });
 });

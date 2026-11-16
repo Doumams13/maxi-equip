@@ -28,6 +28,79 @@ CREATE TABLE IF NOT EXISTS emplacements (
 -- Catalogue
 -- ==========================================================
 
+-- ==========================================================
+-- Catégories / sous-catégories du catalogue — fondations quincaillerie
+-- (Phase 1). Administrables depuis l'application, jamais codées en dur
+-- — voir shared-types/categorie.ts. Le rattachement d'un modèle
+-- (modeles_produit.sous_categorie_id ci-dessous) est posé par la
+-- migration dédiée — le câblage du repository/UI est une phase
+-- ultérieure, volontairement hors périmètre ici.
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS categories (
+  id            TEXT PRIMARY KEY,
+  nom           TEXT NOT NULL,
+  image_data_url TEXT,
+  ordre         INTEGER NOT NULL DEFAULT 0,
+  deleted_at    TEXT,
+  deleted_by    TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sous_categories (
+  id            TEXT PRIMARY KEY,
+  categorie_id  TEXT NOT NULL REFERENCES categories (id),
+  nom           TEXT NOT NULL,
+  ordre         INTEGER NOT NULL DEFAULT 0,
+  -- Fondations quincaillerie (Phase 3 bis) — voir shared-types/categorie.ts
+  -- (ModelePhysiqueSousCategorie). NULL = aucun modele physique dedie
+  -- (immense majorite des sous-categories) : "carreau" est la seule
+  -- valeur posee a ce jour, par migration, jamais deduite du nom.
+  modele_physique TEXT,
+  -- `0` (défaut) = aucune restriction d'unité saisie, les 6 unités
+  -- restent proposées. `1` = configuration explicite, voir
+  -- sous_categorie_unites ci-dessous (toujours >= 1 ligne dans ce cas,
+  -- une configuration vide étant refusée à l'écriture).
+  unites_configurees INTEGER NOT NULL DEFAULT 0,
+  deleted_at    TEXT,
+  deleted_by    TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sous_categories_categorie ON sous_categories (categorie_id);
+
+-- Unités de vente explicitement autorisées par sous-catégorie —
+-- fondations quincaillerie (Phase 3 bis). Une sous-catégorie absente
+-- de cette table (ou dont sous_categories.unites_configurees = 0)
+-- n'est PAS restreinte : voir domain/catalogue, unitesEffectivesPourSousCategorie.
+CREATE TABLE IF NOT EXISTS sous_categorie_unites (
+  sous_categorie_id TEXT NOT NULL REFERENCES sous_categories (id),
+  unite_vente       TEXT NOT NULL,
+  PRIMARY KEY (sous_categorie_id, unite_vente)
+);
+
+-- Champs de caractéristiques suggérés/configurés par sous-catégorie —
+-- pure configuration, jamais de donnée transactionnelle : une
+-- suppression ou modification ici n'efface ni ne réinterprète aucune
+-- valeur déjà saisie sur un produit (stockée séparément, voir
+-- produits.caracteristiques), donc pas de suppression douce nécessaire.
+-- `type`/`obligatoire`/`valeurs_autorisees`/`unite_mesure`/`role` —
+-- fondations quincaillerie (Phase 3 bis), voir shared-types/categorie.ts.
+CREATE TABLE IF NOT EXISTS sous_categorie_champs (
+  id                TEXT PRIMARY KEY,
+  sous_categorie_id TEXT NOT NULL REFERENCES sous_categories (id),
+  nom               TEXT NOT NULL,
+  type              TEXT NOT NULL DEFAULT 'texte',
+  obligatoire       INTEGER NOT NULL DEFAULT 0,
+  valeurs_autorisees TEXT,
+  unite_mesure      TEXT,
+  role              TEXT,
+  ordre             INTEGER NOT NULL DEFAULT 0,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sous_categorie_champs_sous_categorie ON sous_categorie_champs (sous_categorie_id);
+
 -- Modèles de carreaux (motif/patron) — regroupe plusieurs variantes (formats).
 -- Les images appartiennent au modèle, pas à une variante spécifique.
 CREATE TABLE IF NOT EXISTS modeles_produit (
@@ -37,6 +110,15 @@ CREATE TABLE IF NOT EXISTS modeles_produit (
   -- Position d'affichage dans la vitrine du site public (0 = premier),
   -- NULL = non sélectionné — voir shared-types/produit.ts.
   ordre_vitrine INTEGER,
+  -- Fondations quincaillerie (Phase 1) — voir shared-types/categorie.ts.
+  -- NULL = non classé (cas transitoire uniquement, la migration
+  -- rattache tout modèle existant à "Carrelage et revêtements", voir
+  -- migrate.ts). Colonne posée au niveau schéma seulement — le type
+  -- partagé ModeleProduit et ModeleRepository ne l'exposent pas encore
+  -- (phase Catalogue, ultérieure).
+  sous_categorie_id TEXT REFERENCES sous_categories (id),
+  -- Fondations quincaillerie (Phase 2) — marque du modèle (ex. "Nicoll"). NULL = non renseignée.
+  marque        TEXT,
   deleted_at    TEXT,
   deleted_by    TEXT,
   created_at    TEXT NOT NULL,
@@ -65,6 +147,13 @@ CREATE TABLE IF NOT EXISTS produits (
   -- taille, NULL tant que non renseigné (voir shared-types/produit.ts).
   carreaux_par_carton INTEGER,
   seuil_alerte  INTEGER NOT NULL DEFAULT 0,
+  -- Fondations quincaillerie (Phase 1) — NULL = "carton" (comportement
+  -- historique carreaux). Voir shared-types/produit.ts (UniteVente,
+  -- caracteristiques).
+  unite_vente   TEXT,
+  caracteristiques TEXT,
+  -- Fondations quincaillerie (Phase 2) — dénormalisé depuis modeles_produit.marque, même principe que motif/type.
+  marque        TEXT,
   deleted_at    TEXT,
   deleted_by    TEXT,
   created_at    TEXT NOT NULL,
@@ -203,7 +292,10 @@ CREATE TABLE IF NOT EXISTS lignes_facture (
   -- Surface d'un carton de ce produit en m², au moment de la vente
   -- (snapshot, jamais recalculé depuis le produit actuel) — voir
   -- shared-types/facture.ts.
-  surface_carton_m2    REAL
+  surface_carton_m2    REAL,
+  -- Fondations quincaillerie (Phase 1) — snapshot comme surface_carton_m2 ci-dessus. NULL = "carton".
+  unite_vente          TEXT,
+  caracteristiques     TEXT
   -- Volontairement AUCUN champ fournisseur / prix d'achat ici (Corrections §7/§9 point 12).
 );
 

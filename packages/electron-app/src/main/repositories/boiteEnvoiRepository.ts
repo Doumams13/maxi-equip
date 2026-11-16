@@ -46,7 +46,15 @@ export type TypeOperationBoiteEnvoi =
   // Correction "visibilité croisée Factures/Historique entre postes"
   // (2026-10-27) — même mécanisme générique (voir
   // core/emplacementStore.ts côté API).
-  | "emplacement";
+  | "emplacement"
+  // Phase 5 (référentiel commun) — même mécanisme générique de projection
+  // que "modele"/"produit"/"compte"/"emplacement" ci-dessus (voir
+  // core/referentielStore.ts côté API). "sous_categorie" porte aussi,
+  // en sous-objet de son payload, la configuration d'unités autorisées
+  // (PHASE_5_CAHIER_DES_CHARGES.md §4.6/§7.3) — jamais un type séparé.
+  | "categorie"
+  | "sous_categorie"
+  | "sous_categorie_champ";
 export type StatutBoiteEnvoi = "pending" | "sent" | "confirmed" | "error";
 
 export interface EntreeBoiteEnvoi {
@@ -148,16 +156,26 @@ export class BoiteEnvoiRepository {
   }
 
   /**
-   * Enregistre une tentative échouée — incrémente `attempts`, note
-   * `last_error`, bascule le statut en `error`. Ne calcule PAS de vrai
-   * `next_attempt_at` (aucun moteur de retry automatique à cette étape,
-   * §8) — la colonne reste disponible pour la phase qui implémentera
-   * réellement le backoff, jamais devinée arbitrairement ici.
+   * Enregistre une tentative échouée — Phase 5 (référentiel commun),
+   * sous-phase 5.8, chantier B : incrémente `attempts`, note
+   * `last_error`, bascule le statut en `error`, ET calcule désormais un
+   * VRAI `next_attempt_at` (backoff exponentiel plafonné, voir
+   * `calculerDelaiBackoffMs` ci-dessous — centralisé, pur, testable
+   * indépendamment de toute base de données). `attempts` est relu AVANT
+   * incrément (jamais deviné depuis l'appelant) pour que le délai
+   * corresponde exactement au nombre réel d'échecs déjà enregistrés.
+   * No-op silencieux sur un id inconnu — même convention que le reste de
+   * ce repository (`findById`, etc.), jamais une exception.
    */
   enregistrerErreur(id: string, message: string): void {
+    const existante = this.db.prepare("SELECT attempts FROM boite_envoi WHERE id = ?").get(id) as { attempts: number } | undefined;
+    if (!existante) return;
+    const attempts = existante.attempts + 1;
+    const maintenant = new Date();
+    const prochaineTentative = new Date(maintenant.getTime() + calculerDelaiBackoffMs(attempts));
     this.db
-      .prepare("UPDATE boite_envoi SET status = 'error', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE id = ?")
-      .run(message, new Date().toISOString(), id);
+      .prepare("UPDATE boite_envoi SET status = 'error', attempts = ?, last_error = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?")
+      .run(attempts, message, prochaineTentative.toISOString(), maintenant.toISOString(), id);
   }
 
   /** Répartition par statut — utile pour une vérification technique rapide (Partie 10), jamais un nouvel écran utilisateur. */
@@ -168,13 +186,39 @@ export class BoiteEnvoiRepository {
 
   /**
    * Opérations prêtes à être (ré)envoyées — Phase 3.7, Partie 5 : inclut
-   * `pending` (jamais encore tentée) ET `error` (tentative précédente
-   * en échec — erreur réseau ou refus serveur, toujours disponible pour
-   * une nouvelle tentative manuelle, jamais un abandon silencieux).
-   * `confirmed`/`sent` ne sont JAMAIS renvoyées ici.
+   * `pending` (jamais encore tentée, `next_attempt_at` toujours NULL —
+   * comportement normal inchangé) ET `error` dont le backoff est
+   * EXPIRÉ (Phase 5, sous-phase 5.8, chantier B : `next_attempt_at`
+   * NULL ou déjà dans le passé). Une entrée `error` dont le délai n'est
+   * pas encore écoulé n'est JAMAIS renvoyée prématurément ici —
+   * `confirmed`/`sent` ne le sont jamais non plus, par construction.
    */
   listerPretesPourEnvoi(): EntreeBoiteEnvoi[] {
-    const rows = this.db.prepare("SELECT * FROM boite_envoi WHERE status IN ('pending', 'error') ORDER BY created_at ASC").all() as EntreeBoiteEnvoiRow[];
+    const maintenant = new Date().toISOString();
+    const rows = this.db
+      .prepare("SELECT * FROM boite_envoi WHERE status IN ('pending', 'error') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY created_at ASC")
+      .all(maintenant) as EntreeBoiteEnvoiRow[];
     return rows.map(rowToEntree);
   }
+}
+
+/**
+ * Phase 5 (référentiel commun), sous-phase 5.8, chantier B — backoff
+ * exponentiel plafonné, centralisé et testable indépendamment de toute
+ * base de données. `attempts` est le nombre de TENTATIVES ÉCHOUÉES déjà
+ * enregistrées (après incrément, jamais avant) : 1 → délai de base, puis
+ * doublement à chaque échec supplémentaire, plafonné pour éviter une
+ * croissance illimitée (une panne prolongée ne doit jamais repousser la
+ * prochaine tentative à plusieurs heures/jours). Mêmes ordres de
+ * grandeur que le cycle de synchronisation périodique existant (5
+ * minutes, voir main/index.ts) : le plafond reste un multiple raisonnable
+ * de ce cycle, jamais un délai qui rendrait le backoff indiscernable
+ * d'un abandon.
+ */
+export const DELAI_BACKOFF_BASE_MS = 30_000; // 30 secondes.
+export const DELAI_BACKOFF_PLAFOND_MS = 30 * 60_000; // 30 minutes.
+
+export function calculerDelaiBackoffMs(attempts: number): number {
+  const delai = DELAI_BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1);
+  return Math.min(delai, DELAI_BACKOFF_PLAFOND_MS);
 }

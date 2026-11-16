@@ -200,7 +200,17 @@ describe("VenteService — annulation d'une facture (restauration du stock)", as
 function creerService(opts: {
   stock?: Record<string, Record<string, number>>;
   promotions?: { id: string; libelle: string; typeReduction: "pourcentage" | "montant_fixe"; valeur: number; perimetre: "global" | "cible"; produitIds: string[]; dateDebut: string; dateFin: string }[];
-  produits?: { id: string; prix: number; motif: string; taille: string; largeur?: number | null; hauteur?: number | null; carreauxParCarton?: number | null }[];
+  produits?: {
+    id: string;
+    prix: number;
+    motif: string;
+    taille: string;
+    largeur?: number | null;
+    hauteur?: number | null;
+    carreauxParCarton?: number | null;
+    uniteVente?: string | null;
+    caracteristiques?: string | null;
+  }[];
 } = {}) {
   const stockData = opts.stock ?? {};
   const promotionsData = opts.promotions ?? [];
@@ -323,6 +333,67 @@ describe("§18-A — Vente simple", async () => {
 
     const facture = factureCreeAvec[0] as { lignes: { surfaceCartonM2: number | null }[] };
     expect(facture.lignes[0]!.surfaceCartonM2).toBeNull();
+  });
+
+  // Fondations quincaillerie (Phase 3) — snapshot uniteVente/caracteristiques.
+  it("snapshote uniteVente et caracteristiques sur la ligne de facture pour un produit non-carreau (ex. un sac de ciment)", async () => {
+    const { service, factureCreeAvec } = creerService({
+      stock: { p1: { akebe: 50 } },
+      produits: [
+        {
+          id: "p1",
+          prix: 6500,
+          motif: "Ciment CPJ 45",
+          taille: "Sac 50kg",
+          uniteVente: "sac",
+          caracteristiques: JSON.stringify([{ cle: "Poids", valeur: "50 kg" }]),
+        },
+      ],
+    });
+
+    await service.enregistrerVente({
+      pointDeVenteId: "shop",
+      clientNom: "Dupont",
+      clientTelephone: "077001122",
+      clientAdresse: null,
+      vendeurUtilisateurId: "u1",
+      vendeurCompteConnecteNom: "Admin",
+      vendeurNomManuel: null,
+      modeReglement: "Espèces",
+      remise: 0,
+      lignes: [{ produitId: "p1", quantite: 5, prixUnitaire: 6500, allocationsDepots: [{ emplacementId: "akebe", quantite: 5 }] }],
+    });
+
+    const facture = factureCreeAvec[0] as { lignes: { uniteVente: string | null; caracteristiques: string | null }[] };
+    expect(facture.lignes[0]!.uniteVente).toBe("sac");
+    expect(facture.lignes[0]!.caracteristiques).toBe(JSON.stringify([{ cle: "Poids", valeur: "50 kg" }]));
+  });
+
+  // Non-régression explicite : une vente de carreau historique (uniteVente absent) ne doit JAMAIS snapshoter une valeur inventée.
+  it("uniteVente et caracteristiques restent null pour une vente de carreau historique (uniteVente absent du produit)", async () => {
+    const { service, factureCreeAvec } = creerService({
+      stock: { p1: { akebe: 50 } },
+      produits: [{ id: "p1", prix: 8000, motif: "Marbre Blanc", taille: "60×60", largeur: 60, hauteur: 60, carreauxParCarton: 4 }],
+    });
+
+    await service.enregistrerVente({
+      pointDeVenteId: "shop",
+      clientNom: "Dupont",
+      clientTelephone: "077001122",
+      clientAdresse: null,
+      vendeurUtilisateurId: "u1",
+      vendeurCompteConnecteNom: "Admin",
+      vendeurNomManuel: null,
+      modeReglement: "Espèces",
+      remise: 0,
+      lignes: [{ produitId: "p1", quantite: 3, prixUnitaire: 11520, allocationsDepots: [{ emplacementId: "akebe", quantite: 3 }] }],
+    });
+
+    const facture = factureCreeAvec[0] as { lignes: { uniteVente: string | null; caracteristiques: string | null; surfaceCartonM2: number | null }[] };
+    expect(facture.lignes[0]!.uniteVente).toBeNull();
+    expect(facture.lignes[0]!.caracteristiques).toBeNull();
+    // Comportement historique carreau inchangé par la même occasion.
+    expect(facture.lignes[0]!.surfaceCartonM2).toBeCloseTo(1.44, 6);
   });
 
   // RÉGRESSION bug réel (correction "Rendre le numéro de téléphone

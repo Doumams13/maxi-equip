@@ -120,6 +120,8 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         motif: "Marbre Postgres Test",
         type: "Faïence",
         ordreVitrine: null,
+        sousCategorieId: null,
+        marque: null,
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
       expect(applique).toBe(true);
@@ -137,6 +139,8 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         motif: "Modele Vitrine PG",
         type: "Faïence",
         ordreVitrine: 3,
+        sousCategorieId: null,
+        marque: null,
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
       const modeles = await storage.listerModelesActifs();
@@ -150,6 +154,8 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         motif: "Marbre Postgres Test Modifié",
         type: "Grès cérame",
         ordreVitrine: null,
+        sousCategorieId: null,
+        marque: null,
         updatedAt: "2026-01-02T00:00:00.000Z",
       });
       const modeles = await storage.listerModelesActifs();
@@ -163,6 +169,8 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         motif: "PÉRIMÉ — ne doit jamais apparaître",
         type: "Faïence",
         ordreVitrine: null,
+        sousCategorieId: null,
+        marque: null,
         updatedAt: "2026-01-01T12:00:00.000Z", // antérieur à la mise à jour précédente (2026-01-02)
       });
       const modeles = await storage.listerModelesActifs();
@@ -180,11 +188,51 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         hauteur: 60,
         reference: "PG-6060",
         prix: 15000,
+        uniteVente: null,
+        caracteristiques: null,
+        marque: null,
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
       expect(applique).toBe(true);
       const produits = await storage.listerProduitsActifs();
       expect(produits.find((p) => p.id === PRODUIT_ID)).toMatchObject({ modeleId: MODELE_ID, prix: 15000 });
+    });
+
+    it("Phase 5 (référentiel commun), sous-phase 5.5 — parité PostgreSQL : sousCategorieId/marque (modèle) et uniteVente/caracteristiques/marque (produit) correctement enregistrés PUIS restitués", async () => {
+      const MODELE_5_5 = uuidDeterministe("555000000001");
+      const PRODUIT_5_5 = uuidDeterministe("555000000002");
+
+      await storage.appliquerOperationModele({
+        operation: "create",
+        modeleId: MODELE_5_5,
+        motif: "Ciment Portland PG",
+        type: "Quincaillerie",
+        ordreVitrine: null,
+        sousCategorieId: null,
+        marque: "Nicoll",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      await storage.appliquerOperationProduit({
+        operation: "create",
+        produitId: PRODUIT_5_5,
+        modeleId: MODELE_5_5,
+        taille: "25kg",
+        tailleTri: 25,
+        largeur: null,
+        hauteur: null,
+        reference: "PG-CIM-25",
+        prix: 7500,
+        uniteVente: "sac",
+        caracteristiques: '{"poids":"25kg"}',
+        marque: "Nicoll",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      const modeles = await storage.listerModelesActifs();
+      expect(modeles.find((m) => m.id === MODELE_5_5)).toMatchObject({ sousCategorieId: null, marque: "Nicoll" });
+
+      const produits = await storage.listerProduitsActifs();
+      expect(produits.find((p) => p.id === PRODUIT_5_5)).toMatchObject({ uniteVente: "sac", caracteristiques: '{"poids":"25kg"}', marque: "Nicoll" });
     });
 
     it("promotion ciblée réelle : table de jointure correctement peuplée puis nettoyée à la modification", async () => {
@@ -227,6 +275,8 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
         motif: "Marbre Postgres Test Modifié",
         type: "Grès cérame",
         ordreVitrine: null,
+        sousCategorieId: null,
+        marque: null,
         updatedAt: "2026-01-03T00:00:00.000Z",
       });
       const modeles = await storage.listerModelesActifs();
@@ -242,6 +292,8 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
           motif: "Marbre Postgres Test Modifié", // même motif que le modèle supprimé juste au-dessus
           type: "Faïence",
           ordreVitrine: null,
+          sousCategorieId: null,
+          marque: null,
           updatedAt: "2026-01-04T00:00:00.000Z",
         })
       ).resolves.toMatchObject({ applique: true });
@@ -255,7 +307,16 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
     it("image : upsert de métadonnées + URL, puis suppression réelle", async () => {
       const IMAGE_ID = uuidDeterministe("203");
       const MODELE_IMG = uuidDeterministe("204");
-      await storage.appliquerOperationModele({ operation: "create", modeleId: MODELE_IMG, motif: "Modele Image PG", type: "Faïence", ordreVitrine: null, updatedAt: "2026-01-01T00:00:00.000Z" });
+      await storage.appliquerOperationModele({
+        operation: "create",
+        modeleId: MODELE_IMG,
+        motif: "Modele Image PG",
+        type: "Faïence",
+        ordreVitrine: null,
+        sousCategorieId: null,
+        marque: null,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
 
       const { applique } = await storage.upsertImageMeta(
         { operation: "create", imageId: IMAGE_ID, modeleId: MODELE_IMG, kind: "produit", ordre: 0, estPrincipale: true, updatedAt: "2026-01-01T00:00:00.000Z" },
@@ -270,6 +331,195 @@ describe("PostgresServerStorage — vrai serveur PostgreSQL réel (Bloc 1)", () 
       await storage.upsertImageMeta({ operation: "delete", imageId: IMAGE_ID, modeleId: MODELE_IMG, kind: "produit", ordre: 0, estPrincipale: false, updatedAt: "2026-01-02T00:00:00.000Z" });
       const imagesApres = await storage.listerImagesActives();
       expect(imagesApres.some((i) => i.id === IMAGE_ID)).toBe(false);
+    });
+
+    // Phase 5 (référentiel commun), sous-phase 5.1 — extension des
+    // payloads modèle/produit, vérifiée ici contre un VRAI PostgreSQL
+    // (pas seulement SQLite). Colonnes sous_categorie_id/marque
+    // (modèle) et marque (produit) n'existaient pas avant cette phase.
+    it("modèle : sousCategorieId/marque persistés via une migration réelle sur base déjà peuplée (migrer() rejouée en amont de ce fichier)", async () => {
+      const MODELE_REF = uuidDeterministe("210");
+      const SOUS_CAT_REF = uuidDeterministe("211");
+      await storage.appliquerOperationModele({
+        operation: "create",
+        modeleId: MODELE_REF,
+        motif: "Ciment PG",
+        type: "Ciment",
+        ordreVitrine: null,
+        sousCategorieId: SOUS_CAT_REF,
+        marque: "Ciments du Gabon PG",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      // Lecture SQL brute : listerModelesActifs()/ModeleRow restent
+      // délibérément inchangés dans cette sous-phase (hors périmètre).
+      const res = await pool_query_modele(MODELE_REF);
+      expect(res).toEqual({ sousCategorieId: SOUS_CAT_REF, marque: "Ciments du Gabon PG" });
+    });
+
+    it("produit : uniteVente/caracteristiques/marque persistés (colonnes unite_vente/caracteristiques déjà présentes mais dormantes, désormais câblées)", async () => {
+      const PRODUIT_REF = uuidDeterministe("212");
+      const caracteristiques = JSON.stringify([{ cle: "Poids", valeur: "50 kg" }]);
+      await storage.appliquerOperationProduit({
+        operation: "create",
+        produitId: PRODUIT_REF,
+        modeleId: MODELE_ID,
+        taille: "Sac 50kg",
+        tailleTri: 50,
+        largeur: null,
+        hauteur: null,
+        reference: "CIM-50-PG",
+        prix: 6500,
+        uniteVente: "sac",
+        caracteristiques,
+        marque: "Ciments du Gabon PG",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      const res = await pool_query_produit(PRODUIT_REF);
+      expect(res).toEqual({ uniteVente: "sac", caracteristiques, marque: "Ciments du Gabon PG" });
+    });
+
+    it("rétrocompatibilité réelle : un payload ancien format (sousCategorieId/marque null) reste accepté sans erreur", async () => {
+      const MODELE_LEGACY = uuidDeterministe("213");
+      await expect(
+        storage.appliquerOperationModele({
+          operation: "create",
+          modeleId: MODELE_LEGACY,
+          motif: "Modèle legacy PG",
+          type: "Faïence",
+          ordreVitrine: null,
+          sousCategorieId: null,
+          marque: null,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        })
+      ).resolves.toEqual({ applique: true });
+    });
+
+    async function pool_query_modele(id: string): Promise<{ sousCategorieId: string | null; marque: string | null }> {
+      const res = await (storage as unknown as { pool: { query: (sql: string, params: unknown[]) => Promise<{ rows: unknown[] }> } }).pool.query(
+        `SELECT sous_categorie_id as "sousCategorieId", marque FROM catalogue_modeles WHERE id = $1`,
+        [id]
+      );
+      return res.rows[0] as { sousCategorieId: string | null; marque: string | null };
+    }
+
+    async function pool_query_produit(id: string): Promise<{ uniteVente: string | null; caracteristiques: string | null; marque: string | null }> {
+      const res = await (storage as unknown as { pool: { query: (sql: string, params: unknown[]) => Promise<{ rows: unknown[] }> } }).pool.query(
+        `SELECT unite_vente as "uniteVente", caracteristiques, marque FROM catalogue_produits WHERE id = $1`,
+        [id]
+      );
+      return res.rows[0] as { uniteVente: string | null; caracteristiques: string | null; marque: string | null };
+    }
+  });
+
+  describe("Référentiel commun du catalogue — catégories/sous-catégories/champs (réel PostgreSQL, Phase 5 sous-phase 5.1)", () => {
+    const CATEGORIE_PG = uuidDeterministe("300");
+    const SOUS_CATEGORIE_PG = uuidDeterministe("301");
+    const CHAMP_PG = uuidDeterministe("302");
+
+    it("catégorie : création, retrouvée via listerCategoriesActives", async () => {
+      const { applique } = await storage.appliquerOperationCategorie({
+        operation: "create",
+        categorieId: CATEGORIE_PG,
+        nom: "Quincaillerie générale PG",
+        imageDataUrl: null,
+        ordre: 0,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      expect(applique).toBe(true);
+      const categories = await storage.listerCategoriesActives();
+      expect(categories.find((c) => c.id === CATEGORIE_PG)).toMatchObject({ nom: "Quincaillerie générale PG" });
+    });
+
+    it("catégorie : suppression (tombstone réel) — Phase 5.6 : reste restituée par listerCategoriesActives, avec deletedAt renseigné (nécessaire à la transmission aux autres postes)", async () => {
+      await storage.appliquerOperationCategorie({
+        operation: "delete",
+        categorieId: CATEGORIE_PG,
+        nom: "Quincaillerie générale PG",
+        imageDataUrl: null,
+        ordre: 0,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      const categories = await storage.listerCategoriesActives();
+      const categorie = categories.find((c) => c.id === CATEGORIE_PG);
+      expect(categorie).toBeDefined();
+      expect(categorie!.deletedAt).not.toBeNull();
+    });
+
+    it("sous-catégorie : configuration d'unités en sous-objet, survit à un aller-retour réel PostgreSQL", async () => {
+      await storage.appliquerOperationSousCategorie({
+        operation: "create",
+        sousCategorieId: SOUS_CATEGORIE_PG,
+        categorieId: CATEGORIE_PG,
+        nom: "Ciments PG",
+        ordre: 0,
+        modelePhysique: null,
+        unitesAutorisees: ["sac", "kg"],
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      const sousCategories = await storage.listerSousCategoriesActives();
+      expect(sousCategories.find((s) => s.id === SOUS_CATEGORIE_PG)).toMatchObject({ unitesAutorisees: ["sac", "kg"] });
+    });
+
+    it("sous-catégorie : upsert LWW réel — opération plus ancienne rejouée après une plus récente n'écrase jamais l'état", async () => {
+      await storage.appliquerOperationSousCategorie({
+        operation: "update",
+        sousCategorieId: SOUS_CATEGORIE_PG,
+        categorieId: CATEGORIE_PG,
+        nom: "Nom récent PG",
+        ordre: 0,
+        modelePhysique: null,
+        unitesAutorisees: ["sac", "kg"],
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      await storage.appliquerOperationSousCategorie({
+        operation: "update",
+        sousCategorieId: SOUS_CATEGORIE_PG,
+        categorieId: CATEGORIE_PG,
+        nom: "PÉRIMÉ",
+        ordre: 0,
+        modelePhysique: null,
+        unitesAutorisees: ["sac", "kg"],
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      const sousCategories = await storage.listerSousCategoriesActives();
+      expect(sousCategories.find((s) => s.id === SOUS_CATEGORIE_PG)?.nom).toBe("Nom récent PG");
+    });
+
+    it("champ de sous-catégorie : création + tombstone réel (jamais une suppression physique)", async () => {
+      await storage.appliquerOperationSousCategorieChamp({
+        operation: "create",
+        champId: CHAMP_PG,
+        sousCategorieId: SOUS_CATEGORIE_PG,
+        nom: "Diamètre PG",
+        type: "nombre",
+        obligatoire: true,
+        valeursAutorisees: null,
+        uniteMesure: "mm",
+        role: "physique",
+        ordre: 0,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      let champs = await storage.listerSousCategorieChampsActifs();
+      expect(champs.find((c) => c.id === CHAMP_PG)).toMatchObject({ nom: "Diamètre PG", obligatoire: true });
+
+      await storage.appliquerOperationSousCategorieChamp({
+        operation: "delete",
+        champId: CHAMP_PG,
+        sousCategorieId: SOUS_CATEGORIE_PG,
+        nom: "Diamètre PG",
+        type: "nombre",
+        obligatoire: true,
+        valeursAutorisees: null,
+        uniteMesure: "mm",
+        role: "physique",
+        ordre: 0,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      champs = await storage.listerSousCategorieChampsActifs();
+      // Phase 5 (référentiel commun), sous-phase 5.6 — le champ reste restitué (deletedAt renseigné), nécessaire à la transmission du tombstone aux autres postes ; jamais une suppression physique de la ligne.
+      const champSupprime = champs.find((c) => c.id === CHAMP_PG);
+      expect(champSupprime).toBeDefined();
+      expect(champSupprime!.deletedAt).not.toBeNull();
     });
   });
 

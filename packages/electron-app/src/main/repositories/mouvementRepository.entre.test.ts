@@ -88,6 +88,82 @@ describe("MouvementRepository.sommeQuantiteParTypeEntre — plage de dates libre
 });
 
 /**
+ * Fondations quincaillerie (Phase 4) — correction "le bilan additionne
+ * des quantités d'unités différentes" : même filtre exact que
+ * `sommeQuantiteParTypeEntre` ci-dessus, mais ventilé par unité de vente
+ * du produit — jamais une somme unique mélangeant des unités distinctes.
+ */
+describe("MouvementRepository.sommeQuantiteParTypeEtUniteEntre — ventilation par unité (base réelle)", () => {
+  let db: Database.Database;
+  let repository: MouvementRepository;
+  const DEPOT_ID = "depot-test-unite";
+
+  beforeEach(() => {
+    db = ouvrirBaseDeTest();
+    repository = new MouvementRepository(db);
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO emplacements (id, nom, type, ville, est_point_de_vente, created_at, updated_at) VALUES (?, 'Akébé', 'depot', 'Libreville', 0, ?, ?)"
+    ).run(DEPOT_ID, maintenant, maintenant);
+    // Un produit carreau (unite_vente NULL, comportement historique) et un
+    // produit quincaillerie (unite_vente = 'sac').
+    db.prepare(
+      "INSERT INTO produits (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, unite_vente, created_at, updated_at) VALUES ('p-carton', 'X', 'Y', 'Z', 1, 'REF-CARTON', 1000, 0, NULL, ?, ?)"
+    ).run(maintenant, maintenant);
+    db.prepare(
+      "INSERT INTO produits (id, motif, type, taille, taille_tri, reference, prix, seuil_alerte, unite_vente, created_at, updated_at) VALUES ('p-sac', 'Ciment', 'Z', 'Sac 50kg', 0, 'REF-SAC', 6500, 0, 'sac', ?, ?)"
+    ).run(maintenant, maintenant);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  afterAll(() => {
+    if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
+  });
+
+  function insererMouvement(produitId: string, type: "entree" | "sortie", quantite: number, date: string): void {
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO mouvements (id, type, produit_id, emplacement_id, quantite, date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(`mvt-${Math.random()}`, type, produitId, DEPOT_ID, quantite, date, maintenant, maintenant);
+  }
+
+  it("ventile par unité — jamais une somme unique mélangeant carton et sac", () => {
+    insererMouvement("p-carton", "entree", 30, "2026-01-05T00:00:00.000Z");
+    insererMouvement("p-sac", "entree", 15, "2026-01-10T00:00:00.000Z");
+
+    const resultat = repository.sommeQuantiteParTypeEtUniteEntre("entree", "2026-01-01T00:00:00.000Z", "2026-01-31T23:59:59.999Z");
+    expect(resultat).toEqual([
+      { unite: "carton", quantite: 30 },
+      { unite: "sac", quantite: 15 },
+    ]);
+  });
+
+  it("un produit sans unite_vente (NULL) est regroupé sous 'carton' — comportement historique", () => {
+    insererMouvement("p-carton", "entree", 10, "2026-01-05T00:00:00.000Z");
+    insererMouvement("p-carton", "entree", 20, "2026-01-06T00:00:00.000Z");
+
+    const resultat = repository.sommeQuantiteParTypeEtUniteEntre("entree", "2026-01-01T00:00:00.000Z", "2026-01-31T23:59:59.999Z");
+    expect(resultat).toEqual([{ unite: "carton", quantite: 30 }]);
+  });
+
+  it("respecte la même plage de dates et la même exclusion des factures annulées que sommeQuantiteParTypeEntre", () => {
+    insererMouvement("p-carton", "entree", 999, "2025-12-31T23:59:59.999Z"); // hors plage
+    insererMouvement("p-carton", "entree", 5, "2026-01-05T00:00:00.000Z"); // dans la plage
+
+    const resultat = repository.sommeQuantiteParTypeEtUniteEntre("entree", "2026-01-01T00:00:00.000Z", "2026-01-31T23:59:59.999Z");
+    expect(resultat).toEqual([{ unite: "carton", quantite: 5 }]);
+  });
+
+  it("aucun mouvement sur la plage → tableau vide, jamais une exception", () => {
+    const resultat = repository.sommeQuantiteParTypeEtUniteEntre("entree", "2026-01-01T00:00:00.000Z", "2026-01-31T23:59:59.999Z");
+    expect(resultat).toEqual([]);
+  });
+});
+
+/**
  * Bilan d'activité — tableau détaillé par produit (2026-10-22) — même
  * principe de base réelle que ci-dessus (dates insérées directement en
  * SQL), pour distinguer "vendu" (sortie liée à une facture) de "sortie"

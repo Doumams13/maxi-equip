@@ -1,13 +1,23 @@
 import { useMemo, useState, useEffect, Fragment } from "react";
 import { Card, Button, Combobox, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Plus, ImageOff, Images, Search, Star, X, ImagePlus, Pencil, Trash2, Circle, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
-import type { ModeleProduitAvecVariantes, VarianteProduit, StagedImage } from "../../../preload/index.js";
-import type { Emplacement } from "@maxi-equip/shared-types";
+import type { ModeleProduitAvecVariantes, VarianteProduit, StagedImage, Categorie, SousCategorie, SousCategorieChamp } from "../../../preload/index.js";
+import type { Emplacement, ConfigurationUnitesSousCategorie } from "@maxi-equip/shared-types";
+import {
+  UNITES_VENTE,
+  uniteVenteEffective,
+  type UniteVente,
+  parseCaracteristiques,
+  serialiserCaracteristiques,
+  fusionnerCaracteristiquesSuggerees,
+  type CaracteristiqueEntry,
+} from "@maxi-equip/shared-types";
 import { ImagesModal } from "./ImagesModal.js";
 import { VitrineModal } from "./VitrineModal.js";
 import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
+import { CaracteristiquesEditor } from "../components/CaracteristiquesEditor.js";
 import { useSurbrillanceOperation } from "../highlight.js";
-import { pricing as domainPricing } from "@maxi-equip/domain";
+import { pricing as domainPricing, catalogue as domainCatalogue } from "@maxi-equip/domain";
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -72,15 +82,73 @@ function StatutStock({ quantite, seuil }: { quantite: number; seuil: number }) {
   );
 }
 
+/**
+ * Phase 5 (référentiel commun), sous-phase 5.6 — badge de classification
+ * orpheline : signale, sans jamais rien bloquer ni supprimer, qu'un
+ * modèle référence une sous-catégorie (ou sa catégorie) supprimée par un
+ * autre poste (tombstone reçu, voir ModeleRepository.listAvecStatutClassification).
+ * Le modèle et ses produits restent intacts et pleinement utilisables.
+ */
+function BadgeClassificationOrpheline({ sousCategorieSupprimee, categorieSupprimee }: { sousCategorieSupprimee: boolean; categorieSupprimee: boolean }) {
+  if (!sousCategorieSupprimee && !categorieSupprimee) return null;
+  const label = categorieSupprimee ? "Catégorie supprimée" : "Sous-catégorie supprimée";
+  return (
+    <span
+      title="La classification de ce modèle a été supprimée sur un autre poste. Le modèle et ses produits restent intacts."
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "3px 8px",
+        borderRadius: defaultTokens.radius.pill,
+        fontSize: 11,
+        fontWeight: 700,
+        color: defaultTokens.colors.warning,
+        background: defaultTokens.colors.warningSoft,
+        marginLeft: 8,
+      }}
+    >
+      <Circle size={6} fill={defaultTokens.colors.warning} color={defaultTokens.colors.warning} />
+      {label}
+    </span>
+  );
+}
+
 function extraireDimensions(taille: string): { largeur: string; hauteur: string } | null {
   const match = taille.match(/(\d+(?:[.,]\d+)?)\D+(\d+(?:[.,]\d+)?)/);
   if (!match) return null;
   return { largeur: match[1]!.replace(",", "."), hauteur: match[2]!.replace(",", ".") };
 }
 
-type VarianteForm = { id?: string; largeur: string; hauteur: string; reference: string; prix: string; carreauxParCarton: string; seuilAlerte: string };
+type VarianteForm = {
+  id?: string;
+  largeur: string;
+  hauteur: string;
+  reference: string;
+  prix: string;
+  carreauxParCarton: string;
+  seuilAlerte: string;
+  /** Fondations quincaillerie (Phase 2) — "carton" = comportement historique (largeur×hauteur, prix/m²). */
+  uniteVente: UniteVente;
+  /** Libellé de taille libre, utilisé UNIQUEMENT quand uniteVente !== "carton" (ex. "Sac 50kg"). */
+  tailleLibre: string;
+  caracteristiques: CaracteristiqueEntry[];
+};
 function varianteFormVide(): VarianteForm {
-  return { largeur: "", hauteur: "", reference: "", prix: "", carreauxParCarton: "", seuilAlerte: "10" };
+  return { largeur: "", hauteur: "", reference: "", prix: "", carreauxParCarton: "", seuilAlerte: "10", uniteVente: "carton", tailleLibre: "", caracteristiques: [] };
+}
+
+/**
+ * Taille affichée/triée construite depuis le formulaire — branche selon
+ * la NATURE de la sous-catégorie (`estModeleCarreau`), jamais selon
+ * l'unité de vente (fondations quincaillerie, Phase 3 bis — corrige le
+ * couplage historique sur `uniteVente === "carton"`).
+ */
+function construireTailleEtTri(v: Pick<VarianteForm, "largeur" | "hauteur" | "tailleLibre">, estModeleCarreau: boolean): { taille: string; tailleTri: number } {
+  if (estModeleCarreau) {
+    return { taille: `${v.largeur} × ${v.hauteur} cm`, tailleTri: Number(v.largeur) || 0 };
+  }
+  return { taille: v.tailleLibre.trim(), tailleTri: 0 };
 }
 
 /**
@@ -108,6 +176,9 @@ function surfaceCartonForm(f: Pick<VarianteForm, "largeur" | "hauteur" | "carrea
  */
 function VarianteFormRow({
   modele,
+  estModeleCarreau,
+  unitesAutorisees,
+  champs,
   editingVariante,
   ajoutVarianteModeleId,
   varianteForm,
@@ -117,6 +188,10 @@ function VarianteFormRow({
   onCancel,
 }: {
   modele: ModeleProduitAvecVariantes;
+  /** Fondations quincaillerie (Phase 3 bis) — calculé par l'appelant (seul point de lecture : estSousCategorieModeleCarreau). */
+  estModeleCarreau: boolean;
+  unitesAutorisees: UniteVente[];
+  champs: SousCategorieChamp[];
   editingVariante: { modeleId: string; varianteId: string } | null;
   ajoutVarianteModeleId: string | null;
   varianteForm: VarianteForm;
@@ -128,33 +203,76 @@ function VarianteFormRow({
   const isEdit = editingVariante?.modeleId === modele.id;
   const isAdd = ajoutVarianteModeleId === modele.id;
   if (!isEdit && !isAdd) return null;
+  const estCarton = varianteForm.uniteVente === "carton";
+  // Une variante déjà enregistrée peut porter une unité devenue entre-temps
+  // incompatible (restriction ajoutée après coup) — jamais retirée de la
+  // liste pour autant, sinon la valeur actuellement sélectionnée
+  // disparaîtrait silencieusement du <select> (voir Phase 3 bis, §3 :
+  // jamais de perte silencieuse).
+  const optionsUnite = unitesAutorisees.includes(varianteForm.uniteVente) ? unitesAutorisees : [varianteForm.uniteVente, ...unitesAutorisees];
   return (
     <tr style={{ background: defaultTokens.colors.accentSoft + "44", borderTop: `1px solid ${defaultTokens.colors.borderSoft}` }}>
       <td colSpan={6} style={{ padding: "10px 16px" }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 10 }}>
           <div>
-            <label style={{ ...labelStyle, fontSize: 11 }}>Largeur (cm)</label>
-            <input
-              style={{ ...inputStyle, width: 80 }}
-              type="number"
-              min={1}
-              value={varianteForm.largeur}
-              onChange={(e) => setVarianteForm((f) => ({ ...f, largeur: e.target.value }))}
-              placeholder="60"
-            />
+            <label style={{ ...labelStyle, fontSize: 11 }}>Unité de vente</label>
+            <select
+              style={{ ...inputStyle, width: 150 }}
+              value={varianteForm.uniteVente}
+              onChange={(e) => setVarianteForm((f) => ({ ...f, uniteVente: e.target.value as UniteVente }))}
+            >
+              {UNITES_VENTE.filter((u) => optionsUnite.includes(u.valeur)).map((u) => (
+                <option key={u.valeur} value={u.valeur}>{u.libelle}</option>
+              ))}
+            </select>
           </div>
-          <span style={{ paddingBottom: 8, color: defaultTokens.colors.textFaint, fontWeight: 700 }}>×</span>
-          <div>
-            <label style={{ ...labelStyle, fontSize: 11 }}>Hauteur (cm)</label>
-            <input
-              style={{ ...inputStyle, width: 80 }}
-              type="number"
-              min={1}
-              value={varianteForm.hauteur}
-              onChange={(e) => setVarianteForm((f) => ({ ...f, hauteur: e.target.value }))}
-              placeholder="60"
-            />
-          </div>
+          {estModeleCarreau ? (
+            <>
+              <div>
+                <label style={{ ...labelStyle, fontSize: 11 }}>Largeur (cm)</label>
+                <input
+                  style={{ ...inputStyle, width: 80 }}
+                  type="number"
+                  min={1}
+                  value={varianteForm.largeur}
+                  onChange={(e) => setVarianteForm((f) => ({ ...f, largeur: e.target.value }))}
+                  placeholder="60"
+                />
+              </div>
+              <span style={{ paddingBottom: 8, color: defaultTokens.colors.textFaint, fontWeight: 700 }}>×</span>
+              <div>
+                <label style={{ ...labelStyle, fontSize: 11 }}>Hauteur (cm)</label>
+                <input
+                  style={{ ...inputStyle, width: 80 }}
+                  type="number"
+                  min={1}
+                  value={varianteForm.hauteur}
+                  onChange={(e) => setVarianteForm((f) => ({ ...f, hauteur: e.target.value }))}
+                  placeholder="60"
+                />
+              </div>
+              {(() => {
+                const l = Number(varianteForm.largeur);
+                const h = Number(varianteForm.hauteur);
+                const surfaceUnitaire = l > 0 && h > 0 ? domainPricing.calculerSurfaceCarreauM2(l, h) : null;
+                return (
+                  <div style={{ paddingBottom: 8, fontSize: 11, color: defaultTokens.colors.textFaint }}>
+                    {surfaceUnitaire !== null ? `Surface unitaire : ${surfaceUnitaire.toFixed(2)} m²` : ""}
+                  </div>
+                );
+              })()}
+            </>
+          ) : (
+            <div>
+              <label style={{ ...labelStyle, fontSize: 11 }}>Taille / libellé</label>
+              <input
+                style={{ ...inputStyle, width: 140 }}
+                value={varianteForm.tailleLibre}
+                onChange={(e) => setVarianteForm((f) => ({ ...f, tailleLibre: e.target.value }))}
+                placeholder="Ex. Sac 50kg"
+              />
+            </div>
+          )}
           <div>
             <label style={{ ...labelStyle, fontSize: 11 }}>Référence</label>
             <input
@@ -164,19 +282,21 @@ function VarianteFormRow({
               placeholder="MB-6060"
             />
           </div>
+          {estModeleCarreau && estCarton && (
+            <div>
+              <label style={{ ...labelStyle, fontSize: 11 }}>Carreaux/carton</label>
+              <input
+                style={{ ...inputStyle, width: 90 }}
+                type="number"
+                min={1}
+                value={varianteForm.carreauxParCarton}
+                onChange={(e) => setVarianteForm((f) => ({ ...f, carreauxParCarton: e.target.value }))}
+                placeholder="4"
+              />
+            </div>
+          )}
           <div>
-            <label style={{ ...labelStyle, fontSize: 11 }}>Carreaux/carton</label>
-            <input
-              style={{ ...inputStyle, width: 90 }}
-              type="number"
-              min={1}
-              value={varianteForm.carreauxParCarton}
-              onChange={(e) => setVarianteForm((f) => ({ ...f, carreauxParCarton: e.target.value }))}
-              placeholder="4"
-            />
-          </div>
-          <div>
-            <label style={{ ...labelStyle, fontSize: 11 }}>Prix / m² (FCFA)</label>
+            <label style={{ ...labelStyle, fontSize: 11 }}>{estModeleCarreau && estCarton ? "Prix / m² (FCFA)" : "Prix unitaire (FCFA)"}</label>
             <input
               style={{ ...inputStyle, width: 110 }}
               type="number"
@@ -185,31 +305,33 @@ function VarianteFormRow({
               onChange={(e) => setVarianteForm((f) => ({ ...f, prix: e.target.value }))}
             />
           </div>
-          <div>
-            {(() => {
-              const surface = surfaceCartonForm(varianteForm);
-              const prixM2 = Number(varianteForm.prix) || 0;
-              const prixCarton = surface !== null && prixM2 ? domainPricing.calculerPrixCartonDepuisPrixM2(prixM2, surface) : null;
-              return (
-                <>
-                  <label style={{ ...labelStyle, fontSize: 11 }}>Prix / carton (FCFA)</label>
-                  <input
-                    style={{ ...inputStyle, width: 110, opacity: surface === null ? 0.5 : 1 }}
-                    type="number"
-                    min={0}
-                    disabled={surface === null}
-                    title={surface === null ? "Renseignez largeur, hauteur et carreaux/carton pour activer ce champ" : undefined}
-                    value={prixCarton !== null ? String(prixCarton) : ""}
-                    onChange={(e) => {
-                      if (surface === null) return;
-                      const valeur = Number(e.target.value) || 0;
-                      setVarianteForm((f) => ({ ...f, prix: valeur ? String(domainPricing.calculerPrixM2DepuisPrixCarton(valeur, surface)) : "" }));
-                    }}
-                  />
-                </>
-              );
-            })()}
-          </div>
+          {estModeleCarreau && estCarton && (
+            <div>
+              {(() => {
+                const surface = surfaceCartonForm(varianteForm);
+                const prixM2 = Number(varianteForm.prix) || 0;
+                const prixCarton = surface !== null && prixM2 ? domainPricing.calculerPrixCartonDepuisPrixM2(prixM2, surface) : null;
+                return (
+                  <>
+                    <label style={{ ...labelStyle, fontSize: 11 }}>Prix / carton (FCFA)</label>
+                    <input
+                      style={{ ...inputStyle, width: 110, opacity: surface === null ? 0.5 : 1 }}
+                      type="number"
+                      min={0}
+                      disabled={surface === null}
+                      title={surface === null ? "Renseignez largeur, hauteur et carreaux/carton pour activer ce champ" : undefined}
+                      value={prixCarton !== null ? String(prixCarton) : ""}
+                      onChange={(e) => {
+                        if (surface === null) return;
+                        const valeur = Number(e.target.value) || 0;
+                        setVarianteForm((f) => ({ ...f, prix: valeur ? String(domainPricing.calculerPrixM2DepuisPrixCarton(valeur, surface)) : "" }));
+                      }}
+                    />
+                  </>
+                );
+              })()}
+            </div>
+          )}
           <div>
             <label style={{ ...labelStyle, fontSize: 11 }}>Seuil alerte</label>
             <input
@@ -229,6 +351,11 @@ function VarianteFormRow({
             </Button>
           </div>
         </div>
+        <CaracteristiquesEditor
+          value={varianteForm.caracteristiques}
+          champs={champs}
+          onChange={(next) => setVarianteForm((f) => ({ ...f, caracteristiques: next }))}
+        />
       </td>
     </tr>
   );
@@ -238,11 +365,17 @@ export function ProduitsScreen({
   session: _session,
   cibleSurbrillance,
   onSurbrillanceAppliquee,
+  sousCategorieId = null,
+  sousCategorieNom = null,
 }: {
   session: { userId: string };
   /** Correction "Dashboard cliquable" (2026-10-21) — modeleId visé depuis un autre écran (ex. "Produits en stock faible"), même mécanisme que modeleEnSurbrillance ci-dessous. */
   cibleSurbrillance: string | null;
   onSurbrillanceAppliquee: () => void;
+  /** Fondations quincaillerie (Phase 2) — filtre la liste à une seule sous-catégorie (navigation Catalogue → sous-catégories → produits). `null` = aucun filtre, comportement historique inchangé. */
+  sousCategorieId?: string | null;
+  /** Libellé affiché en titre quand un filtre de sous-catégorie est actif — `null` = titre historique "Carreaux". */
+  sousCategorieNom?: string | null;
 }) {
   const { showSuccess, showWarning, showError } = useToast();
   const [modeles, setModeles] = useState<ModeleProduitAvecVariantes[]>([]);
@@ -274,10 +407,19 @@ export function ProduitsScreen({
     if (cibleSurbrillance) setModeleEnSurbrillance(cibleSurbrillance);
   }, [cibleSurbrillance]);
 
+  // Fondations quincaillerie (Phase 2) — catégories/sous-catégories pour
+  // le formulaire modèle, champs suggérés pour le préremplissage des
+  // caractéristiques. Jamais synchronisées au serveur (locales à ce poste).
+  const [categories, setCategories] = useState<Categorie[]>([]);
+  const [sousCategories, setSousCategories] = useState<SousCategorie[]>([]);
+  const [champsParSousCategorie, setChampsParSousCategorie] = useState<Record<string, SousCategorieChamp[]>>({});
+  // Fondations quincaillerie (Phase 3 bis) — unités de vente autorisées par sous-catégorie.
+  const [unitesParSousCategorie, setUnitesParSousCategorie] = useState<Record<string, ConfigurationUnitesSousCategorie>>({});
+
   // Formulaire modèle
   const [showModeleForm, setShowModeleForm] = useState(false);
   const [editingModeleId, setEditingModeleId] = useState<string | null>(null);
-  const [modeleForm, setModeleForm] = useState({ motif: "", type: "" });
+  const [modeleForm, setModeleForm] = useState({ motif: "", type: "", sousCategorieId: "", marque: "" });
   const [variantesForm, setVariantesForm] = useState<VarianteForm[]>([varianteFormVide()]);
   const [stagedImages, setStagedImages] = useState<StagedImage[]>([]);
   const [principaleStagingId, setPrincipaleStagingId] = useState<string | null>(null);
@@ -316,9 +458,20 @@ export function ProduitsScreen({
   const [stockParDepot, setStockParDepot] = useState<Record<string, Record<string, number>>>({});
 
   async function refresh() {
-    const [liste, sugg] = await Promise.all([window.maxiEquip.listModelesProduits(), window.maxiEquip.getCatalogueSuggestions()]);
+    const [liste, sugg, cats, sousCats, champs, unites] = await Promise.all([
+      window.maxiEquip.listModelesProduits(),
+      window.maxiEquip.getCatalogueSuggestions(),
+      window.maxiEquip.listerCategories(),
+      window.maxiEquip.listerSousCategories(),
+      window.maxiEquip.listerChampsSousCategories(),
+      window.maxiEquip.listerUnitesSousCategories(),
+    ]);
     setModeles(liste);
     setSuggestions(sugg);
+    setCategories(cats);
+    setSousCategories(sousCats);
+    setChampsParSousCategorie(champs);
+    setUnitesParSousCategorie(unites);
     // Le stock par dépôt peut changer après une suppression (écoulement
     // automatique, voir StockService.ecoulerStockPourSuppression) — déjà
     // rafraîchi au montage, refait ici pour rester cohérent après toute
@@ -336,6 +489,23 @@ export function ProduitsScreen({
     setStockParDepot(map);
   }
 
+  /**
+   * Fondations quincaillerie (Phase 3 bis) — la présence des dimensions
+   * (largeur/hauteur/carreaux par carton) dépend de la NATURE de la
+   * sous-catégorie (modelePhysique === "carreau"), jamais de l'unité de
+   * vente choisie (voir shared-types/categorie.ts). Seul point de
+   * lecture de cette information dans tout l'écran.
+   */
+  function estSousCategorieModeleCarreau(sousCategorieId: string | null | undefined): boolean {
+    return sousCategorieId ? sousCategories.find((s) => s.id === sousCategorieId)?.modelePhysique === "carreau" : false;
+  }
+
+  /** Unités réellement proposables pour une sous-catégorie — jamais un second calcul, voir domain/catalogue. */
+  function unitesAutoriseesPourSousCategorie(sousCategorieId: string | null | undefined): UniteVente[] {
+    const config = sousCategorieId ? (unitesParSousCategorie[sousCategorieId] ?? { configuree: false, unites: [] }) : { configuree: false, unites: [] };
+    return domainCatalogue.unitesEffectivesPourSousCategorie(config);
+  }
+
   useEffect(() => {
     void refresh();
     void (async () => {
@@ -349,6 +519,10 @@ export function ProduitsScreen({
   const modelesFiltres = useMemo(() => {
     const q = recherche.trim().toLowerCase();
     return modeles.filter((m) => {
+      // Fondations quincaillerie (Phase 2) — filtre de navigation
+      // Catalogue → sous-catégories, en complément des filtres existants,
+      // jamais à leur place.
+      if (sousCategorieId && m.sousCategorieId !== sousCategorieId) return false;
       if (filtreType && m.type !== filtreType) return false;
       if (filtreTaille && !m.variantes.some((v) => v.taille === filtreTaille)) return false;
       if (!q) return true;
@@ -358,7 +532,7 @@ export function ProduitsScreen({
         m.variantes.some((v) => v.reference.toLowerCase().includes(q) || v.taille.toLowerCase().includes(q))
       );
     });
-  }, [modeles, recherche, filtreType, filtreTaille]);
+  }, [modeles, recherche, filtreType, filtreTaille, sousCategorieId]);
 
   // Retrouve le modèle visé même si une recherche active le masquerait.
   useEffect(() => {
@@ -385,7 +559,10 @@ export function ProduitsScreen({
   }
 
   function resetModeleForm() {
-    setModeleForm({ motif: "", type: "" });
+    // Fondations quincaillerie (Phase 2) — préremplit la sous-catégorie
+    // avec le filtre de navigation actif, s'il y en a un (évite de
+    // forcer un re-choix pour un cas déjà évident), jamais imposé.
+    setModeleForm({ motif: "", type: "", sousCategorieId: sousCategorieId ?? "", marque: "" });
     setVariantesForm([varianteFormVide()]);
     setStagedImages([]);
     setPrincipaleStagingId(null);
@@ -401,7 +578,7 @@ export function ProduitsScreen({
   }
 
   function handleStartEditModele(m: ModeleProduitAvecVariantes) {
-    setModeleForm({ motif: m.motif, type: m.type });
+    setModeleForm({ motif: m.motif, type: m.type, sousCategorieId: m.sousCategorieId ?? "", marque: m.marque ?? "" });
     setEditingModeleId(m.id);
     // Correction "Modifier doit rouvrir l'écran d'ajout avec les cases
     // préremplies" (2026-10-08) — jusqu'ici ce formulaire masquait
@@ -412,7 +589,8 @@ export function ProduitsScreen({
     setVariantesForm(
       m.variantes.length > 0
         ? m.variantes.map((v) => {
-            const dims = extraireDimensions(v.taille) ?? { largeur: "", hauteur: "" };
+            const unite = uniteVenteEffective({ uniteVente: v.uniteVente ?? null });
+            const dims = unite === "carton" ? extraireDimensions(v.taille) ?? { largeur: "", hauteur: "" } : { largeur: "", hauteur: "" };
             return {
               id: v.id,
               largeur: dims.largeur,
@@ -421,6 +599,9 @@ export function ProduitsScreen({
               prix: String(v.prix),
               carreauxParCarton: v.carreauxParCarton !== null ? String(v.carreauxParCarton) : "",
               seuilAlerte: String(v.seuilAlerte),
+              uniteVente: unite,
+              tailleLibre: unite === "carton" ? "" : v.taille,
+              caracteristiques: parseCaracteristiques(v.caracteristiques ?? null),
             };
           })
         : [varianteFormVide()]
@@ -467,9 +648,21 @@ export function ProduitsScreen({
       showWarning("Champs requis", "Le type de carreau est obligatoire.");
       return;
     }
-    const varInvalide = variantesForm.find((v) => !v.largeur || !v.hauteur || !v.reference.trim() || !v.prix);
+    // Fondations quincaillerie (Phase 2) — sous-catégorie obligatoire
+    // UNIQUEMENT à la création (jamais imposée en modification, pour ne
+    // jamais bloquer un modèle existant dont le classement serait
+    // revérifié plus tard, voir migrate.ts — filet de sécurité "Divers").
+    if (!editingModeleId && !modeleForm.sousCategorieId) {
+      showWarning("Champs requis", "La catégorie est obligatoire pour un nouveau modèle.");
+      return;
+    }
+    const estModeleCarreauChoisi = estSousCategorieModeleCarreau(modeleForm.sousCategorieId);
+    const varInvalide = variantesForm.find((v) => {
+      if (estModeleCarreauChoisi) return !v.largeur || !v.hauteur || !v.reference.trim() || !v.prix;
+      return !v.tailleLibre.trim() || !v.reference.trim() || !v.prix;
+    });
     if (varInvalide) {
-      showWarning("Champs requis", "Chaque format doit avoir une taille (L×H), une référence et un prix.");
+      showWarning("Champs requis", "Chaque format doit avoir une taille, une référence et un prix.");
       return;
     }
     setShowConfirmSaveModele(true);
@@ -482,7 +675,12 @@ export function ProduitsScreen({
     const modeleIdModifie = editingModeleId;
     try {
       if (editingModeleId) {
-        const result = await window.maxiEquip.modifierModeleProduit(editingModeleId, { motif: modeleForm.motif, type: modeleForm.type });
+        const result = await window.maxiEquip.modifierModeleProduit(editingModeleId, {
+          motif: modeleForm.motif,
+          type: modeleForm.type,
+          sousCategorieId: modeleForm.sousCategorieId || null,
+          marque: modeleForm.marque || null,
+        });
         if (!result.success) throw new Error(result.message);
         // Correction "Modifier doit rouvrir l'écran d'ajout avec les
         // cases préremplies" (2026-10-08) — les formats affichés dans ce
@@ -492,16 +690,20 @@ export function ProduitsScreen({
         // absent). Jamais de suppression implicite ici — retirer un
         // format existant reste réservé au flux de suppression dédié
         // (bouton X masqué pour ces lignes-là, voir plus bas).
+        const estModeleCarreauChoisi = estSousCategorieModeleCarreau(modeleForm.sousCategorieId);
         for (const v of variantesForm) {
+          const { taille, tailleTri } = construireTailleEtTri(v, estModeleCarreauChoisi);
           const input = {
-            taille: `${v.largeur} × ${v.hauteur} cm`,
-            tailleTri: Number(v.largeur),
-            largeur: Number(v.largeur),
-            hauteur: Number(v.hauteur),
+            taille,
+            tailleTri,
+            largeur: estModeleCarreauChoisi ? Number(v.largeur) : null,
+            hauteur: estModeleCarreauChoisi ? Number(v.hauteur) : null,
             reference: v.reference.trim(),
             prix: Number(v.prix),
-            carreauxParCarton: v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
+            carreauxParCarton: estModeleCarreauChoisi && v.uniteVente === "carton" && v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
             seuilAlerte: Number(v.seuilAlerte) || 0,
+            uniteVente: v.uniteVente,
+            caracteristiques: serialiserCaracteristiques(v.caracteristiques),
           };
           const resultVariante = v.id
             ? await window.maxiEquip.modifierVariante(v.id, input)
@@ -510,22 +712,30 @@ export function ProduitsScreen({
         }
         showSuccess("Modèle modifié", `"${modeleForm.motif}" mis à jour.`);
       } else {
-        const variantes = variantesForm.map((v) => ({
-          taille: `${v.largeur} × ${v.hauteur} cm`,
-          tailleTri: Number(v.largeur),
-          largeur: Number(v.largeur),
-          hauteur: Number(v.hauteur),
-          reference: v.reference.trim(),
-          prix: Number(v.prix),
-          carreauxParCarton: v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
-          seuilAlerte: Number(v.seuilAlerte) || 0,
-        }));
+        const estModeleCarreauChoisi = estSousCategorieModeleCarreau(modeleForm.sousCategorieId);
+        const variantes = variantesForm.map((v) => {
+          const { taille, tailleTri } = construireTailleEtTri(v, estModeleCarreauChoisi);
+          return {
+            taille,
+            tailleTri,
+            largeur: estModeleCarreauChoisi ? Number(v.largeur) : null,
+            hauteur: estModeleCarreauChoisi ? Number(v.hauteur) : null,
+            reference: v.reference.trim(),
+            prix: Number(v.prix),
+            carreauxParCarton: estModeleCarreauChoisi && v.uniteVente === "carton" && v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
+            seuilAlerte: Number(v.seuilAlerte) || 0,
+            uniteVente: v.uniteVente,
+            caracteristiques: serialiserCaracteristiques(v.caracteristiques),
+          };
+        });
         const result = await window.maxiEquip.creerModeleProduit({
           motif: modeleForm.motif,
           type: modeleForm.type,
           variantes,
           stagedImages: stagedImages.map((s) => s.stagingId),
           principaleStagingId,
+          sousCategorieId: modeleForm.sousCategorieId || null,
+          marque: modeleForm.marque || null,
         });
         if (!result.success) throw new Error(result.message);
         showSuccess("Modèle créé", `"${modeleForm.motif}" ajouté au catalogue.`);
@@ -537,7 +747,15 @@ export function ProduitsScreen({
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[produits] enregistrement impossible :", err);
-      showError(editingModeleId ? "Modification impossible" : "Création impossible", "Une erreur inattendue s'est produite. Vérifiez que les références ne sont pas déjà utilisées.");
+      // Fondations quincaillerie (Phase 3 bis) — un message de validation
+      // métier précis (unité incompatible, caractéristique obligatoire
+      // manquante, changement de sous-catégorie bloqué) doit atteindre
+      // l'utilisateur tel quel, jamais être remplacé par un message
+      // générique qui masquerait l'information utile pour corriger.
+      showError(
+        editingModeleId ? "Modification impossible" : "Création impossible",
+        err instanceof Error ? err.message : "Une erreur inattendue s'est produite. Vérifiez que les références ne sont pas déjà utilisées."
+      );
     } finally {
       setSavingModele(false);
     }
@@ -563,19 +781,35 @@ export function ProduitsScreen({
   function handleStartAjoutVariante(modeleId: string) {
     setAjoutVarianteModeleId(modeleId);
     setEditingVariante(null);
-    setVarianteForm(varianteFormVide());
+    // Fondations quincaillerie (Phase 2) — préremplit les caractéristiques
+    // suggérées par la sous-catégorie du modèle, vides, jamais en écrasant
+    // une valeur déjà saisie (voir fusionnerCaracteristiquesSuggerees) —
+    // ici le formulaire démarre vide, donc équivalent à tout préremplir.
+    const modele = modeles.find((m) => m.id === modeleId);
+    const nomsSuggeres = modele?.sousCategorieId ? (champsParSousCategorie[modele.sousCategorieId] ?? []).map((c) => c.nom) : [];
+    setVarianteForm({ ...varianteFormVide(), caracteristiques: fusionnerCaracteristiquesSuggerees([], nomsSuggeres) });
     setExpanded((prev) => new Set([...prev, modeleId]));
   }
 
   function handleStartEditVariante(modele: ModeleProduitAvecVariantes, variante: VarianteProduit) {
-    const dims = extraireDimensions(variante.taille) ?? { largeur: "", hauteur: "" };
+    const unite = uniteVenteEffective({ uniteVente: variante.uniteVente ?? null });
+    // Fondations quincaillerie (Phase 3 bis) — dimensions relues dès que
+    // la sous-catégorie est de nature "carreau", quelle que soit l'unité
+    // réellement enregistrée (jamais réservé au seul cas "carton").
+    const estModeleCarreau = estSousCategorieModeleCarreau(modele.sousCategorieId);
+    const dims = estModeleCarreau ? extraireDimensions(variante.taille) ?? { largeur: "", hauteur: "" } : { largeur: "", hauteur: "" };
+    const nomsSuggeres = modele.sousCategorieId ? (champsParSousCategorie[modele.sousCategorieId] ?? []).map((c) => c.nom) : [];
     setVarianteForm({
+      id: variante.id,
       largeur: dims.largeur,
       hauteur: dims.hauteur,
       reference: variante.reference,
       prix: String(variante.prix),
       carreauxParCarton: variante.carreauxParCarton !== null ? String(variante.carreauxParCarton) : "",
       seuilAlerte: String(variante.seuilAlerte),
+      uniteVente: unite,
+      tailleLibre: estModeleCarreau ? "" : variante.taille,
+      caracteristiques: fusionnerCaracteristiquesSuggerees(parseCaracteristiques(variante.caracteristiques ?? null), nomsSuggeres),
     });
     setEditingVariante({ modeleId: modele.id, varianteId: variante.id });
     setAjoutVarianteModeleId(null);
@@ -584,21 +818,26 @@ export function ProduitsScreen({
 
   async function handleSauvegarderVariante(modele: ModeleProduitAvecVariantes) {
     const v = varianteForm;
-    if (!v.largeur || !v.hauteur || !v.reference.trim() || !v.prix) {
-      showWarning("Champs requis", "Taille (L×H), référence et prix sont obligatoires.");
+    const estModeleCarreau = estSousCategorieModeleCarreau(modele.sousCategorieId);
+    const varianteInvalide = estModeleCarreau ? !v.largeur || !v.hauteur : !v.tailleLibre.trim();
+    if (varianteInvalide || !v.reference.trim() || !v.prix) {
+      showWarning("Champs requis", "Taille, référence et prix sont obligatoires.");
       return;
     }
     setSavingVariante(true);
     try {
+      const { taille, tailleTri } = construireTailleEtTri(v, estModeleCarreau);
       const input = {
-        taille: `${v.largeur} × ${v.hauteur} cm`,
-        tailleTri: Number(v.largeur),
-        largeur: Number(v.largeur),
-        hauteur: Number(v.hauteur),
+        taille,
+        tailleTri,
+        largeur: estModeleCarreau ? Number(v.largeur) : null,
+        hauteur: estModeleCarreau ? Number(v.hauteur) : null,
         reference: v.reference.trim(),
         prix: Number(v.prix),
-        carreauxParCarton: v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
+        carreauxParCarton: estModeleCarreau && v.uniteVente === "carton" && v.carreauxParCarton ? Number(v.carreauxParCarton) : null,
         seuilAlerte: Number(v.seuilAlerte) || 0,
+        uniteVente: v.uniteVente,
+        caracteristiques: serialiserCaracteristiques(v.caracteristiques),
       };
       if (editingVariante) {
         const result = await window.maxiEquip.modifierVariante(editingVariante.varianteId, input);
@@ -616,7 +855,7 @@ export function ProduitsScreen({
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[produits] variante impossible :", err);
-      showError("Erreur", "Une erreur inattendue s'est produite. Vérifiez que la référence n'est pas déjà utilisée.");
+      showError("Erreur", err instanceof Error ? err.message : "Une erreur inattendue s'est produite. Vérifiez que la référence n'est pas déjà utilisée.");
     } finally {
       setSavingVariante(false);
     }
@@ -656,7 +895,7 @@ export function ProduitsScreen({
   return (
     <div style={{ padding: 28 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, margin: 0 }}>Carreaux</h1>
+        <h1 style={{ fontFamily: defaultTokens.typography.display, fontSize: 22, color: defaultTokens.colors.text, margin: 0 }}>{sousCategorieNom ?? "Carreaux"}</h1>
         <div style={{ display: "flex", gap: 10 }}>
           <Button variant="secondary" onClick={() => setShowVitrineModal(true)}>
             <Star size={16} />
@@ -681,7 +920,7 @@ export function ProduitsScreen({
       {showModeleForm && (
         <Card style={{ marginBottom: 20 }}>
           <h2 style={{ margin: "0 0 14px", fontFamily: defaultTokens.typography.display, fontSize: 16 }}>
-            {editingModeleId ? "Modifier le modèle" : "Nouveau modèle de carreau"}
+            {editingModeleId ? "Modifier le modèle" : "Nouveau modèle"}
           </h2>
           <form onSubmit={handleOuvrirConfirmSaveModele}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
@@ -695,33 +934,114 @@ export function ProduitsScreen({
               </div>
             </div>
 
+            {/* Fondations quincaillerie (Phase 2) — catégorie/sous-catégorie et marque. Catégorie obligatoire à la création uniquement (voir handleOuvrirConfirmSaveModele). */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={labelStyle}>Catégorie{!editingModeleId && " *"}</label>
+                <select
+                  style={inputStyle}
+                  value={(() => {
+                    const sc = sousCategories.find((s) => s.id === modeleForm.sousCategorieId);
+                    return sc?.categorieId ?? "";
+                  })()}
+                  onChange={(e) => {
+                    const premiereSousCategorie = sousCategories.find((s) => s.categorieId === e.target.value);
+                    setModeleForm((f) => ({ ...f, sousCategorieId: premiereSousCategorie?.id ?? "" }));
+                  }}
+                >
+                  <option value="">— Choisir —</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.nom}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Sous-catégorie{!editingModeleId && " *"}</label>
+                <select
+                  style={inputStyle}
+                  value={modeleForm.sousCategorieId}
+                  onChange={(e) => setModeleForm((f) => ({ ...f, sousCategorieId: e.target.value }))}
+                >
+                  <option value="">— Choisir —</option>
+                  {sousCategories
+                    .filter((s) => {
+                      const categorieChoisie = sousCategories.find((x) => x.id === modeleForm.sousCategorieId)?.categorieId;
+                      return s.categorieId === categorieChoisie || s.id === modeleForm.sousCategorieId;
+                    })
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>{s.nom}</option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Marque (optionnel)</label>
+                <input style={inputStyle} value={modeleForm.marque} onChange={(e) => setModeleForm((f) => ({ ...f, marque: e.target.value }))} placeholder="Ex. Nicoll" />
+              </div>
+            </div>
+
             <>
                 <h3 style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: defaultTokens.colors.text }}>
                   Formats disponibles
                 </h3>
-                {variantesForm.map((v, i) => (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 16px auto auto auto auto auto 1fr", gap: 8, alignItems: "flex-end", marginBottom: 10 }}>
+                {(() => {
+                  // Fondations quincaillerie (Phase 3 bis) — calculés une
+                  // seule fois pour tous les formats : une seule
+                  // sous-catégorie par modèle.
+                  const estModeleCarreau = estSousCategorieModeleCarreau(modeleForm.sousCategorieId);
+                  const unitesAutorisees = unitesAutoriseesPourSousCategorie(modeleForm.sousCategorieId);
+                  return variantesForm.map((v, i) => {
+                  const estCarton = v.uniteVente === "carton";
+                  const optionsUnite = unitesAutorisees.includes(v.uniteVente) ? unitesAutorisees : [v.uniteVente, ...unitesAutorisees];
+                  return (
+                  <div key={i} style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.sm, padding: 10, marginBottom: 10 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "auto auto 16px auto auto auto auto auto 1fr", gap: 8, alignItems: "flex-end", marginBottom: 10 }}>
                     <div>
-                      <label style={labelStyle}>Largeur (cm)</label>
-                      <input
-                        style={{ ...inputStyle, width: 80 }}
-                        type="number" min={1}
-                        value={v.largeur}
-                        onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, largeur: e.target.value } : x))}
-                        placeholder="60"
-                      />
+                      <label style={labelStyle}>Unité</label>
+                      <select
+                        style={{ ...inputStyle, width: 130 }}
+                        value={v.uniteVente}
+                        onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => (j === i ? { ...x, uniteVente: e.target.value as UniteVente } : x)))}
+                      >
+                        {UNITES_VENTE.filter((u) => optionsUnite.includes(u.valeur)).map((u) => (
+                          <option key={u.valeur} value={u.valeur}>{u.libelle}</option>
+                        ))}
+                      </select>
                     </div>
-                    <span style={{ paddingBottom: 10, fontWeight: 700, color: defaultTokens.colors.textFaint }}>×</span>
-                    <div>
-                      <label style={labelStyle}>Hauteur (cm)</label>
-                      <input
-                        style={{ ...inputStyle, width: 80 }}
-                        type="number" min={1}
-                        value={v.hauteur}
-                        onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, hauteur: e.target.value } : x))}
-                        placeholder="60"
-                      />
-                    </div>
+                    {estModeleCarreau ? (
+                      <>
+                        <div>
+                          <label style={labelStyle}>Largeur (cm)</label>
+                          <input
+                            style={{ ...inputStyle, width: 80 }}
+                            type="number" min={1}
+                            value={v.largeur}
+                            onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, largeur: e.target.value } : x))}
+                            placeholder="60"
+                          />
+                        </div>
+                        <span style={{ paddingBottom: 10, fontWeight: 700, color: defaultTokens.colors.textFaint }}>×</span>
+                        <div>
+                          <label style={labelStyle}>Hauteur (cm)</label>
+                          <input
+                            style={{ ...inputStyle, width: 80 }}
+                            type="number" min={1}
+                            value={v.hauteur}
+                            onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, hauteur: e.target.value } : x))}
+                            placeholder="60"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ gridColumn: "span 2" }}>
+                        <label style={labelStyle}>Taille / libellé</label>
+                        <input
+                          style={{ ...inputStyle, width: 160 }}
+                          value={v.tailleLibre}
+                          onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, tailleLibre: e.target.value } : x))}
+                          placeholder="Ex. Sac 50kg"
+                        />
+                      </div>
+                    )}
                     <div>
                       <label style={labelStyle}>Référence</label>
                       <input
@@ -732,7 +1052,7 @@ export function ProduitsScreen({
                       />
                     </div>
                     <div>
-                      <label style={labelStyle}>Prix / m² (FCFA)</label>
+                      <label style={labelStyle}>{estModeleCarreau && estCarton ? "Prix / m² (FCFA)" : "Prix unitaire (FCFA)"}</label>
                       <input
                         style={{ ...inputStyle, width: 110 }}
                         type="number" min={0}
@@ -740,16 +1060,18 @@ export function ProduitsScreen({
                         onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, prix: e.target.value } : x))}
                       />
                     </div>
-                    <div>
-                      <label style={labelStyle}>Carreaux/carton</label>
-                      <input
-                        style={{ ...inputStyle, width: 90 }}
-                        type="number" min={1}
-                        value={v.carreauxParCarton}
-                        onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, carreauxParCarton: e.target.value } : x))}
-                        placeholder="4"
-                      />
-                    </div>
+                    {estModeleCarreau && estCarton && (
+                      <div>
+                        <label style={labelStyle}>Carreaux/carton</label>
+                        <input
+                          style={{ ...inputStyle, width: 90 }}
+                          type="number" min={1}
+                          value={v.carreauxParCarton}
+                          onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, carreauxParCarton: e.target.value } : x))}
+                          placeholder="4"
+                        />
+                      </div>
+                    )}
                     <div>
                       <label style={labelStyle}>Seuil alerte</label>
                       <input
@@ -768,7 +1090,15 @@ export function ProduitsScreen({
                       )}
                     </div>
                   </div>
-                ))}
+                  <CaracteristiquesEditor
+                    value={v.caracteristiques}
+                    champs={modeleForm.sousCategorieId ? (champsParSousCategorie[modeleForm.sousCategorieId] ?? []) : []}
+                    onChange={(next) => setVariantesForm((prev) => prev.map((x, j) => (j === i ? { ...x, caracteristiques: next } : x)))}
+                  />
+                  </div>
+                  );
+                  });
+                })()}
                 <Button
                   type="button"
                   variant="secondary"
@@ -933,7 +1263,10 @@ export function ProduitsScreen({
                         <td style={{ padding: "8px 16px" }}>
                           <Miniature dataUrl={m.imagePrincipaleDataUrl} />
                         </td>
-                        <td style={{ padding: "8px 16px", fontWeight: 700 }}>{m.motif}</td>
+                        <td style={{ padding: "8px 16px", fontWeight: 700 }}>
+                          {m.motif}
+                          <BadgeClassificationOrpheline sousCategorieSupprimee={m.sousCategorieSupprimee} categorieSupprimee={m.categorieSupprimee} />
+                        </td>
                         <td style={{ padding: "8px 16px", color: defaultTokens.colors.textSoft, fontSize: 12.5 }}>
                           {variantesAffichees.map((v) => v.taille).join(", ")}
                         </td>
@@ -1074,6 +1407,9 @@ export function ProduitsScreen({
                                   ))}
                                   <VarianteFormRow
                                     modele={m}
+                                    estModeleCarreau={estSousCategorieModeleCarreau(m.sousCategorieId)}
+                                    unitesAutorisees={unitesAutoriseesPourSousCategorie(m.sousCategorieId)}
+                                    champs={m.sousCategorieId ? (champsParSousCategorie[m.sousCategorieId] ?? []) : []}
                                     editingVariante={editingVariante}
                                     ajoutVarianteModeleId={ajoutVarianteModeleId}
                                     varianteForm={varianteForm}

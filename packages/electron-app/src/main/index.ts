@@ -16,6 +16,8 @@ import { EmplacementRepository, bootstrapDefaultEmplacements } from "./repositor
 import { EmplacementSyncService } from "./services/emplacementSyncService.js";
 import { CompteSyncService } from "./services/compteSyncService.js";
 import { CatalogueSyncService } from "./services/catalogueSyncService.js";
+import { ReferentielSyncService } from "./services/referentielSyncService.js";
+import { executerRattrapageProactifReferentiel } from "./services/referentielRattrapageProactif.js";
 import { SyncApplicationService } from "./services/syncApplicationService.js";
 import { ProduitRepository } from "./repositories/produitRepository.js";
 import { StockRepository } from "./repositories/stockRepository.js";
@@ -57,6 +59,10 @@ import { registerPostesIpcHandlers } from "./ipc/postes.js";
 import { SyncStreamClient } from "./services/syncStreamClient.js";
 import { ModeleRepository } from "./repositories/modeleRepository.js";
 import { PromotionRepository } from "./repositories/promotionRepository.js";
+import { CategorieRepository } from "./repositories/categorieRepository.js";
+import { SousCategorieRepository } from "./repositories/sousCategorieRepository.js";
+import { SousCategorieChampRepository } from "./repositories/sousCategorieChampRepository.js";
+import { SousCategorieUniteRepository } from "./repositories/sousCategorieUniteRepository.js";
 import { PromotionService } from "./services/promotionService.js";
 import { registerPromotionsIpcHandlers } from "./ipc/promotions.js";
 
@@ -340,6 +346,11 @@ app.whenReady().then(async () => {
     const syncRepository = new SyncRepository(db);
     const modeleRepository = new ModeleRepository(db);
     const promotionRepository = new PromotionRepository(db);
+    // Fondations quincaillerie (Phase 2) — catégories/sous-catégories, locales à ce poste (jamais synchronisées).
+    const categorieRepository = new CategorieRepository(db);
+    const sousCategorieRepository = new SousCategorieRepository(db);
+    const sousCategorieChampRepository = new SousCategorieChampRepository(db);
+    const sousCategorieUniteRepository = new SousCategorieUniteRepository(db);
     const promotionService = new PromotionService(db, promotionRepository, boiteEnvoiRepository);
     registerPromotionsIpcHandlers(promotionService, sessionManager);
 
@@ -397,6 +408,8 @@ app.whenReady().then(async () => {
     syncService.definirRattrapageComptes(utilisateurRepository, new CompteSyncService());
     // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 2 — voir syncService.ts.
     syncService.definirRattrapageCatalogue(modeleRepository, produitRepository, new CatalogueSyncService());
+    // Phase 5 (référentiel commun), sous-phase 5.4 — voir syncService.ts.
+    syncService.definirRattrapageReferentiel(categorieRepository, sousCategorieRepository, sousCategorieChampRepository, new ReferentielSyncService());
     // Correction "visibilité croisée Factures/Historique entre postes" (2026-10-27), Phase 4 — voir syncService.ts.
     // Système multiposte fiable (2026-10-28), Phase E — notificationRepository/
     // produitRepository/emplacementRepository servent UNIQUEMENT à composer
@@ -434,6 +447,15 @@ app.whenReady().then(async () => {
         });
       }
     }
+
+    // Phase 5 (référentiel commun), sous-phase 5.7 — rattrapage PONCTUEL
+    // du référentiel local (catégories/sous-catégories/champs) déjà créé
+    // AVANT cette sous-phase, jamais mis en file vers le serveur central
+    // (le mécanisme n'existait pas encore). Voir referentielRattrapageProactif.ts
+    // pour le détail (trois gardes indépendantes, protection transactionnelle
+    // contre une exécution partielle).
+    executerRattrapageProactifReferentiel(db, boiteEnvoiRepository, categorieRepository, sousCategorieRepository, sousCategorieChampRepository, sousCategorieUniteRepository);
+
     registerMetierIpcHandlers(
       produitRepository,
       emplacementRepository,
@@ -447,7 +469,11 @@ app.whenReady().then(async () => {
       imageService,
       sessionManager,
       modeleRepository,
-      promotionRepository
+      promotionRepository,
+      categorieRepository,
+      sousCategorieRepository,
+      sousCategorieChampRepository,
+      sousCategorieUniteRepository
     );
     registerImageIpcHandlers(imageService, sessionManager);
 

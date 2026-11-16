@@ -8,17 +8,30 @@ const API_VERSION_PREFIX = "/v1";
  * ═══════════════════════════════════════════════════════════════════
  * RATE LIMITING — correction "Phase 3.5.1 — Consolidation API", Partie 7
  * ═══════════════════════════════════════════════════════════════════
- * ANALYSE : l'API n'est actuellement PAS exposée publiquement — elle
- * tourne uniquement en développement local (`local-dev-server.ts`),
- * jamais déployée, jamais appelée par `electron-app` (confirmé lors de
- * l'audit Phase 3 par recherche exhaustive). Aucune infrastructure de
- * rate limiting n'existe et aucune n'est créée par cette étape — un
- * système complexe serait prématuré tant qu'aucun trafic réel n'existe.
+ * MISE À JOUR (Phase 5, sous-phase 5.8, chantier E) — l'analyse
+ * ci-dessous, qui affirmait que l'API n'était "pas exposée
+ * publiquement", est OBSOLÈTE : l'API est bien déployée en production
+ * derrière Nginx/Certbot (voir deploy/README.md, deploy/nginx/
+ * maxi-equip.conf), accessible depuis Internet sur `api.maxi-equip.com`,
+ * et c'est le chemin réel utilisé par `electron-app` (voir
+ * syncConfig.ts : `https://api.maxi-equip.com` est la valeur de secours
+ * d'un poste packagé).
  *
- * RATE LIMITING OBLIGATOIRE AVANT EXPOSITION PUBLIQUE. À implémenter
- * impérativement avant que cette API ne soit accessible depuis un
- * réseau non maîtrisé (au minimum sur les tentatives d'authentification
- * échouées, pour limiter une attaque par force brute sur un jeton).
+ * Une infrastructure de rate limiting EXISTE désormais
+ * (core/rateLimiter.ts) : fenêtre fixe en mémoire par clé, déjà
+ * utilisée pour l'authentification (routes/v1/app/auth/login.ts), la
+ * récupération d'installation (routes/v1/public/installation/
+ * verifier-recuperation.ts), les demandes publiques du site
+ * (routes/v1/public/requests.ts), et désormais aussi la synchronisation
+ * (routes/v1/app/sync/push.ts, sous-phase 5.8). Volontairement PAS un
+ * middleware central ici dans `dispatch()` : chaque route garde le
+ * contrôle de sa propre clé (poste vs IP) et de son propre seuil, selon
+ * sa sensibilité réelle — jamais une limite unique, arbitraire, pour
+ * des usages aussi différents qu'une tentative de connexion et un push
+ * de synchronisation massif. Une protection complémentaire au niveau
+ * Nginx (`limit_req_zone`) est documentée en PROPOSITION dans
+ * `deploy/nginx/maxi-equip.conf` (jamais appliquée automatiquement par
+ * ce dépôt — nécessite une action manuelle sur le VPS).
  *
  * ═══════════════════════════════════════════════════════════════════
  * RÉVOCATION DE JWT — Partie 8 — IMPLÉMENTÉE (système multiposte

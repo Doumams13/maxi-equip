@@ -3,6 +3,7 @@ import type { ModeleCataloguePayload, ProduitCataloguePayload, PromotionCatalogu
 import type { IdentiteCataloguePayload } from "./identiteStore.js";
 import type { CompteCataloguePayload } from "./compteStore.js";
 import type { EmplacementCataloguePayload } from "./emplacementStore.js";
+import type { CategorieCataloguePayload, SousCategorieCataloguePayload, SousCategorieChampCataloguePayload } from "./referentielStore.js";
 
 /**
  * Validation stricte des opérations catalogue reçues (modèle, produit,
@@ -76,6 +77,41 @@ function dateIso(valeur: unknown, champ: string): string {
   return valeur;
 }
 
+/** Phase 5 (référentiel commun) — UUID optionnel : `null`/`undefined` accepté (ex. un modèle pas encore classé), jamais une chaîne invalide. */
+function uuidOuNull(valeur: unknown, champ: string): string | null {
+  if (valeur === null || valeur === undefined) return null;
+  return uuid(valeur, champ);
+}
+
+/**
+ * Texte optionnel, jamais tronqué/retouché (contrairement à `texte()`/
+ * `texteOuVide()`, qui trim) — utilisé pour des champs qui doivent
+ * transiter EXACTEMENT tels que saisis/sérialisés côté client (ex.
+ * `caracteristiques`, une chaîne JSON déjà sérialisée dont l'espacement
+ * ne doit jamais être altéré par le serveur).
+ */
+function texteOuNull(valeur: unknown, champ: string, maxLongueur?: number): string | null {
+  if (valeur === null || valeur === undefined) return null;
+  if (typeof valeur !== "string") {
+    throw new ValidationError(`Le champ '${champ}' doit être une chaîne de caractères ou null.`);
+  }
+  if (maxLongueur !== undefined && valeur.length > maxLongueur) {
+    throw new ValidationError(`Le champ '${champ}' dépasse la longueur maximale autorisée (${maxLongueur} caractères).`);
+  }
+  return valeur;
+}
+
+const UNITES_VENTE = new Set(["carton", "piece", "sac", "metre", "kg", "litre"]);
+
+/** Phase 5 — unité de vente optionnelle (voir shared-types/produit.ts côté app, UniteVente) : `null` = comportement historique (carton). */
+function uniteVenteOuNull(valeur: unknown, champ: string): string | null {
+  if (valeur === null || valeur === undefined) return null;
+  if (typeof valeur !== "string" || !UNITES_VENTE.has(valeur)) {
+    throw new ValidationError(`Le champ '${champ}' doit être l'une des unités autorisées ou null (reçu : ${String(valeur)}).`);
+  }
+  return valeur;
+}
+
 export function validerOperationModele(payload: unknown): ModeleCataloguePayload {
   if (!estObjetPlain(payload)) throw new ValidationError("Le payload 'modele' doit être un objet.");
   return {
@@ -84,6 +120,11 @@ export function validerOperationModele(payload: unknown): ModeleCataloguePayload
     motif: texte(payload["motif"], "motif"),
     type: texte(payload["type"], "type"),
     ordreVitrine: nombreOuNull(payload["ordreVitrine"], "ordreVitrine"),
+    // Phase 5 (référentiel commun) — nullable : un ancien poste pas
+    // encore mis à jour, ou un modèle legacy jamais classé, n'envoie
+    // jamais ces deux champs — jamais une exigence bloquante.
+    sousCategorieId: uuidOuNull(payload["sousCategorieId"], "sousCategorieId"),
+    marque: texteOuNull(payload["marque"], "marque", 150),
     updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
   };
 }
@@ -100,6 +141,15 @@ export function validerOperationProduit(payload: unknown): ProduitCataloguePaylo
     hauteur: nombreOuNull(payload["hauteur"], "hauteur"),
     reference: texte(payload["reference"], "reference", 100),
     prix: nombre(payload["prix"], "prix"),
+    // Phase 5 (référentiel commun) — tous les trois nullable, même
+    // raisonnement que modele.sousCategorieId ci-dessus. `caracteristiques`
+    // est une chaîne JSON déjà sérialisée côté client (voir
+    // shared-types/caracteristiques.ts) : jamais reparsée/revalidée ici,
+    // jamais une seconde logique métier (déjà bornée par le plafond
+    // générique de 100 Ko du corps de la requête, validationSync.ts).
+    uniteVente: uniteVenteOuNull(payload["uniteVente"], "uniteVente"),
+    caracteristiques: texteOuNull(payload["caracteristiques"], "caracteristiques"),
+    marque: texteOuNull(payload["marque"], "marque", 150),
     updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
   };
 }
@@ -215,6 +265,117 @@ export function validerOperationEmplacement(payload: unknown): EmplacementCatalo
     ville: texte(payload["ville"], "ville", 150),
     estPointDeVente: Boolean(payload["estPointDeVente"]),
     actif: Boolean(payload["actif"]),
+    updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
+  };
+}
+
+/**
+ * Référentiel commun du catalogue — Phase 5 (voir
+ * PHASE_5_CAHIER_DES_CHARGES.md). Même rigueur de validation que le
+ * reste de ce fichier : ne jamais faire confiance aux données reçues.
+ */
+
+export function validerOperationCategorie(payload: unknown): CategorieCataloguePayload {
+  if (!estObjetPlain(payload)) throw new ValidationError("Le payload 'categorie' doit être un objet.");
+  return {
+    operation: operation(payload["operation"]),
+    categorieId: uuid(payload["categorieId"], "categorieId"),
+    nom: texte(payload["nom"], "nom", 150),
+    // Potentiellement une image encodée en base64 — déjà bornée par le
+    // plafond générique de 100 Ko du corps de la requête
+    // (validationSync.ts) ; cette limite locale est un filet de sécurité
+    // supplémentaire, jamais une seconde contrainte indépendante.
+    imageDataUrl: texteOuNull(payload["imageDataUrl"], "imageDataUrl", 150_000),
+    ordre: nombre(payload["ordre"], "ordre"),
+    updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
+  };
+}
+
+const MODELES_PHYSIQUES = new Set(["carreau"]);
+
+function modelePhysiqueOuNull(valeur: unknown, champ: string): "carreau" | null {
+  if (valeur === null || valeur === undefined) return null;
+  if (typeof valeur !== "string" || !MODELES_PHYSIQUES.has(valeur)) {
+    throw new ValidationError(`Le champ '${champ}' doit être 'carreau' ou null (reçu : ${String(valeur)}).`);
+  }
+  return valeur as "carreau";
+}
+
+type UniteVenteValide = "carton" | "piece" | "sac" | "metre" | "kg" | "litre";
+
+/**
+ * `null` = sous-catégorie non configurée (les 6 unités restent
+ * proposées par défaut) ; un tableau REFUSE explicitement d'être vide
+ * (même règle que `domain/catalogue.validerConfigurationUnites` côté
+ * app : une configuration explicite autorise toujours au moins une
+ * unité, jamais persistée autrement).
+ */
+function unitesAutoriseesOuNull(valeur: unknown, champ: string): UniteVenteValide[] | null {
+  if (valeur === null || valeur === undefined) return null;
+  if (!Array.isArray(valeur) || valeur.length === 0) {
+    throw new ValidationError(`Le champ '${champ}' doit être un tableau non vide d'unités autorisées, ou null.`);
+  }
+  return valeur.map((v, i) => {
+    if (typeof v !== "string" || !UNITES_VENTE.has(v)) {
+      throw new ValidationError(`Le champ '${champ}[${i}]' doit être une unité autorisée valide (reçu : ${String(v)}).`);
+    }
+    return v as UniteVenteValide;
+  });
+}
+
+export function validerOperationSousCategorie(payload: unknown): SousCategorieCataloguePayload {
+  if (!estObjetPlain(payload)) throw new ValidationError("Le payload 'sous_categorie' doit être un objet.");
+  return {
+    operation: operation(payload["operation"]),
+    sousCategorieId: uuid(payload["sousCategorieId"], "sousCategorieId"),
+    categorieId: uuid(payload["categorieId"], "categorieId"),
+    nom: texte(payload["nom"], "nom", 150),
+    ordre: nombre(payload["ordre"], "ordre"),
+    modelePhysique: modelePhysiqueOuNull(payload["modelePhysique"], "modelePhysique"),
+    unitesAutorisees: unitesAutoriseesOuNull(payload["unitesAutorisees"], "unitesAutorisees"),
+    updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
+  };
+}
+
+const TYPES_CHAMP = new Set(["texte", "nombre", "liste"]);
+const ROLES_CHAMP = new Set(["descriptif", "physique", "calcul"]);
+
+function typeChampValide(valeur: unknown, champ: string): "texte" | "nombre" | "liste" {
+  if (typeof valeur !== "string" || !TYPES_CHAMP.has(valeur)) {
+    throw new ValidationError(`Le champ '${champ}' doit être 'texte', 'nombre' ou 'liste' (reçu : ${String(valeur)}).`);
+  }
+  return valeur as "texte" | "nombre" | "liste";
+}
+
+function roleChampOuNull(valeur: unknown, champ: string): "descriptif" | "physique" | "calcul" | null {
+  if (valeur === null || valeur === undefined) return null;
+  if (typeof valeur !== "string" || !ROLES_CHAMP.has(valeur)) {
+    throw new ValidationError(`Le champ '${champ}' doit être 'descriptif', 'physique', 'calcul' ou null (reçu : ${String(valeur)}).`);
+  }
+  return valeur as "descriptif" | "physique" | "calcul";
+}
+
+function valeursAutoriseesOuNull(valeur: unknown, champ: string): string[] | null {
+  if (valeur === null || valeur === undefined) return null;
+  if (!Array.isArray(valeur)) {
+    throw new ValidationError(`Le champ '${champ}' doit être un tableau de chaînes, ou null.`);
+  }
+  return valeur.map((v, i) => texte(v, `${champ}[${i}]`, 100));
+}
+
+export function validerOperationSousCategorieChamp(payload: unknown): SousCategorieChampCataloguePayload {
+  if (!estObjetPlain(payload)) throw new ValidationError("Le payload 'sous_categorie_champ' doit être un objet.");
+  return {
+    operation: operation(payload["operation"]),
+    champId: uuid(payload["champId"], "champId"),
+    sousCategorieId: uuid(payload["sousCategorieId"], "sousCategorieId"),
+    nom: texte(payload["nom"], "nom", 150),
+    type: typeChampValide(payload["type"], "type"),
+    obligatoire: Boolean(payload["obligatoire"]),
+    valeursAutorisees: valeursAutoriseesOuNull(payload["valeursAutorisees"], "valeursAutorisees"),
+    uniteMesure: texteOuNull(payload["uniteMesure"], "uniteMesure", 50),
+    role: roleChampOuNull(payload["role"], "role"),
+    ordre: nombre(payload["ordre"], "ordre"),
     updatedAt: dateIso(payload["updatedAt"], "updatedAt"),
   };
 }

@@ -3,6 +3,7 @@ import { createRouter } from "./index.js";
 import type { ApiRequest } from "./core/types.js";
 import { signerJwt } from "./core/jwt.js";
 import { initialiserStockageServeur, fermerStockageServeur, listerOperationsDepuis } from "./core/storeServeur.js";
+import { reinitialiserLimitationPourTests } from "./core/rateLimiter.js";
 import { listerModelesActifs, listerProduitsActifs, listerPromotionsActives } from "./core/catalogStore.js";
 
 /**
@@ -34,6 +35,13 @@ describe("Pipeline catalogue — Electron → outbox → API → projection serv
     process.env["JWT_SIGNING_SECRET"] = SECRET_TEST;
     process.env["MAXI_EQUIP_ENV"] = "test";
     initialiserStockageServeur(":memory:");
+    // Phase 5 (référentiel commun), sous-phase 5.8, chantier E — /sync/push
+    // est désormais limité en fréquence par poste (voir push.ts) ; sans
+    // cette réinitialisation, l'état du limiteur (en mémoire, partagé par
+    // TOUT le process de test — voir rateLimiter.ts) survivrait entre les
+    // fichiers de test exécutés dans le même worker Vitest, tous
+    // utilisant le même "sub" de jeton ("installation-test").
+    reinitialiserLimitationPourTests();
   });
   afterEach(() => {
     delete process.env["JWT_SIGNING_SECRET"];
@@ -250,5 +258,91 @@ describe("Pipeline catalogue — Electron → outbox → API → projection serv
 
     const slugs = (await listerModelesActifs()).map((m) => m.slug).sort();
     expect(slugs).toEqual(["marbre-blanc", "marbre-blanc-2"]);
+  });
+
+  describe("Phase 5 (référentiel commun), sous-phase 5.5 — complétude modèle/produit", () => {
+    it("Scénario A — nouveau client : pousse les 5 champs, la projection les restitue EXACTEMENT via listerModelesActifs/listerProduitsActifs", async () => {
+      const router = createRouter();
+      await router.dispatch(
+        req(
+          push([
+            {
+              entityType: "modele",
+              entityId: MODELE_1,
+              payload: {
+                operation: "create",
+                modeleId: MODELE_1,
+                motif: "Ciment Portland",
+                type: "Quincaillerie",
+                sousCategorieId: null,
+                marque: "Nicoll",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+          ])
+        )
+      );
+      await router.dispatch(
+        req(
+          push([
+            {
+              entityType: "produit",
+              entityId: PRODUIT_1,
+              payload: {
+                operation: "create",
+                produitId: PRODUIT_1,
+                modeleId: MODELE_1,
+                taille: "25kg",
+                tailleTri: 25,
+                largeur: null,
+                hauteur: null,
+                reference: "CIM-25",
+                prix: 7500,
+                uniteVente: "sac",
+                caracteristiques: '{"poids":"25kg"}',
+                marque: "Nicoll",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+          ])
+        )
+      );
+
+      const modeles = await listerModelesActifs();
+      expect(modeles[0]).toMatchObject({ id: MODELE_1, marque: "Nicoll", sousCategorieId: null });
+
+      const produits = await listerProduitsActifs();
+      expect(produits[0]).toMatchObject({ id: PRODUIT_1, uniteVente: "sac", caracteristiques: '{"poids":"25kg"}', marque: "Nicoll" });
+    });
+
+    it("Scénario B — ancien client : un payload SANS les 5 nouveaux champs reste accepté, restitués comme null (jamais inventés, jamais bloquant)", async () => {
+      const router = createRouter();
+      const resModele = await router.dispatch(
+        req(
+          push([
+            { entityType: "modele", entityId: MODELE_1, payload: { operation: "create", modeleId: MODELE_1, motif: "Marbre Blanc", type: "Faïence", updatedAt: "2026-01-01T00:00:00.000Z" } },
+          ])
+        )
+      );
+      expect(resModele.status).toBe(200);
+      const resProduit = await router.dispatch(
+        req(
+          push([
+            {
+              entityType: "produit",
+              entityId: PRODUIT_1,
+              payload: { operation: "create", produitId: PRODUIT_1, modeleId: MODELE_1, taille: "60x60", tailleTri: 3600, largeur: 60, hauteur: 60, reference: "MB-6060", prix: 15000, updatedAt: "2026-01-01T00:00:00.000Z" },
+            },
+          ])
+        )
+      );
+      expect(resProduit.status).toBe(200);
+
+      const modeles = await listerModelesActifs();
+      expect(modeles[0]).toMatchObject({ id: MODELE_1, sousCategorieId: null, marque: null });
+
+      const produits = await listerProduitsActifs();
+      expect(produits[0]).toMatchObject({ id: PRODUIT_1, uniteVente: null, caracteristiques: null, marque: null });
+    });
   });
 });

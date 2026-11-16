@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import { randomUUID } from "node:crypto";
-import type { Mouvement } from "@maxi-equip/shared-types";
+import type { Mouvement, UniteVente } from "@maxi-equip/shared-types";
 import { stock as domainStock } from "@maxi-equip/domain";
 
 interface MouvementRow {
@@ -309,6 +309,28 @@ export class MouvementRepository {
         )
         .get(type, debut, fin) as { total: number }
     ).total;
+  }
+
+  /**
+   * Même filtre EXACT que `sommeQuantiteParTypeEntre` ci-dessus, ventilé
+   * par unité de vente du produit — correction "le bilan additionne des
+   * quantités d'unités différentes" (Phase 4). La méthode existante
+   * reste inchangée (conservée pour un éventuel autre appelant), cette
+   * nouvelle méthode est utilisée par le Bilan à sa place.
+   */
+  sommeQuantiteParTypeEtUniteEntre(type: Mouvement["type"], debut: string, fin: string): { unite: UniteVente; quantite: number }[] {
+    return this.db
+      .prepare(
+        `SELECT COALESCE(p.unite_vente, 'carton') as unite, COALESCE(SUM(m.quantite), 0) as quantite
+         FROM mouvements m
+         JOIN produits p ON p.id = m.produit_id
+         LEFT JOIN factures f ON f.id = m.facture_id
+         WHERE m.type = ? AND m.date >= ? AND m.date <= ?
+           AND (m.facture_id IS NULL OR f.annulee_le IS NULL) AND m.annule_le IS NULL
+         GROUP BY COALESCE(p.unite_vente, 'carton')
+         ORDER BY unite`
+      )
+      .all(type, debut, fin) as { unite: UniteVente; quantite: number }[];
   }
 
   /**

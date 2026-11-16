@@ -1,4 +1,5 @@
 import type { ISODateTime, MetierEntity, UUID } from "./common.js";
+import type { UniteVente } from "./produit.js";
 
 /**
  * Facture client. Cahier des charges §7 et §11 — RÈGLE CRITIQUE :
@@ -145,6 +146,15 @@ export interface LigneFacture {
    * inventée.
    */
   surfaceCartonM2: number | null;
+  /**
+   * Fondations quincaillerie (Phase 1) — snapshot au moment de la vente,
+   * même principe que surfaceCartonM2 ci-dessus (jamais recalculé depuis
+   * le produit actuel). `null` = comportement historique carreau, ou
+   * vente enregistrée avant cette évolution.
+   */
+  uniteVente?: UniteVente | null;
+  /** Snapshot des caractéristiques au moment de la vente — même principe que surfaceCartonM2/uniteVente ci-dessus. */
+  caracteristiques?: string | null;
 }
 
 /**

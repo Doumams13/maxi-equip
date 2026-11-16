@@ -2,7 +2,8 @@ import PDFDocument from "pdfkit";
 import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
-import type { IdentiteEntrepriseSnapshot } from "@maxi-equip/shared-types";
+import type { IdentiteEntrepriseSnapshot, UniteVente } from "@maxi-equip/shared-types";
+import { formaterVentilationUnites } from "@maxi-equip/shared-types";
 import {
   PAGE_WIDTH,
   PAGE_HEIGHT,
@@ -32,9 +33,16 @@ export interface BilanPdfInput {
   ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
   /** Vide = aucune vente sur la période, affiché explicitement, jamais masqué. */
   topProduits: { label: string; quantite: number }[];
-  mouvements: { totalEntrees: number; totalSorties: number };
+  /**
+   * Fondations quincaillerie (Phase 4) — ventilé par unité de vente,
+   * jamais un total unique mélangeant des unités différentes (correction
+   * "le bilan additionne 40 cartons + 12 sacs = 52" — résultat faux).
+   * Voir StockRepository/MouvementRepository (base réelle, GROUP BY
+   * l'unité du produit) et `formaterVentilationUnites` (shared-types).
+   */
+  mouvements: { entrees: { unite: UniteVente; quantite: number }[]; sorties: { unite: UniteVente; quantite: number }[] };
   /** Instantané au moment de la génération — le stock n'a pas d'historique "entre deux dates", voir factureRepository.bilanVentesEntre. */
-  stockParEmplacement: { nom: string; cartons: number }[];
+  stockParEmplacement: { nom: string; parUnite: { unite: UniteVente; quantite: number }[] }[];
   produitsSousSeuilCount: number;
   promotionsActivesPendantPeriode: number;
   /** Colonnes dynamiques du tableau détaillé ci-dessous — un dépôt = une colonne "Stock <nom>". */
@@ -236,19 +244,20 @@ function dessinerBilan(doc: PDFKit.PDFDocument, input: BilanPdfInput): void {
   }
   y += 14;
 
-  // --- Mouvements de stock ---
+  // --- Mouvements de stock — ventilés par unité (Phase 4), jamais un
+  // total unique mélangeant des unités différentes. ---
   dessinerSectionTitre(doc, "MOUVEMENTS DE STOCK", y);
   y += 26;
-  dessinerLigneChiffre(doc, "Total entrées (toutes périodes confondues sur cette plage)", String(input.mouvements.totalEntrees), y);
+  dessinerLigneChiffre(doc, "Total entrées (toutes périodes confondues sur cette plage)", formaterVentilationUnites(input.mouvements.entrees) ?? "Aucune entrée", y);
   y += 16;
-  dessinerLigneChiffre(doc, "Total sorties", String(input.mouvements.totalSorties), y);
+  dessinerLigneChiffre(doc, "Total sorties", formaterVentilationUnites(input.mouvements.sorties) ?? "Aucune sortie", y);
   y += 30;
 
-  // --- Stock actuel (instantané) ---
+  // --- Stock actuel (instantané) — ventilé par unité (Phase 4). ---
   dessinerSectionTitre(doc, "STOCK ACTUEL (INSTANTANÉ AU MOMENT DU BILAN)", y);
   y += 26;
   for (const d of input.stockParEmplacement) {
-    dessinerLigneChiffre(doc, `Stock ${d.nom}`, `${d.cartons} carton(s)`, y);
+    dessinerLigneChiffre(doc, `Stock ${d.nom}`, formaterVentilationUnites(d.parUnite) ?? "Aucun stock", y);
     y += 16;
   }
   dessinerLigneChiffre(doc, "Produits en alerte de stock (rupture ou sous seuil)", String(input.produitsSousSeuilCount), y);

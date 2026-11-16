@@ -103,4 +103,42 @@ describe("ProduitRepository.creerDepuisServeur (base réelle)", () => {
     expect(produitRepository.list().filter((p) => p.id === "produit-serveur-1")).toHaveLength(1);
     expect(produitRepository.findById("produit-serveur-1")?.prix).toBe(16000);
   });
+
+  describe("Phase 5 (référentiel commun), sous-phase 5.5 — uniteVente/caracteristiques/marque", () => {
+    it("persiste les trois champs quand ils sont fournis", () => {
+      modeleRepository.creerDepuisServeur({ id: "modele-1", motif: "Ciment", type: "Quincaillerie", ordreVitrine: null });
+      produitRepository.creerDepuisServeur({
+        id: "produit-serveur-1",
+        modeleId: "modele-1",
+        taille: "25kg",
+        tailleTri: 25,
+        largeur: null,
+        hauteur: null,
+        reference: "CIM-25",
+        prix: 7500,
+        uniteVente: "sac",
+        caracteristiques: '{"poids":"25kg"}',
+        marque: "Nicoll",
+      });
+
+      expect(produitRepository.findById("produit-serveur-1")).toMatchObject({ uniteVente: "sac", caracteristiques: '{"poids":"25kg"}', marque: "Nicoll" });
+    });
+
+    it("rétrocompatibilité : un ancien payload SANS ces trois champs les traite comme null, jamais une exception", () => {
+      modeleRepository.creerDepuisServeur({ id: "modele-1", motif: "Marbre Blanc", type: "Faïence", ordreVitrine: null });
+      expect(() =>
+        produitRepository.creerDepuisServeur({
+          id: "produit-serveur-1",
+          modeleId: "modele-1",
+          taille: "60x60",
+          tailleTri: 3600,
+          largeur: 60,
+          hauteur: 60,
+          reference: "MB-6060",
+          prix: 15000,
+        })
+      ).not.toThrow();
+      expect(produitRepository.findById("produit-serveur-1")).toMatchObject({ uniteVente: null, caracteristiques: null, marque: null });
+    });
+  });
 });

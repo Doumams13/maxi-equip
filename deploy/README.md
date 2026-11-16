@@ -57,6 +57,8 @@ curl -I https://api.maxi-equip.com/v1/public/health   # doit répondre 200
 curl -I https://maxi-equip.com                         # doit répondre 200
 ```
 
+**Limitation de fréquence (rate limiting)** — une protection applicative existe déjà côté API (`core/rateLimiter.ts`, par poste/IP selon la route). `deploy/nginx/maxi-equip.conf` contient en plus une PROPOSITION de `limit_req` côté Nginx (voir les commentaires de ce fichier) : elle nécessite d'ajouter manuellement la ligne `limit_req_zone` dans `/etc/nginx/nginx.conf` (bloc `http{}`) avant de redéployer ce fichier — jamais appliquée automatiquement par ce dépôt.
+
 ## 7. Sauvegardes B2
 
 - **PostgreSQL (serveur)** : aucun mécanisme n'existait déjà dans le code pour ça — script fourni : `deploy/backup-postgres-to-b2.sh` (voir son en-tête pour l'installation/cron). Clé B2 dédiée, préfixe `postgres/`.

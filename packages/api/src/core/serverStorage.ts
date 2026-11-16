@@ -31,7 +31,13 @@ export type TypeOperationSync =
   // "compte" (upsert conditionné sur updatedAt), jamais le journal
   // `operations_synchronisees` (un dépôt est une entité mutable,
   // renommée/archivée au fil du temps — pas un événement immuable).
-  | "emplacement";
+  | "emplacement"
+  // Phase 5 (référentiel commun), sous-phase 5.3 — même mécanisme de
+  // projection que "modele"/"produit"/"compte"/"emplacement" ci-dessus.
+  // Voir CategorieCataloguePayload et suivants plus bas dans ce fichier.
+  | "categorie"
+  | "sous_categorie"
+  | "sous_categorie_champ";
 
 export interface OperationRecue {
   entityType: TypeOperationSync;
@@ -64,6 +70,15 @@ export interface ModeleCataloguePayload {
   type: string;
   /** Position d'affichage dans la vitrine de l'accueil du site (null = non sélectionné) — voir shared-types/produit.ts côté app. */
   ordreVitrine: number | null;
+  /**
+   * Phase 5 (référentiel commun) — champs complétant le payload modèle,
+   * jusqu'ici jamais transmis (voir PHASE_5_CAHIER_DES_CHARGES.md §8).
+   * Tous deux nullable : un ancien poste pas encore mis à jour, ou un
+   * modèle legacy jamais classé, continue de transiter avec `null` —
+   * jamais une exigence bloquante pour la rétrocompatibilité.
+   */
+  sousCategorieId: string | null;
+  marque: string | null;
   updatedAt: string;
 }
 
@@ -77,6 +92,17 @@ export interface ProduitCataloguePayload {
   hauteur: number | null;
   reference: string;
   prix: number;
+  /**
+   * Phase 5 (référentiel commun) — `uniteVente`/`caracteristiques`
+   * correspondent aux colonnes déjà présentes mais dormantes de
+   * `catalogue_produits` (jamais écrites jusqu'ici, voir le commentaire
+   * historique sur cette table) ; `marque` est un champ nouvellement
+   * ajouté. Les trois sont nullable pour la même raison que
+   * `ModeleCataloguePayload.sousCategorieId` ci-dessus.
+   */
+  uniteVente: string | null;
+  caracteristiques: string | null;
+  marque: string | null;
   updatedAt: string;
 }
 
@@ -310,6 +336,9 @@ export interface ModeleRow {
   slug: string;
   ordreVitrine: number | null;
   updatedAt: string;
+  // Phase 5 (référentiel commun), sous-phase 5.5 — restitués au catch-up app (jamais au site public, voir publicCatalog.ts : construction explicite champ par champ, jamais un spread).
+  sousCategorieId: string | null;
+  marque: string | null;
 }
 
 export interface ProduitRow {
@@ -321,6 +350,10 @@ export interface ProduitRow {
   hauteur: number | null;
   reference: string;
   prix: number;
+  // Phase 5 (référentiel commun), sous-phase 5.5 — restitués au catch-up app (jamais au site public, voir publicCatalog.ts).
+  uniteVente: string | null;
+  caracteristiques: string | null;
+  marque: string | null;
 }
 
 export interface ImageRow {
@@ -340,6 +373,109 @@ export interface PromotionRow {
   produitIds: string[];
   dateDebut: string;
   dateFin: string;
+}
+
+/**
+ * Référentiel commun du catalogue — Phase 5 (voir
+ * PHASE_5_CAHIER_DES_CHARGES.md). Même principe de projection mutable
+ * LWW que `modele`/`produit`/`compte`/`emplacement` ci-dessus (upsert
+ * conditionné par `updatedAt`), mais sur des tables de projection
+ * DÉDIÉES (`catalogue_categories`, `catalogue_sous_categories`,
+ * `catalogue_sous_categorie_champs`), jamais `catalogue_modeles`/
+ * `catalogue_produits` — ce référentiel n'est JAMAIS exposé au site
+ * public (voir publicCatalog.ts, qui ne lit ni n'importe jamais ces
+ * types).
+ *
+ * Aucun `deletedBy` transmis ni stocké côté serveur — cohérent avec
+ * TOUTES les projections existantes (`modele`/`compte`/`emplacement`,
+ * ci-dessus) : le serveur ne retient jamais QUI a supprimé, seulement
+ * QUAND (`deleted_at`), même si la base locale de chaque poste conserve
+ * cette information pour son propre usage.
+ */
+export interface CategorieCataloguePayload {
+  operation: "create" | "update" | "delete";
+  categorieId: string;
+  nom: string;
+  imageDataUrl: string | null;
+  ordre: number;
+  updatedAt: string;
+}
+
+export interface CategorieRow {
+  id: string;
+  nom: string;
+  imageDataUrl: string | null;
+  ordre: number;
+  updatedAt: string;
+  /** Phase 5 (référentiel commun), sous-phase 5.6 — tombstone transmis (voir `listerCategoriesActives`, qui ne filtre plus `deleted_at`). */
+  deletedAt: string | null;
+}
+
+/**
+ * `unitesAutorisees` : `null` = sous-catégorie non configurée (les 6
+ * unités restent proposées par défaut, voir
+ * shared-types/categorie.ts/ConfigurationUnitesSousCategorie côté app) ;
+ * un tableau non vide = configuration explicite. Transmis comme
+ * SOUS-OBJET de la sous-catégorie, jamais comme entité séparée — voir
+ * PHASE_5_CAHIER_DES_CHARGES.md §4.6/§7.3 (décision définitive : aucune
+ * table de projection indépendante pour les unités).
+ */
+export interface SousCategorieCataloguePayload {
+  operation: "create" | "update" | "delete";
+  sousCategorieId: string;
+  categorieId: string;
+  nom: string;
+  ordre: number;
+  modelePhysique: "carreau" | null;
+  unitesAutorisees: Array<"carton" | "piece" | "sac" | "metre" | "kg" | "litre"> | null;
+  updatedAt: string;
+}
+
+export interface SousCategorieRow {
+  id: string;
+  categorieId: string;
+  nom: string;
+  ordre: number;
+  modelePhysique: "carreau" | null;
+  unitesAutorisees: Array<"carton" | "piece" | "sac" | "metre" | "kg" | "litre"> | null;
+  updatedAt: string;
+  /** Phase 5 (référentiel commun), sous-phase 5.6 — tombstone transmis (voir `listerSousCategoriesActives`, qui ne filtre plus `deleted_at`). */
+  deletedAt: string | null;
+}
+
+/**
+ * Champ de caractéristique suggéré par sous-catégorie. Suppression
+ * toujours en tombstone (`deleted_at`), jamais physique, côté serveur
+ * comme côté client (Phase 5, §9 — prérequis pour qu'une suppression
+ * soit répliquable par upsert LWW comme toute autre modification).
+ */
+export interface SousCategorieChampCataloguePayload {
+  operation: "create" | "update" | "delete";
+  champId: string;
+  sousCategorieId: string;
+  nom: string;
+  type: "texte" | "nombre" | "liste";
+  obligatoire: boolean;
+  valeursAutorisees: string[] | null;
+  uniteMesure: string | null;
+  role: "descriptif" | "physique" | "calcul" | null;
+  ordre: number;
+  updatedAt: string;
+}
+
+export interface SousCategorieChampRow {
+  id: string;
+  sousCategorieId: string;
+  nom: string;
+  type: "texte" | "nombre" | "liste";
+  obligatoire: boolean;
+  valeursAutorisees: string[] | null;
+  uniteMesure: string | null;
+  role: "descriptif" | "physique" | "calcul" | null;
+  ordre: number;
+  updatedAt: string;
+  /** Phase 5 (référentiel commun), sous-phase 5.6 — tombstone transmis (voir `listerSousCategorieChampsActifs`, qui ne filtre plus `deleted_at`). */
+  deletedAt: string | null;
 }
 
 /**
@@ -411,6 +547,14 @@ export interface ServerStorage {
   listerImagesActives(): Promise<ImageRow[]>;
   listerPromotionsActives(): Promise<PromotionRow[]>;
   getIdentiteActuelle(): Promise<IdentiteRow | null>;
+
+  /** Référentiel commun du catalogue — Phase 5. Voir CategorieCataloguePayload ci-dessus. */
+  appliquerOperationCategorie(payload: CategorieCataloguePayload): Promise<{ applique: boolean }>;
+  appliquerOperationSousCategorie(payload: SousCategorieCataloguePayload): Promise<{ applique: boolean }>;
+  appliquerOperationSousCategorieChamp(payload: SousCategorieChampCataloguePayload): Promise<{ applique: boolean }>;
+  listerCategoriesActives(): Promise<CategorieRow[]>;
+  listerSousCategoriesActives(): Promise<SousCategorieRow[]>;
+  listerSousCategorieChampsActifs(): Promise<SousCategorieChampRow[]>;
 
   /**
    * Mot de passe de récupération d'installation — singleton (même

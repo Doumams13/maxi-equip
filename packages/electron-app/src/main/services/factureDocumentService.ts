@@ -3,6 +3,7 @@ import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
 import type { Facture, IdentiteEntrepriseSnapshot } from "@maxi-equip/shared-types";
+import { uniteVenteEffective, LIBELLE_UNITE_VENTE, caracteristiquesAffichage } from "@maxi-equip/shared-types";
 import { invoicing as domainInvoicing, pricing as domainPricing } from "@maxi-equip/domain";
 
 /**
@@ -27,16 +28,28 @@ export const MARGE_GAUCHE = 45.5;
 export const MARGE_DROITE = 576;
 
 /**
- * Format A5 (correction "choix du modèle d'impression — A5 par défaut",
- * 2026-11-13) — décision utilisateur : une VRAIE mise en page dédiée,
- * jamais un A4 réduit à l'échelle (l'A5 fait environ la moitié de la
- * surface de l'A4, un simple scale aurait rendu le texte illisible).
- * Dimensions ISO A5 réelles (148 × 210 mm), jamais approximées.
+ * Dimensions ISO A5 réelles (148 × 210 mm) — correction "facture A4
+ * paysage" (Phase 4) : servent désormais UNIQUEMENT à calculer l'échelle
+ * de réduction de la facture A4 complète pour chaque panneau du format
+ * paysage (voir `dessinerFactureA4Paysage`) — ne décrivent plus une
+ * mise en page A5 dédiée (celle-ci, `dessinerFactureA5`, a été retirée :
+ * elle produisait un document DIFFÉRENT de la facture officielle,
+ * jamais une simple réduction de celle-ci).
  */
 export const PAGE_WIDTH_A5 = 419.53;
 export const PAGE_HEIGHT_A5 = 595.28;
-export const MARGE_GAUCHE_A5 = 28;
-export const MARGE_DROITE_A5 = 391.5;
+
+/**
+ * Format A4 paysage — deux exemplaires de la facture A4 portrait
+ * COMPLÈTE, réduits à l'échelle et placés côte à côte (Phase 4).
+ * Dimensions ISO A4 paysage NOMINALES (l'inverse exact de
+ * PAGE_WIDTH/PAGE_HEIGHT ci-dessus) — jamais le double exact de
+ * PAGE_WIDTH_A5 (839.06pt, ~1mm plus étroit) : priorité donnée à une
+ * impression correcte sur une vraie feuille A4, les deux panneaux sont
+ * centrés dans cette largeur avec une fine marge extérieure de chaque côté.
+ */
+export const PAGE_WIDTH_A4_PAYSAGE = PAGE_HEIGHT;
+export const PAGE_HEIGHT_A4_PAYSAGE = PAGE_WIDTH;
 
 export const VERT = "#6ca545";
 export const GRIS_LABEL = "#8a8574";
@@ -69,6 +82,22 @@ export function formaterMontant(n: number): string {
     .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
+function capitaliser(mot: string): string {
+  return mot.length === 0 ? mot : mot.charAt(0).toUpperCase() + mot.slice(1);
+}
+
+/**
+ * Vrai si TOUTES les lignes sont vendues au carton (`uniteVenteEffective`
+ * — `null`/absent toujours traité comme carton, même règle que partout
+ * ailleurs dans le projet). Pilote le choix entre libellés historiques
+ * et génériques — fondations quincaillerie (Phase 4), partagée par les
+ * formats A4 et A5 (contenu de panneau du format paysage), jamais deux
+ * règles distinctes.
+ */
+function facturePrincipalementAuCarton(facture: Facture): boolean {
+  return facture.lignes.length > 0 && facture.lignes.every((l) => uniteVenteEffective({ uniteVente: l.uniteVente ?? null }) === "carton");
+}
+
 /**
  * Charge une image dans le document — vérifie explicitement l'existence
  * du fichier et journalise une erreur claire si absent, plutôt qu'un
@@ -93,8 +122,13 @@ export interface FactureDocumentInput {
   facture: Facture;
   identite: IdentiteEntrepriseSnapshot;
   vendeurNomAffiche: string;
-  /** "a5" par défaut (décision utilisateur) — "a4" reproduit le modèle officiel existant à l'identique, jamais modifié par cette correction. */
-  format?: "a4" | "a5";
+  /**
+   * "a4-paysage" par défaut (Phase 4) — deux exemplaires A5 identiques
+   * côte à côte sur une page A4 paysage, remplace l'ancien choix "a5"
+   * indépendant (retiré, voir FacturesScreen.tsx). "a4" reproduit le
+   * modèle officiel existant à l'identique, jamais modifié.
+   */
+  format?: "a4" | "a4-paysage";
 }
 
 /**
@@ -205,19 +239,19 @@ export function dessinerPiedDePage(doc: PDFKit.PDFDocument, identite: IdentiteEn
  * créer plusieurs factures/numéros").
  */
 export async function genererFacturePdf(input: FactureDocumentInput): Promise<string> {
-  const format = input.format ?? "a5";
+  const format = input.format ?? "a4-paysage";
   const dossier = join(app.getPath("userData"), "factures-generees");
   if (!existsSync(dossier)) mkdirSync(dossier, { recursive: true });
   const chemin = join(dossier, `${input.facture.numero}.pdf`);
 
   return new Promise((resolve, reject) => {
-    const taille: [number, number] = format === "a4" ? [PAGE_WIDTH, PAGE_HEIGHT] : [PAGE_WIDTH_A5, PAGE_HEIGHT_A5];
+    const taille: [number, number] = format === "a4" ? [PAGE_WIDTH, PAGE_HEIGHT] : [PAGE_WIDTH_A4_PAYSAGE, PAGE_HEIGHT_A4_PAYSAGE];
     const doc = new PDFDocument({ size: taille, margin: 0 });
     const flux = createWriteStream(chemin);
     doc.pipe(flux);
 
     if (format === "a4") dessinerFacture(doc, input);
-    else dessinerFactureA5(doc, input);
+    else dessinerFactureA4Paysage(doc, input);
 
     doc.end();
     flux.on("finish", () => resolve(chemin));
@@ -277,16 +311,46 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   // "Cartons", jamais contraint) et 4pt à M²/CTN (valeurs courtes type
   // "0.72") — largeur totale du tableau INCHANGÉE (530.5pt), seules les
   // positions x des colonnes suivantes se décalent en conséquence.
-  const colonnes = [
-    { x: 45.5, largeur: 60, titre: "QUANTITÉ" },
-    { x: 105.5, largeur: 72, titre: "DÉSIGNATION" },
-    { x: 177.5, largeur: 70, titre: "RÉFÉRENCE" },
-    { x: 247.5, largeur: 58, titre: "TAILLE" },
-    { x: 305.5, largeur: 72, titre: "PRIX/M²" },
-    { x: 377.5, largeur: 40, titre: "M²/CTN" },
-    { x: 417.5, largeur: 68, titre: "PRIX/CTN" },
-    { x: 485.5, largeur: 90.5, titre: "TOTAL" },
-  ];
+  // Fondations quincaillerie (Phase 4) — adaptation par unité de vente,
+  // voir shared-types/produit.ts (UniteVente). Deux jeux de colonnes
+  // possibles, MÊMES positions/largeurs physiques dans les deux cas
+  // (530.5pt, jamais une refonte de la grille) :
+  //  - "mode historique" (toutes les lignes sont vendues au carton, selon
+  //    `uniteVenteEffective` — donc `null`/absent TOUJOURS traité comme
+  //    carton, même règle que partout ailleurs dans le projet) : libellés
+  //    et calculs STRICTEMENT identiques à avant cette phase — zéro
+  //    changement visuel pour toute facture 100% carreau, ancienne ou
+  //    nouvelle, QUE `surfaceCartonM2` soit connu ou non pour certaines
+  //    lignes (déjà géré par le "—" existant, inchangé).
+  //  - "mode générique" (au moins une ligne a une unité de vente autre que
+  //    carton — couvre le cas exclusivement non-carreaux ET le cas
+  //    mixte) : les deux colonnes spécifiques au carton (PRIX/M²,
+  //    M²/CTN) sont réaffectées à CARACTÉRISTIQUES et UNITÉ — décision
+  //    validée : ne jamais supprimer systématiquement les caractéristiques
+  //    des produits non-carreaux au seul motif qu'une facture contient
+  //    aussi des carreaux.
+  const toutesLignesCarton = facturePrincipalementAuCarton(facture);
+  const colonnes = toutesLignesCarton
+    ? [
+        { x: 45.5, largeur: 60, titre: "QUANTITÉ" },
+        { x: 105.5, largeur: 72, titre: "DÉSIGNATION" },
+        { x: 177.5, largeur: 70, titre: "RÉFÉRENCE" },
+        { x: 247.5, largeur: 58, titre: "TAILLE" },
+        { x: 305.5, largeur: 72, titre: "PRIX/M²" },
+        { x: 377.5, largeur: 40, titre: "M²/CTN" },
+        { x: 417.5, largeur: 68, titre: "PRIX/CTN" },
+        { x: 485.5, largeur: 90.5, titre: "TOTAL" },
+      ]
+    : [
+        { x: 45.5, largeur: 60, titre: "QUANTITÉ" },
+        { x: 105.5, largeur: 72, titre: "DÉSIGNATION" },
+        { x: 177.5, largeur: 70, titre: "RÉFÉRENCE" },
+        { x: 247.5, largeur: 58, titre: "TAILLE" },
+        { x: 305.5, largeur: 72, titre: "CARACT." },
+        { x: 377.5, largeur: 40, titre: "UNITÉ" },
+        { x: 417.5, largeur: 68, titre: "PRIX UNIT." },
+        { x: 485.5, largeur: 90.5, titre: "TOTAL" },
+      ];
   const tableTop = 369.9 + DECALAGE_EN_TETE;
   const headerHeight = 17.7;
   const rowHeight = 21;
@@ -322,21 +386,52 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
       // la vente (ligne.surfaceCartonM2, jamais recalculée depuis le
       // produit actuel — voir shared-types/facture.ts). "—" si cette
       // information n'était pas disponible à l'époque de la vente.
-      const prixM2 =
-        ligne.surfaceCartonM2 !== null ? domainPricing.calculerPrixM2DepuisPrixCarton(ligne.prixUnitaire, ligne.surfaceCartonM2) : null;
+      const estLigneCarton = uniteVenteEffective({ uniteVente: ligne.uniteVente ?? null }) === "carton";
+      const prixM2 = ligne.surfaceCartonM2 !== null ? domainPricing.calculerPrixM2DepuisPrixCarton(ligne.prixUnitaire, ligne.surfaceCartonM2) : null;
 
       doc.fillColor(NOIR);
       doc.text(`${ligne.quantite}`, colonnes[0]!.x + 6, ligneY + 6, { width: colonnes[0]!.largeur - 10 });
-      // DÉSIGNATION = libellé générique de l'article vendu, PAS le motif du
-      // carreau — l'identification précise se fait via RÉFÉRENCE + TAILLE
-      // (décision utilisateur du 2026-10-10 : le motif disparaît de la facture).
-      doc.text("Cartons", colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10 });
-      doc.text(ligne.reference ?? "—", colonnes[2]!.x + 6, ligneY + 6, { width: colonnes[2]!.largeur - 10 });
-      doc.text(ligne.taille, colonnes[3]!.x + 6, ligneY + 6, { width: colonnes[3]!.largeur - 10 });
-      doc.text(prixM2 !== null ? `${formaterMontant(prixM2)} FCFA` : "—", colonnes[4]!.x + 6, ligneY + 6, { width: colonnes[4]!.largeur - 10 });
-      doc.text(ligne.surfaceCartonM2 !== null ? ligne.surfaceCartonM2.toFixed(2) : "—", colonnes[5]!.x + 6, ligneY + 6, {
-        width: colonnes[5]!.largeur - 10,
-      });
+
+      if (toutesLignesCarton) {
+        // Mode historique — comportement STRICTEMENT inchangé (voir
+        // commentaire sur `colonnes` ci-dessus). DÉSIGNATION = libellé
+        // générique "Cartons", PAS le motif du carreau — l'identification
+        // précise se fait via RÉFÉRENCE + TAILLE (décision utilisateur du
+        // 2026-10-10 : le motif disparaît de la facture).
+        doc.text("Cartons", colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10 });
+        doc.text(ligne.reference ?? "—", colonnes[2]!.x + 6, ligneY + 6, { width: colonnes[2]!.largeur - 10 });
+        doc.text(ligne.taille, colonnes[3]!.x + 6, ligneY + 6, { width: colonnes[3]!.largeur - 10 });
+        doc.text(prixM2 !== null ? `${formaterMontant(prixM2)} FCFA` : "—", colonnes[4]!.x + 6, ligneY + 6, { width: colonnes[4]!.largeur - 10 });
+        doc.text(ligne.surfaceCartonM2 !== null ? ligne.surfaceCartonM2.toFixed(2) : "—", colonnes[5]!.x + 6, ligneY + 6, {
+          width: colonnes[5]!.largeur - 10,
+        });
+      } else {
+        // Mode générique (facture exclusivement non-carreaux, ou mixte) —
+        // DÉSIGNATION redevient le nom réel du produit (une colonne UNITÉ
+        // dédiée indique déjà le mode de vente, "Cartons" serait redondant).
+        const unite = uniteVenteEffective({ uniteVente: ligne.uniteVente ?? null });
+        // `ellipsis: true` — un nom de produit réel peut être plus long que
+        // le mot fixe "Cartons" (mode historique, jamais ce problème) ;
+        // jamais un retour à la ligne qui chevaucherait la ligne suivante
+        // du tableau, toujours une seule ligne tronquée proprement.
+        doc.text(ligne.motif, colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10, height: rowHeight - 8, ellipsis: true });
+        doc.text(ligne.reference ?? "—", colonnes[2]!.x + 6, ligneY + 6, { width: colonnes[2]!.largeur - 10, height: rowHeight - 8, ellipsis: true });
+        doc.text(ligne.taille, colonnes[3]!.x + 6, ligneY + 6, { width: colonnes[3]!.largeur - 10, height: rowHeight - 8, ellipsis: true });
+        // Caractéristiques — pour une ligne carreau AU SEIN d'une facture
+        // mixte, l'information commerciale essentielle (prix/m², surface
+        // par carton) est préservée ici plutôt que supprimée, conformément
+        // à la décision validée ; pour toute autre ligne, ce sont ses
+        // propres caractéristiques (shared-types/caracteristiques.ts).
+        const texteCaracteristiques = estLigneCarton
+          ? prixM2 !== null
+            ? `${formaterMontant(prixM2)} F/m² · ${ligne.surfaceCartonM2!.toFixed(2)} m²/ctn`
+            : "—"
+          : caracteristiquesAffichage(ligne.caracteristiques ?? null) || "—";
+        doc.fontSize(6.3).text(texteCaracteristiques, colonnes[4]!.x + 5, ligneY + 7, { width: colonnes[4]!.largeur - 8, height: rowHeight - 8, ellipsis: true });
+        doc.fontSize(9);
+        doc.text(capitaliser(LIBELLE_UNITE_VENTE[unite].singulier), colonnes[5]!.x + 6, ligneY + 6, { width: colonnes[5]!.largeur - 10 });
+      }
+
       doc.text(`${formaterMontant(ligne.prixUnitaire)} FCFA`, colonnes[6]!.x + 6, ligneY + 6, { width: colonnes[6]!.largeur - 10 });
       doc.text(`${formaterMontant(ligne.quantite * ligne.prixUnitaire)} FCFA`, colonnes[7]!.x + 6, ligneY + 6, {
         width: colonnes[7]!.largeur - 10,
@@ -431,150 +526,89 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
 }
 
 /**
- * Pied de page compact — format A5. Jamais les coordonnées absolues de
- * dessinerPiedDePage (calées sur la hauteur A4, 841.92pt) : l'A5 ne fait
- * que 595.28pt de haut, ces coordonnées tomberaient hors-page.
+ * Format A4 paysage — DEUX EXEMPLAIRES COMPLETS de la facture A4
+ * portrait officielle (`dessinerFacture`, appelée ici TELLE QUELLE,
+ * jamais modifiée ni réécrite), réduits à l'échelle et placés côte à
+ * côte, avec trait de découpe central (Phase 4 — correction : la
+ * première version de ce format réutilisait à tort `dessinerFactureA5`,
+ * une mise en page SIMPLIFIÉE et DIFFÉRENTE du document officiel
+ * — retirée, voir le commentaire sur PAGE_WIDTH_A5).
+ *
+ * Construit DIRECTEMENT dans le PDF — jamais via une option d'impression
+ * "2 pages par feuille" du pilote Windows (exigence explicite) : chaque
+ * panneau est une transformation graphique PURE (`doc.save()` /
+ * `doc.translate()` / `doc.scale()` / `doc.restore()`, API standard de
+ * pdfkit) autour d'un appel à `dessinerFacture` — AUCUNE donnée, AUCUN
+ * calcul, AUCUNE colonne n'est dupliquée ou réinventée : c'est
+ * exactement le même rendu que l'A4 portrait, physiquement réduit.
+ * `doc.scale()` s'applique uniformément en X ET en Y (une seule valeur
+ * `echelle`), donc jamais de déformation horizontale ou verticale.
+ *
+ * Les deux panneaux reçoivent EXACTEMENT le même objet `input` et
+ * exécutent EXACTEMENT la même fonction — ils ne peuvent donc pas
+ * diverger, cette garantie découle de la construction elle-même, pas
+ * d'une simple vérification visuelle.
+ *
+ * Pagination : ce format hérite du même comportement que `dessinerFacture`
+ * qu'il réutilise tel quel — une facture à très grand nombre de lignes
+ * n'est pas paginée (limitation déjà existante avant cette phase,
+ * documentée ici, jamais étendue sans demande explicite).
+ *
+ * Piège pdfkit (ne concerne QUE ce fichier, jamais `dessinerFacture`
+ * lui-même) : la pagination automatique de pdfkit (le saut de page
+ * silencieux déclenché par `doc.text()` quand la position Y demandée
+ * dépasse `page.maxY()`) compare une coordonnée ABSOLUE, non affectée
+ * par `doc.scale()`/`doc.translate()` (ce sont de pures transformations
+ * du flux graphique PDF, invisibles à cette logique de haut niveau),
+ * à la hauteur RÉELLE de la page physique (`PAGE_HEIGHT_A4_PAYSAGE`,
+ * plus petite que `PAGE_HEIGHT`, la hauteur pour laquelle `dessinerFacture`
+ * a été écrite). Sans précaution, `dessinerFacture` croit déborder et
+ * pdfkit insère des pages supplémentaires avant même que l'échelle ne
+ * s'applique. Correction : agrandir temporairement `doc.page.height`
+ * à `PAGE_HEIGHT` pendant l'appel (purement une donnée de calcul
+ * interne à pdfkit, jamais le MediaBox déjà figé de la page réelle —
+ * voir la constante `MediaBox` fixée à la création de la page), puis la
+ * restaurer immédiatement après — aucune modification de `dessinerFacture`.
  */
-function dessinerPiedDePageA5(doc: PDFKit.PDFDocument, identite: IdentiteEntrepriseSnapshot): void {
-  const telephonesAffiches = identite.telephones.length > 0 ? identite.telephones.join(" - ") : "—";
-  const largeur = MARGE_DROITE_A5 - MARGE_GAUCHE_A5;
-  doc.moveTo(MARGE_GAUCHE_A5, 552).lineTo(MARGE_DROITE_A5, 552).lineWidth(0.5).strokeColor("#999999").stroke();
-  doc.font("Helvetica-Oblique").fontSize(5.8).fillColor(NOIR);
-  doc.text("Société à responsabilité limitée, Siège Social : Libreville", MARGE_GAUCHE_A5, 560, { width: largeur, align: "center" });
-  doc.text(`BP : 22103, Tél : ${telephonesAffiches}`, MARGE_GAUCHE_A5, 569, { width: largeur, align: "center" });
-  doc.text("N° RCCM : GA-LBV-01-2025-B13-00187, NIF : 2025 0100 6503 M", MARGE_GAUCHE_A5, 578, { width: largeur, align: "center" });
-}
+export function dessinerFactureA4Paysage(doc: PDFKit.PDFDocument, input: FactureDocumentInput): void {
+  // Échelle UNIQUE (jamais deux valeurs séparées pour X et Y, ce qui
+  // déformerait le document) qui fait tenir la facture A4 PORTRAIT
+  // COMPLÈTE, inchangée, dans l'espace d'un panneau — un "contain",
+  // jamais un "cover" qui déborderait. Les ratios largeur/hauteur de
+  // PAGE_WIDTH_A5/PAGE_HEIGHT_A5 par rapport à PAGE_WIDTH/PAGE_HEIGHT ne
+  // sont pas rigoureusement identiques (arrondis ISO déjà présents dans
+  // ce fichier) — le plus petit des deux garantit l'absence de
+  // débordement dans les deux sens à la fois.
+  const echelle = Math.min(PAGE_WIDTH_A5 / PAGE_WIDTH, PAGE_HEIGHT_A5 / PAGE_HEIGHT);
+  const largeurPanneauReel = PAGE_WIDTH * echelle;
+  const hauteurPanneauReelle = PAGE_HEIGHT * echelle;
 
-/**
- * Format A5 (correction "choix du modèle d'impression", 2026-11-13) —
- * VRAIE redesign, jamais un A4 réduit (décision utilisateur, voir le
- * commentaire sur PAGE_WIDTH_A5). Contenu volontairement plus dense/
- * compact que l'A4 (pas de filigrane, boîtes réduites, tableau à 4
- * colonnes au lieu de 8 — PRIX/M² et M²/CTN omis ici, toujours
- * disponibles sur le format A4) : un ticket de caisse condensé, pas une
- * reproduction miniature du document officiel. Mêmes DONNÉES (aucune
- * perte d'information métier que le client doit connaître — quantité,
- * référence, taille, prix, total, remise), uniquement moins de
- * colonnes/texte décoratif pour tenir sur une demi-page.
- */
-export function dessinerFactureA5(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche }: FactureDocumentInput): void {
-  const dateAffichee = new Date(facture.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
-  const mentionStatut = facture.statutPaiement === "reservation" ? "Statut : Réservation" : "Statut : Payée";
+  const margeExterieure = (PAGE_WIDTH_A4_PAYSAGE - 2 * PAGE_WIDTH_A5) / 2;
+  // Centrage fin de la facture réduite dans l'espace de son panneau
+  // (différence de quelques points entre les deux ratios ci-dessus) —
+  // jamais un décalage perceptible, uniquement une précision géométrique.
+  const decalageX = (PAGE_WIDTH_A5 - largeurPanneauReel) / 2;
+  const decalageY = (PAGE_HEIGHT_A4_PAYSAGE - hauteurPanneauReelle) / 2;
+  const xPanneau1 = margeExterieure + decalageX;
+  const xPanneau2 = margeExterieure + PAGE_WIDTH_A5 + decalageX;
 
-  // --- En-tête compact ---
-  chargerImage(doc, assetPath("facture-logo.jpg"), MARGE_GAUCHE_A5, 20, { width: 130, height: 34 });
-  doc.font("Helvetica-Bold").fontSize(15).fillColor(VERT).text("FACTURE", 200, 22, { width: MARGE_DROITE_A5 - 200, align: "right" });
-  doc.font("Helvetica").fontSize(7.5).fillColor(NOIR).text(facture.numero, 200, 40, { width: MARGE_DROITE_A5 - 200, align: "right" });
-  doc.text(`Date : ${dateAffichee}`, 200, 49, { width: MARGE_DROITE_A5 - 200, align: "right" });
-  doc.font("Helvetica-Oblique").fontSize(7).text(mentionStatut, 200, 58, { width: MARGE_DROITE_A5 - 200, align: "right" });
-
-  doc.font("Helvetica").fontSize(6).fillColor(GRIS_LABEL);
-  doc.text("Quincaillerie et Vente de Matériaux de Construction — Import et Export", MARGE_GAUCHE_A5, 60);
-
-  doc.moveTo(MARGE_GAUCHE_A5, 72).lineTo(MARGE_DROITE_A5, 72).lineWidth(1).strokeColor(VERT).stroke();
-
-  // --- Boîtes FACTURÉ À / DÉTAILS DE VENTE — côte à côte, réduites ---
-  const boiteY = 78;
-  const boiteHauteur = 58;
-  doc.rect(MARGE_GAUCHE_A5, boiteY, 172, boiteHauteur).fill(FOND_BOITE);
-  doc.rect(MARGE_GAUCHE_A5 + 180, boiteY, 183.5, boiteHauteur).fill(FOND_BOITE);
-
-  doc.font("Helvetica-Bold").fontSize(6.5).fillColor(GRIS_LABEL);
-  doc.text("FACTURÉ À", MARGE_GAUCHE_A5 + 8, boiteY + 6);
-  doc.text("DÉTAILS DE VENTE", MARGE_GAUCHE_A5 + 188, boiteY + 6);
-
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(NOIR);
-  doc.text(facture.clientNom, MARGE_GAUCHE_A5 + 8, boiteY + 17, { width: 156 });
-  doc.font("Helvetica").fontSize(7.5);
-  doc.text(facture.clientTelephone ?? "—", MARGE_GAUCHE_A5 + 8, boiteY + 29, { width: 156 });
-  doc.text(facture.clientAdresse ?? "—", MARGE_GAUCHE_A5 + 8, boiteY + 40, { width: 156 });
-
-  doc.font("Helvetica").fontSize(7.5).fillColor(NOIR);
-  doc.text(`Magasin : ${identite.nom}`, MARGE_GAUCHE_A5 + 188, boiteY + 17, { width: 168 });
-  doc.text(`Articles : ${facture.lignes.length}`, MARGE_GAUCHE_A5 + 188, boiteY + 28, { width: 168 });
-  doc.text(`Règlement : ${facture.modeReglement ?? "—"}`, MARGE_GAUCHE_A5 + 188, boiteY + 39, { width: 168 });
-  doc.text(`Vendeur : ${vendeurNomAffiche}`, MARGE_GAUCHE_A5 + 188, boiteY + 50, { width: 168 });
-
-  // --- Tableau compact (4 colonnes) ---
-  const colonnes = [
-    { x: MARGE_GAUCHE_A5, largeur: 28, titre: "QTÉ" },
-    { x: MARGE_GAUCHE_A5 + 28, largeur: 140, titre: "DÉSIGNATION" },
-    { x: MARGE_GAUCHE_A5 + 168, largeur: 80, titre: "PRIX/CTN" },
-    { x: MARGE_GAUCHE_A5 + 248, largeur: 115.5, titre: "TOTAL" },
-  ];
-  const tableTop = boiteY + boiteHauteur + 10;
-  const headerHeight = 15;
-  const rowHeight = 15;
-
-  doc.rect(MARGE_GAUCHE_A5, tableTop, 363.5, headerHeight).fillAndStroke("#ffffff", "#cccccc");
-  doc.font("Helvetica-Bold").fontSize(6.5).fillColor(NOIR);
-  for (const col of colonnes) {
-    doc.text(col.titre, col.x + 4, tableTop + 4, { width: col.largeur - 6 });
+  const hauteurPageReelle = doc.page.height;
+  for (const x of [xPanneau1, xPanneau2]) {
+    doc.page.height = PAGE_HEIGHT;
+    doc.save();
+    doc.translate(x, decalageY);
+    doc.scale(echelle, echelle);
+    dessinerFacture(doc, input);
+    doc.restore();
+    doc.page.height = hauteurPageReelle;
   }
 
-  let ligneY = tableTop + headerHeight;
-  const nombreLignesAffichees = Math.max(facture.lignes.length, 6);
-  doc.font("Helvetica").fontSize(7.3);
-  for (let i = 0; i < nombreLignesAffichees; i++) {
-    const ligne = facture.lignes[i];
-    doc.rect(MARGE_GAUCHE_A5, ligneY, 363.5, rowHeight).strokeColor("#cccccc").lineWidth(0.4).stroke();
-    for (const col of colonnes) {
-      doc
-        .moveTo(col.x - 0.3, ligneY)
-        .lineTo(col.x - 0.3, ligneY + rowHeight)
-        .strokeColor("#cccccc")
-        .lineWidth(0.4)
-        .stroke();
-    }
-    if (ligne) {
-      doc.fillColor(NOIR).font("Helvetica").fontSize(7.3);
-      doc.text(`${ligne.quantite}`, colonnes[0]!.x + 4, ligneY + 4, { width: colonnes[0]!.largeur - 6 });
-      doc.text(`${ligne.reference ?? "—"} — ${ligne.taille}`, colonnes[1]!.x + 4, ligneY + 4, { width: colonnes[1]!.largeur - 6 });
-      doc.text(`${formaterMontant(ligne.prixUnitaire)} FCFA`, colonnes[2]!.x + 4, ligneY + 4, { width: colonnes[2]!.largeur - 6 });
-      doc.text(`${formaterMontant(ligne.quantite * ligne.prixUnitaire)} FCFA`, colonnes[3]!.x + 4, ligneY + 4, { width: colonnes[3]!.largeur - 6 });
-    }
-    ligneY += rowHeight;
-  }
-
-  // --- Total / Remise / Total Net ---
-  const totalNet = domainInvoicing.calculerTotalNet(facture.total, facture.remise);
-  const labelX = MARGE_GAUCHE_A5 + 200;
-  const valeurX = MARGE_GAUCHE_A5 + 280;
-  const valeurLargeur = MARGE_DROITE_A5 - valeurX;
-
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(NOIR);
-  doc.text("Total", labelX, ligneY + 12);
-  doc.text(`${formaterMontant(facture.total)} FCFA`, valeurX, ligneY + 12, { width: valeurLargeur, align: "right" });
-  doc.font("Helvetica").fontSize(7.5);
-  doc.text("Remise", labelX, ligneY + 24);
-  doc.text(`${formaterMontant(facture.remise)} FCFA`, valeurX, ligneY + 24, { width: valeurLargeur, align: "right" });
-
-  let decalageApres = 0;
-  if (facture.statutPaiement === "reservation") {
-    const soldeRestant = domainInvoicing.calculerSoldeRestant(totalNet, facture.montantPaye);
-    doc.font("Helvetica-Bold").fontSize(7.8).fillColor(VERT);
-    doc.text("Acompte versé", labelX, ligneY + 36);
-    doc.text(`${formaterMontant(facture.montantPaye)} FCFA`, valeurX, ligneY + 36, { width: valeurLargeur, align: "right" });
-    doc.fillColor(NOIR);
-    doc.text("Solde restant", labelX, ligneY + 48);
-    doc.text(`${formaterMontant(soldeRestant)} FCFA`, valeurX, ligneY + 48, { width: valeurLargeur, align: "right" });
-    decalageApres = 12;
-  } else {
-    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(VERT);
-    doc.text("Total Net à payer", labelX, ligneY + 36);
-    doc.text(`${formaterMontant(totalNet)} FCFA`, valeurX, ligneY + 36, { width: valeurLargeur, align: "right" });
-  }
-
-  // --- Mention CGV condensée — renvoi, jamais le texte complet (place
-  // insuffisante sur une demi-page) : décision de simplification propre
-  // à ce format, l'A4 reste la référence pour le texte intégral. ---
-  doc.font("Helvetica-Oblique").fontSize(6).fillColor(GRIS_LABEL);
-  doc.text(
-    "Conditions générales de vente (réservation, délais de livraison et de retrait) disponibles en magasin ou sur le format A4 de ce document.",
-    MARGE_GAUCHE_A5,
-    ligneY + 48 + decalageApres,
-    { width: MARGE_DROITE_A5 - MARGE_GAUCHE_A5, align: "justify" }
-  );
-
-  dessinerPiedDePageA5(doc, identite);
+  // Trait de découpe central — pointillés, dans l'intervalle entre les
+  // deux panneaux (jamais sur leur contenu), sur toute la hauteur utile.
+  const xMilieu = PAGE_WIDTH_A4_PAYSAGE / 2;
+  doc.save();
+  doc.dash(3, { space: 2 });
+  doc.moveTo(xMilieu, 8).lineTo(xMilieu, PAGE_HEIGHT_A4_PAYSAGE - 8).strokeColor("#999999").lineWidth(0.6).stroke();
+  doc.undash();
+  doc.restore();
 }

@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import { randomUUID } from "node:crypto";
 import type { stock as domainStock } from "@maxi-equip/domain";
+import type { UniteVente } from "@maxi-equip/shared-types";
 
 /**
  * Accès au stock. Ne contient AUCUNE règle métier (jamais de vérification
@@ -47,6 +48,25 @@ export class StockRepository {
       emplacementId: string;
       quantite: number;
     }[];
+  }
+
+  /**
+   * Stock ventilé par unité de vente pour un emplacement — correction
+   * "le bilan additionne des quantités d'unités différentes" (Phase 4) :
+   * jamais une somme brute entre produits d'unités distinctes, voir
+   * bilanDocumentService.ts/BilanScreen.tsx. `null`/absent côté produit
+   * → "carton" (même règle que `uniteVenteEffective`, shared-types).
+   */
+  getQuantitesParUniteParEmplacement(emplacementId: string): { unite: UniteVente; quantite: number }[] {
+    return this.db
+      .prepare(
+        `SELECT COALESCE(p.unite_vente, 'carton') as unite, SUM(s.quantite) as quantite
+         FROM stocks s JOIN produits p ON p.id = s.produit_id
+         WHERE s.emplacement_id = ?
+         GROUP BY COALESCE(p.unite_vente, 'carton')
+         ORDER BY unite`
+      )
+      .all(emplacementId) as { unite: UniteVente; quantite: number }[];
   }
 
   /** Stock total (tous emplacements confondus) pour plusieurs produits — colonne "Stock" de la maquette (CarreauxPage). */

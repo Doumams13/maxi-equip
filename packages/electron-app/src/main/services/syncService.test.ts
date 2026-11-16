@@ -703,6 +703,112 @@ describe("SyncService — Phase 3.7 (base réelle, transport simulé)", () => {
       expect(resultat).toMatchObject({ success: true });
     });
   });
+
+  describe("definirRattrapageReferentiel — Phase 5 (référentiel commun), sous-phase 5.4", () => {
+    function reponsePullVide() {
+      return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });
+    }
+
+    it("applique catégories PUIS sous-catégories (avec leurs unités) PUIS champs, APRÈS un PULL réussi", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const categories = [{ id: "c1", nom: "Quincaillerie", imageDataUrl: null, ordre: 0, updatedAt: "2026-01-01T00:00:00.000Z" }];
+      const sousCategories = [
+        {
+          id: "sc1",
+          categorieId: "c1",
+          nom: "Ciments",
+          ordre: 0,
+          modelePhysique: null as "carreau" | null,
+          unitesAutorisees: ["sac", "kg"] as Array<"carton" | "piece" | "sac" | "metre" | "kg" | "litre">,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ];
+      const sousCategorieChamps = [
+        {
+          id: "ch1",
+          sousCategorieId: "sc1",
+          nom: "Poids",
+          type: "nombre" as const,
+          obligatoire: true,
+          valeursAutorisees: null,
+          uniteMesure: "kg",
+          role: "physique" as const,
+          ordre: 0,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ];
+      const recupererReferentiel = vi.fn(async () => ({ success: true as const, categories, sousCategories, sousCategorieChamps }));
+      const appelsOrdre: string[] = [];
+      const categorieRepository = { creerDepuisServeur: vi.fn(() => void appelsOrdre.push("categorie")) };
+      const sousCategorieRepository = {
+        creerDepuisServeur: vi.fn(() => {
+          appelsOrdre.push("sous_categorie");
+          return true;
+        }),
+      };
+      const sousCategorieChampRepository = {
+        creerDepuisServeur: vi.fn(() => {
+          appelsOrdre.push("champ");
+          return true;
+        }),
+      };
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageReferentiel(categorieRepository, sousCategorieRepository, sousCategorieChampRepository, { recupererReferentiel });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat.success).toBe(true);
+      expect(categorieRepository.creerDepuisServeur).toHaveBeenCalledWith(categories[0]);
+      // La configuration d'unités est transmise en SECOND argument, extraite du sous-objet reçu — jamais un appel séparé.
+      expect(sousCategorieRepository.creerDepuisServeur).toHaveBeenCalledWith(sousCategories[0], ["sac", "kg"]);
+      expect(sousCategorieChampRepository.creerDepuisServeur).toHaveBeenCalledWith(sousCategorieChamps[0]);
+      expect(appelsOrdre).toEqual(["categorie", "sous_categorie", "champ"]);
+    });
+
+    it("un échec de recupererReferentiel n'applique rien localement et ne fait jamais échouer la synchronisation", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererReferentiel = vi.fn(async () => ({ success: false as const, message: "hors ligne" }));
+      const categorieRepository = { creerDepuisServeur: vi.fn() };
+      const sousCategorieRepository = { creerDepuisServeur: vi.fn(() => true) };
+      const sousCategorieChampRepository = { creerDepuisServeur: vi.fn(() => true) };
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageReferentiel(categorieRepository, sousCategorieRepository, sousCategorieChampRepository, { recupererReferentiel });
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+      expect(categorieRepository.creerDepuisServeur).not.toHaveBeenCalled();
+      expect(sousCategorieRepository.creerDepuisServeur).not.toHaveBeenCalled();
+      expect(sousCategorieChampRepository.creerDepuisServeur).not.toHaveBeenCalled();
+    });
+
+    it("une exception du rattrapage du référentiel ne fait jamais échouer la synchronisation (déjà réussie à ce stade)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const recupererReferentiel = vi.fn(async () => {
+        throw new Error("panne réseau sur le rattrapage du référentiel");
+      });
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+      service.definirRattrapageReferentiel(
+        { creerDepuisServeur: vi.fn() },
+        { creerDepuisServeur: vi.fn(() => true) },
+        { creerDepuisServeur: vi.fn(() => true) },
+        { recupererReferentiel }
+      );
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+
+    it("sans rattrapage défini : synchronisation inchangée (rétrocompatibilité)", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => reponsePullVide()));
+      const service = new SyncService(boiteEnvoiRepository, syncRepository);
+
+      const resultat = await service.executerSynchronisation();
+
+      expect(resultat).toMatchObject({ success: true });
+    });
+  });
 });
 
 describe("Phase 4 (2026-10-27) — application réelle des opérations métier reçues (vente/annulation/entrée/sortie/transfert)", () => {

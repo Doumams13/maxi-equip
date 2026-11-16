@@ -138,3 +138,83 @@ describe("ProduitRepository.listSousSeuilDepots — modeleId (base réelle)", ()
     expect(resultats[0]!.modeleId).toBeNull();
   });
 });
+
+/**
+ * Fondations quincaillerie Phase 2 — uniteVente/caracteristiques/marque.
+ * Base réelle, jamais un repository mocké.
+ */
+describe("ProduitRepository — uniteVente, caracteristiques, marque (base réelle)", () => {
+  let db: Database.Database;
+  let repository: ProduitRepository;
+
+  beforeEach(() => {
+    db = ouvrirBaseDeTest();
+    repository = new ProduitRepository(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+  afterAll(() => {
+    if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
+  });
+
+  it("RÉTROCOMPATIBILITÉ : un produit créé sans uniteVente/caracteristiques/marque (comme un carreau historique) a les trois champs null", () => {
+    const id = repository.create({ motif: "Marbre", type: "Faïence", taille: "60x60", tailleTri: 60, reference: "MB-6060", prix: 8000, seuilAlerte: 10 });
+    const produit = repository.findById(id)!;
+    expect(produit.uniteVente).toBeNull();
+    expect(produit.caracteristiques).toBeNull();
+    expect(produit.marque).toBeNull();
+  });
+
+  it("persiste uniteVente/caracteristiques/marque fournis à la création (produit de quincaillerie, vendu au sac)", () => {
+    const id = repository.create({
+      motif: "Ciment CIM II",
+      type: "Ciment",
+      marque: "Cimgabon",
+      taille: "Sac 50kg",
+      tailleTri: 0,
+      reference: "CIM-50",
+      prix: 7500,
+      seuilAlerte: 20,
+      uniteVente: "sac",
+      caracteristiques: JSON.stringify([{ cle: "Poids", valeur: "50kg" }]),
+    });
+    const produit = repository.findById(id)!;
+    expect(produit.uniteVente).toBe("sac");
+    expect(produit.marque).toBe("Cimgabon");
+    expect(produit.caracteristiques).toBe(JSON.stringify([{ cle: "Poids", valeur: "50kg" }]));
+  });
+
+  it("update() modifie uniteVente/caracteristiques sans perdre les autres champs (chemin motif fourni)", () => {
+    const id = repository.create({ motif: "Ciment", type: "Ciment", taille: "Sac 50kg", tailleTri: 0, reference: "CIM-50", prix: 7500, seuilAlerte: 20 });
+    repository.update(id, {
+      motif: "Ciment",
+      type: "Ciment",
+      taille: "Sac 50kg",
+      tailleTri: 0,
+      reference: "CIM-50",
+      prix: 7800,
+      seuilAlerte: 20,
+      uniteVente: "sac",
+      caracteristiques: JSON.stringify([{ cle: "Poids", valeur: "50kg" }]),
+    });
+    const produit = repository.findById(id)!;
+    expect(produit.prix).toBe(7800);
+    expect(produit.uniteVente).toBe("sac");
+    expect(produit.caracteristiques).toBe(JSON.stringify([{ cle: "Poids", valeur: "50kg" }]));
+  });
+
+  it("update() modifie uniteVente sans perdre les autres champs (chemin motif absent, variante seule)", () => {
+    const id = repository.create({ motif: "Ciment", type: "Ciment", taille: "Sac 50kg", tailleTri: 0, reference: "CIM-50", prix: 7500, seuilAlerte: 20 });
+    repository.update(id, { type: "Ciment", taille: "Sac 50kg", tailleTri: 0, reference: "CIM-50", prix: 7500, seuilAlerte: 20, uniteVente: "sac" });
+    expect(repository.findById(id)!.uniteVente).toBe("sac");
+    expect(repository.findById(id)!.motif).toBe("Ciment"); // non touché par cette branche.
+  });
+
+  it("un carreau existant (uniteVente null) reste traité comme vendu au carton — valeur jamais réinterprétée par le repository", () => {
+    const id = repository.create({ motif: "Marbre", type: "Faïence", taille: "60x60", tailleTri: 60, reference: "MB-6061", prix: 8000, seuilAlerte: 10 });
+    // Le repository ne réinterprète jamais null→"carton" lui-même (c'est le rôle de uniteVenteEffective() côté shared-types) — il doit juste ne jamais le perdre.
+    expect(repository.findById(id)!.uniteVente).toBeNull();
+  });
+});

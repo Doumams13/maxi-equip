@@ -40,6 +40,13 @@ const TYPES_SUPPORTES: readonly TypeOperationSync[] = [
   // Correction "visibilité croisée Factures/Historique entre postes"
   // (2026-10-27) — voir core/emplacementStore.ts.
   "emplacement",
+  // Phase 5 (référentiel commun), sous-phase 5.3 — voir
+  // core/referentielStore.ts. "sous_categorie" porte aussi, en
+  // sous-objet de son payload, la configuration d'unités autorisées —
+  // jamais un 4ᵉ type "unites" séparé.
+  "categorie",
+  "sous_categorie",
+  "sous_categorie_champ",
 ];
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -75,3 +75,53 @@ describe("ModeleRepository — vitrine du site (ordreVitrine), base réelle", ()
     expect(repository.findById(m2)!.ordreVitrine).toBeNull();
   });
 });
+
+describe("ModeleRepository — fondations quincaillerie Phase 2 (sousCategorieId, marque), base réelle", () => {
+  let db: Database.Database;
+  let repository: ModeleRepository;
+
+  beforeEach(() => {
+    db = ouvrirBaseDeTest();
+    repository = new ModeleRepository(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+  afterAll(() => {
+    if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
+  });
+
+  it("RÉTROCOMPATIBILITÉ : un modèle créé sans sousCategorieId/marque (comme avant cette évolution) a les deux champs null", () => {
+    const id = repository.create({ motif: "Marbre Blanc", type: "Faïence" });
+    const modele = repository.findById(id)!;
+    expect(modele.sousCategorieId).toBeNull();
+    expect(modele.marque).toBeNull();
+  });
+
+  it("persiste sousCategorieId/marque fournis à la création", () => {
+    const sousCategorieId = (db.prepare("SELECT id FROM sous_categories WHERE nom = 'Carreaux'").get() as { id: string }).id;
+    const id = repository.create({ motif: "Tuyau PVC", type: "Plomberie", sousCategorieId, marque: "Nicoll" });
+    const modele = repository.findById(id)!;
+    expect(modele.sousCategorieId).toBe(sousCategorieId);
+    expect(modele.marque).toBe("Nicoll");
+  });
+
+  it("update() modifie sousCategorieId/marque indépendamment des autres champs", () => {
+    const id = repository.create({ motif: "Marbre Blanc", type: "Faïence" });
+    const sousCategorieId = (db.prepare("SELECT id FROM sous_categories WHERE nom = 'Carreaux'").get() as { id: string }).id;
+
+    repository.update(id, { marque: "Somany" });
+    expect(repository.findById(id)!.marque).toBe("Somany");
+    expect(repository.findById(id)!.sousCategorieId).toBeNull(); // non touché.
+
+    repository.update(id, { sousCategorieId });
+    expect(repository.findById(id)!.sousCategorieId).toBe(sousCategorieId);
+    expect(repository.findById(id)!.marque).toBe("Somany"); // non touché.
+  });
+
+  it("marque vide/blanche est stockée comme null, jamais une chaîne vide", () => {
+    const id = repository.create({ motif: "Marbre Blanc", type: "Faïence", marque: "   " });
+    expect(repository.findById(id)!.marque).toBeNull();
+  });
+});

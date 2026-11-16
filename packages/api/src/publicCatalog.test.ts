@@ -3,6 +3,7 @@ import { createRouter } from "./index.js";
 import type { ApiRequest } from "./core/types.js";
 import { signerJwt } from "./core/jwt.js";
 import { initialiserStockageServeur, fermerStockageServeur } from "./core/storeServeur.js";
+import { reinitialiserLimitationPourTests } from "./core/rateLimiter.js";
 
 function req(overrides: Partial<ApiRequest>): ApiRequest {
   return { method: "GET", path: "/v1/public/health", headers: {}, query: {}, body: undefined, ...overrides };
@@ -28,6 +29,8 @@ describe("Catalogue public — GET /v1/public/catalog/models, /v1/public/promoti
     process.env["JWT_SIGNING_SECRET"] = SECRET_TEST;
     process.env["MAXI_EQUIP_ENV"] = "test";
     initialiserStockageServeur(":memory:");
+    // Phase 5 (référentiel commun), sous-phase 5.8, chantier E — voir le commentaire équivalent dans catalogSync.test.ts.
+    reinitialiserLimitationPourTests();
   });
   afterEach(() => {
     delete process.env["JWT_SIGNING_SECRET"];

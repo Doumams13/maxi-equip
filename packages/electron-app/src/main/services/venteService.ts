@@ -319,6 +319,8 @@ export class VenteService {
           fournisseur: ligne.fournisseurExterne,
           prixAchatExterne: ligne.prixAchatExterne,
           surfaceCartonM2,
+          uniteVente: produit.uniteVente,
+          caracteristiques: produit.caracteristiques,
           ...promotionInfo,
         });
         lignesFacture.push(ligneFacture);

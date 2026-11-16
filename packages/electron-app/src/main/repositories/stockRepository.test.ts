@@ -120,3 +120,70 @@ describe("StockRepository.appliquerValeursAbsolues (base réelle)", () => {
     expect(stocks.getQuantite(p1, akanda)).toBe(7);
   });
 });
+
+/**
+ * Fondations quincaillerie (Phase 4) — correction "le bilan additionne
+ * des quantités d'unités différentes" (40 cartons + 12 sacs = 52,
+ * résultat faux) : ventile le stock par unité de vente réelle du
+ * produit, jamais une somme brute entre produits d'unités distinctes.
+ */
+describe("StockRepository.getQuantitesParUniteParEmplacement — ventilation par unité (base réelle)", () => {
+  let db: Database.Database;
+  let produits: ProduitRepository;
+  let stocks: StockRepository;
+  let akebe: string;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    runMigrations(db);
+    produits = new ProduitRepository(db);
+    stocks = new StockRepository(db);
+    const emplacements = new EmplacementRepository(db);
+    bootstrapDefaultEmplacements(emplacements);
+    akebe = emplacements.list().filter((e) => !e.estPointDeVente)[0]!.id;
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("ventile par unité — jamais une somme unique mélangeant carton et sac", () => {
+    const pCarton = produits.create({ motif: "Marbre", type: "carrelage", taille: "60x60", tailleTri: 3600, reference: "MB-60", prix: 8000, seuilAlerte: 1 });
+    const pSac = produits.create({ motif: "Ciment", type: "quincaillerie", taille: "Sac 50kg", tailleTri: 0, reference: "CIM-50", prix: 6500, seuilAlerte: 1, uniteVente: "sac" });
+
+    stocks.applyDelta({ produitId: pCarton, emplacementId: akebe, delta: 40 });
+    stocks.applyDelta({ produitId: pSac, emplacementId: akebe, delta: 12 });
+
+    const resultat = stocks.getQuantitesParUniteParEmplacement(akebe);
+    expect(resultat).toEqual([
+      { unite: "carton", quantite: 40 },
+      { unite: "sac", quantite: 12 },
+    ]);
+  });
+
+  it("un produit sans uniteVente (carreau historique) est regroupé sous 'carton'", () => {
+    const p1 = produits.create({ motif: "Marbre", type: "carrelage", taille: "60x60", tailleTri: 3600, reference: "MB-60", prix: 8000, seuilAlerte: 1 });
+    const p2 = produits.create({ motif: "Grès", type: "carrelage", taille: "30x30", tailleTri: 900, reference: "GR-30", prix: 4000, seuilAlerte: 1 });
+    stocks.applyDelta({ produitId: p1, emplacementId: akebe, delta: 10 });
+    stocks.applyDelta({ produitId: p2, emplacementId: akebe, delta: 20 });
+
+    expect(stocks.getQuantitesParUniteParEmplacement(akebe)).toEqual([{ unite: "carton", quantite: 30 }]);
+  });
+
+  it("aucun stock à cet emplacement → tableau vide, jamais une exception", () => {
+    expect(stocks.getQuantitesParUniteParEmplacement(akebe)).toEqual([]);
+  });
+
+  it("isole correctement deux emplacements différents", () => {
+    const emplacements = new EmplacementRepository(db);
+    const akanda = emplacements.list().filter((e) => !e.estPointDeVente)[1]!.id;
+    const p1 = produits.create({ motif: "Marbre", type: "carrelage", taille: "60x60", tailleTri: 3600, reference: "MB-60", prix: 8000, seuilAlerte: 1 });
+
+    stocks.applyDelta({ produitId: p1, emplacementId: akebe, delta: 5 });
+    stocks.applyDelta({ produitId: p1, emplacementId: akanda, delta: 9 });
+
+    expect(stocks.getQuantitesParUniteParEmplacement(akebe)).toEqual([{ unite: "carton", quantite: 5 }]);
+    expect(stocks.getQuantitesParUniteParEmplacement(akanda)).toEqual([{ unite: "carton", quantite: 9 }]);
+  });
+});

@@ -21,6 +21,7 @@ import {
   Server,
   AlertTriangle,
   FileSignature,
+  Copy,
 } from "lucide-react";
 import logoUrl from "../assets/maxi-equip-logo.png";
 
@@ -39,6 +40,9 @@ export type ScreenId =
   | "utilisateurs"
   | "postes"
   | "bilan"
+  // Phase 5 (référentiel commun), sous-phase 5.7 — diagnostic des
+  // doublons potentiels, strictement consultatif.
+  | "doublons"
   // Correction TB "alertes de stock cliquable" (2026-11-13) — jamais une
   // entrée de menu (atteint uniquement en cliquant la section du
   // Dashboard), voir AppRoot.tsx (absent de `navItems`).
@@ -81,6 +85,7 @@ const ICONS: Record<ScreenId, typeof LayoutDashboard> = {
   utilisateurs: Users,
   postes: Server,
   bilan: ClipboardList,
+  doublons: Copy,
   alertesStock: AlertTriangle,
 };
 

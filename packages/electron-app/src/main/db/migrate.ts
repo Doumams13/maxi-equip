@@ -115,6 +115,34 @@ export function runMigrations(db: Database.Database): void {
   ajouterSurfaceCartonLignesFactureSiAbsente(db);
   // Système multiposte fiable (2026-10-28)
   elargirTypeNotificationsEtAjouterOrigineSiAbsent(db);
+  // Fondations quincaillerie (Phase 1)
+  ajouterUniteVenteEtCaracteristiquesProduitsSiAbsent(db);
+  ajouterUniteVenteEtCaracteristiquesLignesFactureSiAbsent(db);
+  creerTablesCategoriesSiAbsentes(db);
+  ajouterSousCategorieIdModelesSiAbsent(db);
+  migrerCarrelageVersCategorieParDefautSiAbsent(db);
+  creerTableSousCategorieChampsSiAbsente(db);
+  migrerModelesNonClassesVersDiversSiAbsent(db);
+  // Fondations quincaillerie (Phase 2)
+  ajouterMarqueModelesSiAbsent(db);
+  ajouterMarqueProduitsSiAbsent(db);
+  // Initialisation du catalogue quincaillerie (2026-11-15)
+  initialiserCategoriesQuincailleriePredefiniesSiAbsentes(db);
+  // Fondations quincaillerie (Phase 3 bis)
+  ajouterModelePhysiqueEtUnitesConfigureesSousCategoriesSiAbsent(db);
+  marquerCarreauxCommeModelePhysiqueSiAbsent(db);
+  creerTableSousCategorieUnitesSiAbsente(db);
+  ajouterProprietesChampsSousCategorieSiAbsentes(db);
+  // Phase 5 (référentiel commun), sous-phase 5.4 — prérequis de schéma
+  // pour la RÉCEPTION d'un tombstone de champ depuis un autre poste
+  // (voir SousCategorieChampRepository.creerDepuisServeur) : un champ
+  // supprimé ailleurs doit pouvoir être marqué comme tel localement sans
+  // jamais le supprimer physiquement (ce qui romprait l'upsert idempotent
+  // "si plus récent"). Ne change RIEN au mécanisme de suppression LOCALE
+  // (toujours un DELETE physique via `delete()`, réservé à la sous-phase
+  // 5.6) — ces colonnes ne sont écrites ici que par le chemin de
+  // réception, jamais par `delete()`.
+  ajouterColonnesDeletedSousCategorieChampsSiAbsentes(db);
   setSchemaVersion(db);
 }
 
@@ -265,6 +293,401 @@ function elargirTypeNotificationsEtAjouterOrigineSiAbsent(db: Database.Database)
 }
 
 /**
+ * Fondations quincaillerie (Phase 1) — NULL = "carton" (comportement
+ * historique carreaux, voir shared-types/produit.ts, uniteVenteEffective()).
+ */
+function ajouterUniteVenteEtCaracteristiquesProduitsSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(produits)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "unite_vente")) {
+    db.exec("ALTER TABLE produits ADD COLUMN unite_vente TEXT");
+  }
+  if (!columns.some((c) => c.name === "caracteristiques")) {
+    db.exec("ALTER TABLE produits ADD COLUMN caracteristiques TEXT");
+  }
+}
+
+/** Même évolution — snapshot sur lignes_facture, même principe que surface_carton_m2 (voir ajouterSurfaceCartonLignesFactureSiAbsente). */
+function ajouterUniteVenteEtCaracteristiquesLignesFactureSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(lignes_facture)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "unite_vente")) {
+    db.exec("ALTER TABLE lignes_facture ADD COLUMN unite_vente TEXT");
+  }
+  if (!columns.some((c) => c.name === "caracteristiques")) {
+    db.exec("ALTER TABLE lignes_facture ADD COLUMN caracteristiques TEXT");
+  }
+}
+
+/**
+ * Fondations quincaillerie (Phase 1) — `categories`/`sous_categories`
+ * créées ici en plus de schema.sql (même raison que
+ * `creerTableModelesProductsSiAbsente` : une base existante créée avant
+ * cette évolution n'a jamais vu ces tables).
+ */
+function creerTablesCategoriesSiAbsentes(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id            TEXT PRIMARY KEY,
+      nom           TEXT NOT NULL,
+      image_data_url TEXT,
+      ordre         INTEGER NOT NULL DEFAULT 0,
+      deleted_at    TEXT,
+      deleted_by    TEXT,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sous_categories (
+      id            TEXT PRIMARY KEY,
+      categorie_id  TEXT NOT NULL REFERENCES categories (id),
+      nom           TEXT NOT NULL,
+      ordre         INTEGER NOT NULL DEFAULT 0,
+      deleted_at    TEXT,
+      deleted_by    TEXT,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_sous_categories_categorie ON sous_categories (categorie_id);");
+}
+
+/**
+ * Même évolution — colonne ajoutée sur une base créée avant cette
+ * extension. Pose uniquement la colonne au niveau schéma : le type
+ * partagé `ModeleProduit` et `ModeleRepository` ne l'exposent pas
+ * encore (phase Catalogue, ultérieure) — le rattachement par défaut
+ * ci-dessous (`migrerCarrelageVersCategorieParDefautSiAbsent`) opère
+ * directement en SQL, sans dépendre du repository.
+ */
+function ajouterSousCategorieIdModelesSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(modeles_produit)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "sous_categorie_id")) {
+    db.exec("ALTER TABLE modeles_produit ADD COLUMN sous_categorie_id TEXT REFERENCES sous_categories (id)");
+  }
+}
+
+/**
+ * Décision explicite du client (fondations quincaillerie, Phase 1) :
+ * tout modèle existant doit être rattaché automatiquement à la
+ * catégorie "Carrelage et revêtements" à la migration — rien ne doit
+ * disparaître de la grille catalogue le premier jour. Idempotente : ne
+ * s'exécute qu'une seule fois (tant que la table `categories` est
+ * vide), ne touche ensuite plus jamais un modèle déjà classé
+ * manuellement (seuls les modèles avec `sous_categorie_id IS NULL` sont
+ * concernés, à chaque exécution — couvre aussi le cas d'un modèle créé
+ * entre deux migrations sans classement).
+ */
+function migrerCarrelageVersCategorieParDefautSiAbsent(db: Database.Database): void {
+  const aucuneCategorie = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n === 0;
+  if (!aucuneCategorie) return;
+
+  const now = new Date().toISOString();
+  const migrer = db.transaction(() => {
+    const categorieId = randomUUID();
+    db.prepare(
+      "INSERT INTO categories (id, nom, image_data_url, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, NULL, 0, NULL, NULL, ?, ?)"
+    ).run(categorieId, "Carrelage et revêtements", now, now);
+
+    const sousCategorieId = randomUUID();
+    db.prepare(
+      "INSERT INTO sous_categories (id, categorie_id, nom, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)"
+    ).run(sousCategorieId, categorieId, "Carreaux", now, now);
+
+    db.prepare("UPDATE modeles_produit SET sous_categorie_id = ? WHERE sous_categorie_id IS NULL").run(sousCategorieId);
+  });
+  migrer();
+}
+
+/**
+ * Fondations quincaillerie (Phase 1) — configuration pure (noms de
+ * champs suggérés par sous-catégorie), jamais de donnée transactionnelle
+ * — voir shared-types/caracteristiques.ts (fusionnerCaracteristiquesSuggerees).
+ */
+function creerTableSousCategorieChampsSiAbsente(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sous_categorie_champs (
+      id                TEXT PRIMARY KEY,
+      sous_categorie_id TEXT NOT NULL REFERENCES sous_categories (id),
+      nom               TEXT NOT NULL,
+      ordre             INTEGER NOT NULL DEFAULT 0,
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT NOT NULL
+    );
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_sous_categorie_champs_sous_categorie ON sous_categorie_champs (sous_categorie_id);");
+}
+
+/**
+ * Fondations quincaillerie (Phase 3 bis) — voir shared-types/categorie.ts
+ * (ModelePhysiqueSousCategorie, ConfigurationUnitesSousCategorie).
+ * `modele_physique` : NULL par défaut (comportement inchangé pour toute
+ * sous-catégorie existante) — posé explicitement à "carreau" uniquement
+ * par `marquerCarreauxCommeModelePhysiqueSiAbsent` ci-dessous, jamais
+ * déduit ici. `unites_configurees` : `0` par défaut, donc AUCUNE
+ * sous-catégorie existante ne devient restreinte par cette migration —
+ * les 6 unités restent proposées tant qu'un administrateur ne configure
+ * pas explicitement une restriction (voir SousCategorieUniteRepository).
+ */
+function ajouterModelePhysiqueEtUnitesConfigureesSousCategoriesSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(sous_categories)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "modele_physique")) {
+    db.exec("ALTER TABLE sous_categories ADD COLUMN modele_physique TEXT");
+  }
+  if (!columns.some((c) => c.name === "unites_configurees")) {
+    db.exec("ALTER TABLE sous_categories ADD COLUMN unites_configurees INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
+/**
+ * Pose `modele_physique = 'carreau'` UNIQUEMENT sur la sous-catégorie
+ * "Carreaux" déjà créée par `migrerCarrelageVersCategorieParDefautSiAbsent`
+ * — un set de donnée ciblé, jamais une déduction par nom à l'exécution
+ * de l'application (voir shared-types/categorie.ts). Exécutée à chaque
+ * migration (même filet de sécurité que `migrerModelesNonClassesVersDiversSiAbsent`),
+ * mais la clause `modele_physique IS NULL` la rend inoffensive au-delà
+ * de la première fois : elle ne touche plus jamais une ligne déjà posée
+ * (y compris si un administrateur la modifiait manuellement plus tard).
+ */
+function marquerCarreauxCommeModelePhysiqueSiAbsent(db: Database.Database): void {
+  db.prepare("UPDATE sous_categories SET modele_physique = 'carreau' WHERE nom = 'Carreaux' AND modele_physique IS NULL").run();
+}
+
+/**
+ * Fondations quincaillerie (Phase 3 bis) — voir shared-types/categorie.ts
+ * (ConfigurationUnitesSousCategorie). Une sous-catégorie absente de
+ * cette table n'est pas restreinte, voir domain/catalogue.
+ */
+function creerTableSousCategorieUnitesSiAbsente(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sous_categorie_unites (
+      sous_categorie_id TEXT NOT NULL REFERENCES sous_categories (id),
+      unite_vente       TEXT NOT NULL,
+      PRIMARY KEY (sous_categorie_id, unite_vente)
+    );
+  `);
+}
+
+/**
+ * Fondations quincaillerie (Phase 3 bis) — voir shared-types/categorie.ts
+ * (TypeChampCaracteristique, RoleChampCaracteristique). Toute ligne
+ * déjà existante (simple nom suggéré) prend les valeurs par défaut
+ * (`type:'texte'`, `obligatoire:0`, le reste NULL) — aucune perte,
+ * aucun comportement changé pour les champs déjà configurés.
+ */
+function ajouterProprietesChampsSousCategorieSiAbsentes(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(sous_categorie_champs)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "type")) {
+    db.exec("ALTER TABLE sous_categorie_champs ADD COLUMN type TEXT NOT NULL DEFAULT 'texte'");
+  }
+  if (!columns.some((c) => c.name === "obligatoire")) {
+    db.exec("ALTER TABLE sous_categorie_champs ADD COLUMN obligatoire INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!columns.some((c) => c.name === "valeurs_autorisees")) {
+    db.exec("ALTER TABLE sous_categorie_champs ADD COLUMN valeurs_autorisees TEXT");
+  }
+  if (!columns.some((c) => c.name === "unite_mesure")) {
+    db.exec("ALTER TABLE sous_categorie_champs ADD COLUMN unite_mesure TEXT");
+  }
+  if (!columns.some((c) => c.name === "role")) {
+    db.exec("ALTER TABLE sous_categorie_champs ADD COLUMN role TEXT");
+  }
+}
+
+/**
+ * Phase 5 (référentiel commun), sous-phase 5.4 — voir le commentaire
+ * d'appel dans `runMigrations` ci-dessus pour le raisonnement complet.
+ * Idempotente comme toutes les migrations de ce fichier : vérifie
+ * l'absence de la colonne avant de l'ajouter, jamais un doublon de
+ * migration si elle existe déjà.
+ */
+function ajouterColonnesDeletedSousCategorieChampsSiAbsentes(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(sous_categorie_champs)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "deleted_at")) {
+    db.exec("ALTER TABLE sous_categorie_champs ADD COLUMN deleted_at TEXT");
+  }
+  if (!columns.some((c) => c.name === "deleted_by")) {
+    db.exec("ALTER TABLE sous_categorie_champs ADD COLUMN deleted_by TEXT");
+  }
+}
+
+/**
+ * Filet de sécurité (fondations quincaillerie, Phase 1) : une fois la
+ * sous-catégorie rendue obligatoire à la création d'un modèle (phase
+ * Catalogue, ultérieure), ce cas ne devrait plus jamais se produire par
+ * le flux normal de l'application. Reste néanmoins exécutée à CHAQUE
+ * migration (contrairement à `migrerCarrelageVersCategorieParDefautSiAbsent`,
+ * qui ne s'exécute qu'une seule fois) : filet de sécurité réel pour toute
+ * donnée qui échapperait à cette règle (import, correction manuelle,
+ * ancien chemin de code non prévu) — décision explicite du client :
+ * "les produits non classés iront directement dans divers", jamais
+ * silencieusement invisibles du catalogue.
+ */
+function migrerModelesNonClassesVersDiversSiAbsent(db: Database.Database): void {
+  const nonClasses = db.prepare("SELECT COUNT(*) as n FROM modeles_produit WHERE sous_categorie_id IS NULL AND deleted_at IS NULL").get() as { n: number };
+  if (nonClasses.n === 0) return;
+
+  const now = new Date().toISOString();
+  const migrer = db.transaction(() => {
+    let categorieDivers = db.prepare("SELECT id FROM categories WHERE nom = ? AND deleted_at IS NULL").get("Divers") as { id: string } | undefined;
+    if (!categorieDivers) {
+      const id = randomUUID();
+      db.prepare(
+        "INSERT INTO categories (id, nom, image_data_url, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, 'Divers', NULL, 999, NULL, NULL, ?, ?)"
+      ).run(id, now, now);
+      categorieDivers = { id };
+    }
+
+    let sousCategorieNonClasse = db
+      .prepare("SELECT id FROM sous_categories WHERE categorie_id = ? AND nom = ? AND deleted_at IS NULL")
+      .get(categorieDivers.id, "Non classé") as { id: string } | undefined;
+    if (!sousCategorieNonClasse) {
+      const id = randomUUID();
+      db.prepare(
+        "INSERT INTO sous_categories (id, categorie_id, nom, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, 'Non classé', 999, NULL, NULL, ?, ?)"
+      ).run(id, categorieDivers.id, now, now);
+      sousCategorieNonClasse = { id };
+    }
+
+    db.prepare("UPDATE modeles_produit SET sous_categorie_id = ? WHERE sous_categorie_id IS NULL").run(sousCategorieNonClasse.id);
+  });
+  migrer();
+}
+
+/** Fondations quincaillerie (Phase 2) — colonne ajoutée sur une base créée avant cette extension. */
+function ajouterMarqueModelesSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(modeles_produit)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "marque")) {
+    db.exec("ALTER TABLE modeles_produit ADD COLUMN marque TEXT");
+  }
+}
+
+/** Même évolution — dénormalisé sur produits, même principe que motif/type. */
+function ajouterMarqueProduitsSiAbsent(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(produits)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "marque")) {
+    db.exec("ALTER TABLE produits ADD COLUMN marque TEXT");
+  }
+}
+
+/**
+ * Les 20 catégories "visuelles" de la version 0.11.1 (voir
+ * `packages/electron-app/src/renderer/app/screens/catalogueImages.ts`,
+ * mêmes noms, même ordre) et leurs sous-catégories — reprises TELLES
+ * QUELLES du prototype (`D:\Devellopement\Test\maxi-equip\packages\
+ * electron-app\src\main\maintenance\seedCategoriesCatalogue.ts`), jamais
+ * inventées ici. Les images ne sont PAS stockées en base : le Renderer
+ * les associe déjà par nom (`illustrationCategorie`), donc aucune donnée
+ * dupliquée. "Carreaux" (sous "Carrelage et revêtements") et "Non classé"
+ * (sous "Divers") existent déjà par ailleurs (voir
+ * `migrerCarrelageVersCategorieParDefautSiAbsent` /
+ * `migrerModelesNonClassesVersDiversSiAbsent`) et ne sont donc jamais
+ * repris dans les listes ci-dessous.
+ */
+const CATEGORIES_QUINCAILLERIE_PREDEFINIES: { nom: string; sousCats: string[] }[] = [
+  { nom: "Carrelage et revêtements", sousCats: ["Revêtements muraux", "Colles et joints carrelage", "Plinthes et profilés"] },
+  { nom: "Matériaux de construction", sousCats: ["Ciment", "Sable et graviers", "Parpaings et briques", "Chaux et enduits", "Fers à béton"] },
+  { nom: "Sanitaires et toilettes", sousCats: ["Toilettes", "Lavabos", "Éviers", "Douches", "Accessoires"] },
+  { nom: "Plomberie et évacuation", sousCats: ["Tuyaux", "Raccords", "Colles et accessoires", "Siphons et évacuations", "Robinetterie", "Réservoirs et citernes", "Pompes", "Joints et étanchéité"] },
+  { nom: "Électricité", sousCats: ["Câbles et fils", "Prises et interrupteurs", "Disjoncteurs et tableaux", "Goulottes et gaines", "Domotique"] },
+  { nom: "Éclairage", sousCats: ["Ampoules et tubes", "Luminaires intérieurs", "Projecteurs extérieurs", "Rubans LED"] },
+  { nom: "Peinture et décoration", sousCats: ["Peintures", "Enduits et sous-couches", "Outils d'application", "Nuanciers et accessoires"] },
+  { nom: "Bois et menuiserie", sousCats: ["Bois de charpente", "Panneaux et contreplaqués", "Quincaillerie bois", "Moulures et baguettes"] },
+  { nom: "Couverture et toiture", sousCats: ["Tuiles", "Tôles et bacs acier", "Gouttières et descentes", "Accessoires de toiture"] },
+  { nom: "Visserie et fixation", sousCats: ["Vis", "Boulons et écrous", "Chevilles", "Rivets", "Colliers de serrage"] },
+  { nom: "Outillage manuel", sousCats: ["Outils de frappe", "Outils de serrage", "Outils de coupe", "Mesure et traçage"] },
+  { nom: "Outillage électrique", sousCats: ["Perceuses et visseuses", "Meuleuses", "Scies électriques", "Accessoires et batteries"] },
+  { nom: "Accessoires de pose", sousCats: ["Croisillons et cales", "Niveaux et équerres", "Spatules et taloches", "Mélangeurs et auges"] },
+  { nom: "Étanchéité et isolation", sousCats: ["Isolants thermiques", "Membranes d'étanchéité", "Mastics et silicones", "Mousses expansives"] },
+  { nom: "Équipements de protection", sousCats: ["Casques", "Gants", "Chaussures de sécurité", "Lunettes et protections auditives"] },
+  { nom: "Jardinage et espaces extérieurs", sousCats: ["Arrosage", "Outillage de jardin", "Mobilier extérieur", "Brouettes et transport"] },
+  { nom: "Portes et fenêtres", sousCats: ["Portes intérieures", "Portes extérieures", "Fenêtres", "Quincaillerie et poignées"] },
+  { nom: "Chimie du bâtiment", sousCats: ["Mortiers et colles", "Résines et silicones", "Produits de nettoyage", "Adjuvants béton"] },
+  { nom: "Climatisation et ventilation", sousCats: ["Climatiseurs", "Ventilateurs", "Unités extérieures", "Accessoires d'installation"] },
+  { nom: "Divers", sousCats: ["Outillage divers", "Bidons et contenants", "Échelles et escabeaux", "Accessoires divers"] },
+];
+
+/**
+ * Champs suggérés d'exemple — repris TELS QUELS du prototype
+ * (`seedChampsExemplesCatalogue.ts`). Volontairement limité à ces 5
+ * sous-catégories (jamais étendu par supposition) : le client reste
+ * libre d'ajouter les autres depuis "Gérer les catégories".
+ */
+const CHAMPS_SUGGERES_QUINCAILLERIE_PREDEFINIS: { categorie: string; sousCategorie: string; champs: string[] }[] = [
+  { categorie: "Carrelage et revêtements", sousCategorie: "Carreaux", champs: ["Matière", "Finition", "Couleur"] },
+  { categorie: "Carrelage et revêtements", sousCategorie: "Colles et joints carrelage", champs: ["Type de produit", "Couleur", "Poids du conditionnement", "Usage"] },
+  { categorie: "Plomberie et évacuation", sousCategorie: "Tuyaux", champs: ["Matière", "Diamètre", "Longueur", "Pression nominale"] },
+  { categorie: "Électricité", sousCategorie: "Câbles et fils", champs: ["Type", "Section", "Nombre de conducteurs"] },
+  { categorie: "Peinture et décoration", sousCategorie: "Peintures", champs: ["Couleur", "Finition", "Volume", "Rendement"] },
+];
+
+/**
+ * Initialise le catalogue quincaillerie : crée les 20 catégories
+ * ci-dessus si elles n'existent pas déjà (par nom, jamais par doublon),
+ * leurs sous-catégories prédéfinies, puis les champs suggérés
+ * correspondants. Exécutée à CHAQUE migration (comme
+ * `migrerModelesNonClassesVersDiversSiAbsent`) — jamais gardée par un
+ * "une seule fois" global, pour rattraper aussi une base déjà existante
+ * qui n'a encore aucune de ces catégories. Idempotente à trois niveaux
+ * (catégorie / sous-catégorie / champ) : une entité déjà présente (même
+ * créée manuellement par l'utilisateur sous le même nom) n'est jamais
+ * recréée, jamais renommée, jamais réordonnée — seule l'absence déclenche
+ * une création.
+ */
+function initialiserCategoriesQuincailleriePredefiniesSiAbsentes(db: Database.Database): void {
+  const now = new Date().toISOString();
+
+  const initialiser = db.transaction(() => {
+    for (const [index, def] of CATEGORIES_QUINCAILLERIE_PREDEFINIES.entries()) {
+      const categorieExistante = db.prepare("SELECT id FROM categories WHERE nom = ? AND deleted_at IS NULL").get(def.nom) as
+        | { id: string }
+        | undefined;
+      let categorieId: string;
+      if (categorieExistante) {
+        categorieId = categorieExistante.id;
+      } else {
+        categorieId = randomUUID();
+        db.prepare(
+          "INSERT INTO categories (id, nom, image_data_url, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, NULL, ?, NULL, NULL, ?, ?)"
+        ).run(categorieId, def.nom, index, now, now);
+      }
+
+      for (const [sousIndex, nomSousCat] of def.sousCats.entries()) {
+        const sousCategorieExistante = db
+          .prepare("SELECT id FROM sous_categories WHERE categorie_id = ? AND nom = ? AND deleted_at IS NULL")
+          .get(categorieId, nomSousCat);
+        if (sousCategorieExistante) continue;
+        db.prepare(
+          "INSERT INTO sous_categories (id, categorie_id, nom, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)"
+        ).run(randomUUID(), categorieId, nomSousCat, sousIndex, now, now);
+      }
+    }
+
+    for (const def of CHAMPS_SUGGERES_QUINCAILLERIE_PREDEFINIS) {
+      const categorie = db.prepare("SELECT id FROM categories WHERE nom = ? AND deleted_at IS NULL").get(def.categorie) as
+        | { id: string }
+        | undefined;
+      if (!categorie) continue;
+      const sousCategorie = db
+        .prepare("SELECT id FROM sous_categories WHERE categorie_id = ? AND nom = ? AND deleted_at IS NULL")
+        .get(categorie.id, def.sousCategorie) as { id: string } | undefined;
+      if (!sousCategorie) continue;
+
+      for (const [ordre, nomChamp] of def.champs.entries()) {
+        const champExistant = db
+          .prepare("SELECT id FROM sous_categorie_champs WHERE sous_categorie_id = ? AND nom = ?")
+          .get(sousCategorie.id, nomChamp);
+        if (champExistant) continue;
+        db.prepare(
+          "INSERT INTO sous_categorie_champs (id, sous_categorie_id, nom, ordre, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(randomUUID(), sousCategorie.id, nomChamp, ordre, now, now);
+      }
+    }
+  });
+
+  initialiser();
+}
+
+/**
  * Correction "Workflow réel des demandes" — historique de suivi
  * (Partie 5/6/7) : chaque changement de statut peut porter un
  * commentaire libre, conservé pour comprendre plus tard ce qui a déjà
@@ -330,7 +753,7 @@ function ajouterSourceEntityIdDemandesSiAbsent(db: Database.Database): void {
  * plus tard, par la restauration (Phase 3.9) pour valider la
  * compatibilité d'une sauvegarde avant de l'appliquer.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 9;
 
 function setSchemaVersion(db: Database.Database): void {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);

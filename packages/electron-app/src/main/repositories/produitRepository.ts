@@ -7,6 +7,7 @@ interface ProduitRow {
   modele_id: string | null;
   motif: string;
   type: string;
+  marque: string | null;
   taille: string;
   taille_tri: number;
   largeur: number | null;
@@ -15,6 +16,8 @@ interface ProduitRow {
   prix: number;
   carreaux_par_carton: number | null;
   seuil_alerte: number;
+  unite_vente: string | null;
+  caracteristiques: string | null;
   deleted_at: string | null;
   deleted_by: string | null;
   created_at: string;
@@ -27,6 +30,7 @@ function rowToProduit(row: ProduitRow): Produit {
     modeleId: row.modele_id,
     motif: row.motif,
     type: row.type,
+    marque: row.marque,
     taille: row.taille,
     tailleTri: row.taille_tri,
     largeur: row.largeur,
@@ -35,6 +39,8 @@ function rowToProduit(row: ProduitRow): Produit {
     prix: row.prix,
     carreauxParCarton: row.carreaux_par_carton,
     seuilAlerte: row.seuil_alerte,
+    uniteVente: row.unite_vente as Produit["uniteVente"],
+    caracteristiques: row.caracteristiques,
     deletedAt: row.deleted_at,
     deletedBy: row.deleted_by,
     createdAt: row.created_at,
@@ -122,6 +128,20 @@ export class ProduitRepository {
     ).map((r) => r.taille);
   }
 
+  /** Recherche globale catalogue (motif/référence/marque) — fondations quincaillerie Phase 2, voir catalogue:rechercherGlobal. */
+  listParMotifReferenceOuMarque(motifLike: string): Produit[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM produits
+         WHERE deleted_at IS NULL
+           AND (motif LIKE ? COLLATE NOCASE OR reference LIKE ? COLLATE NOCASE OR marque LIKE ? COLLATE NOCASE)
+         ORDER BY motif
+         LIMIT 50`
+      )
+      .all(motifLike, motifLike, motifLike) as ProduitRow[];
+    return rows.map(rowToProduit);
+  }
+
   /** Variantes d'un modèle donné (actives uniquement). */
   listByModele(modeleId: string): Produit[] {
     const rows = this.db
@@ -134,6 +154,7 @@ export class ProduitRepository {
     modeleId?: string | null;
     motif: string;
     type: string;
+    marque?: string | null;
     taille: string;
     tailleTri: number;
     largeur?: number | null;
@@ -142,19 +163,22 @@ export class ProduitRepository {
     prix: number;
     carreauxParCarton?: number | null;
     seuilAlerte: number;
+    uniteVente?: Produit["uniteVente"];
+    caracteristiques?: string | null;
   }): string {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO produits (id, modele_id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, carreaux_par_carton, seuil_alerte, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO produits (id, modele_id, motif, type, marque, taille, taille_tri, largeur, hauteur, reference, prix, carreaux_par_carton, seuil_alerte, unite_vente, caracteristiques, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
         input.modeleId ?? null,
         input.motif,
         input.type,
+        input.marque ?? null,
         input.taille,
         input.tailleTri,
         input.largeur ?? null,
@@ -163,6 +187,8 @@ export class ProduitRepository {
         input.prix,
         input.carreauxParCarton ?? null,
         input.seuilAlerte,
+        input.uniteVente ?? null,
+        input.caracteristiques ?? null,
         now,
         now
       );
@@ -192,6 +218,10 @@ export class ProduitRepository {
     hauteur: number | null;
     reference: string;
     prix: number;
+    // Phase 5 (référentiel commun), sous-phase 5.5 — absents (ancien serveur/ancien payload) traités comme null, jamais inventés.
+    uniteVente?: Produit["uniteVente"];
+    caracteristiques?: string | null;
+    marque?: string | null;
   }): boolean {
     let motif: string;
     let type: string;
@@ -213,23 +243,57 @@ export class ProduitRepository {
     }
 
     const now = new Date().toISOString();
+    const uniteVente = produit.uniteVente ?? null;
+    const caracteristiques = produit.caracteristiques ?? null;
+    const marque = produit.marque ?? null;
     try {
       const existe = this.db.prepare("SELECT id FROM produits WHERE id = ?").get(produit.id) as { id: string } | undefined;
       if (existe) {
         this.db
           .prepare(
-            `UPDATE produits SET modele_id = ?, motif = ?, type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, updated_at = ?
+            `UPDATE produits SET modele_id = ?, motif = ?, type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, unite_vente = ?, caracteristiques = ?, marque = ?, updated_at = ?
              WHERE id = ?`
           )
-          .run(produit.modeleId, motif, type, produit.taille, produit.tailleTri, produit.largeur, produit.hauteur, produit.reference, produit.prix, now, produit.id);
+          .run(
+            produit.modeleId,
+            motif,
+            type,
+            produit.taille,
+            produit.tailleTri,
+            produit.largeur,
+            produit.hauteur,
+            produit.reference,
+            produit.prix,
+            uniteVente,
+            caracteristiques,
+            marque,
+            now,
+            produit.id
+          );
         return true;
       }
       this.db
         .prepare(
-          `INSERT INTO produits (id, modele_id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, carreaux_par_carton, seuil_alerte, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)`
+          `INSERT INTO produits (id, modele_id, motif, type, taille, taille_tri, largeur, hauteur, reference, prix, carreaux_par_carton, seuil_alerte, unite_vente, caracteristiques, marque, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?)`
         )
-        .run(produit.id, produit.modeleId, motif, type, produit.taille, produit.tailleTri, produit.largeur, produit.hauteur, produit.reference, produit.prix, now, now);
+        .run(
+          produit.id,
+          produit.modeleId,
+          motif,
+          type,
+          produit.taille,
+          produit.tailleTri,
+          produit.largeur,
+          produit.hauteur,
+          produit.reference,
+          produit.prix,
+          uniteVente,
+          caracteristiques,
+          marque,
+          now,
+          now
+        );
       return true;
     } catch {
       // Violation de clé étrangère (ex. modele_id résolu localement mais
@@ -244,6 +308,7 @@ export class ProduitRepository {
     input: {
       motif?: string;
       type: string;
+      marque?: string | null;
       taille: string;
       tailleTri: number;
       largeur?: number | null;
@@ -252,6 +317,8 @@ export class ProduitRepository {
       prix: number;
       carreauxParCarton?: number | null;
       seuilAlerte: number;
+      uniteVente?: Produit["uniteVente"];
+      caracteristiques?: string | null;
     }
   ): void {
     const now = new Date().toISOString();
@@ -259,18 +326,49 @@ export class ProduitRepository {
       this.db
         .prepare(
           `UPDATE produits
-           SET motif = ?, type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, carreaux_par_carton = ?, seuil_alerte = ?, updated_at = ?
+           SET motif = ?, type = ?, marque = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, carreaux_par_carton = ?, seuil_alerte = ?, unite_vente = ?, caracteristiques = ?, updated_at = ?
            WHERE id = ? AND deleted_at IS NULL`
         )
-        .run(input.motif, input.type, input.taille, input.tailleTri, input.largeur ?? null, input.hauteur ?? null, input.reference, input.prix, input.carreauxParCarton ?? null, input.seuilAlerte, now, id);
+        .run(
+          input.motif,
+          input.type,
+          input.marque ?? null,
+          input.taille,
+          input.tailleTri,
+          input.largeur ?? null,
+          input.hauteur ?? null,
+          input.reference,
+          input.prix,
+          input.carreauxParCarton ?? null,
+          input.seuilAlerte,
+          input.uniteVente ?? null,
+          input.caracteristiques ?? null,
+          now,
+          id
+        );
     } else {
       this.db
         .prepare(
           `UPDATE produits
-           SET type = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, carreaux_par_carton = ?, seuil_alerte = ?, updated_at = ?
+           SET type = ?, marque = ?, taille = ?, taille_tri = ?, largeur = ?, hauteur = ?, reference = ?, prix = ?, carreaux_par_carton = ?, seuil_alerte = ?, unite_vente = ?, caracteristiques = ?, updated_at = ?
            WHERE id = ? AND deleted_at IS NULL`
         )
-        .run(input.type, input.taille, input.tailleTri, input.largeur ?? null, input.hauteur ?? null, input.reference, input.prix, input.carreauxParCarton ?? null, input.seuilAlerte, now, id);
+        .run(
+          input.type,
+          input.marque ?? null,
+          input.taille,
+          input.tailleTri,
+          input.largeur ?? null,
+          input.hauteur ?? null,
+          input.reference,
+          input.prix,
+          input.carreauxParCarton ?? null,
+          input.seuilAlerte,
+          input.uniteVente ?? null,
+          input.caracteristiques ?? null,
+          now,
+          id
+        );
     }
   }
 

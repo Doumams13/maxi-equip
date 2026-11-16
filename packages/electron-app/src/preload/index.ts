@@ -135,6 +135,11 @@ export interface VarianteProduit {
   prix: number;
   carreauxParCarton: number | null;
   seuilAlerte: number;
+  /** Fondations quincaillerie (Phase 2) — `null`/absent = "carton" (voir shared-types, uniteVenteEffective). */
+  uniteVente?: import("@maxi-equip/shared-types").UniteVente | null;
+  /** Paires clé/valeur encodées en JSON — voir shared-types/caracteristiques.ts (parseCaracteristiques). */
+  caracteristiques?: string | null;
+  marque?: string | null;
   deletedAt: string | null;
   stockTotal: number;
 }
@@ -144,10 +149,16 @@ export interface ModeleProduitAvecVariantes {
   motif: string;
   type: string;
   ordreVitrine: number | null;
+  /** Fondations quincaillerie (Phase 2) — `null` = non classé (ne devrait plus survenir en pratique après migration). */
+  sousCategorieId?: string | null;
+  marque?: string | null;
   deletedAt: string | null;
   imagePrincipaleDataUrl: string | null;
   nombreImages: number;
   variantes: VarianteProduit[];
+  // Phase 5 (référentiel commun), sous-phase 5.6 — badge de classification orpheline, calculé à la lecture (jamais une colonne persistée).
+  sousCategorieSupprimee: boolean;
+  categorieSupprimee: boolean;
 }
 
 export interface VarianteInput {
@@ -159,6 +170,87 @@ export interface VarianteInput {
   prix: number;
   carreauxParCarton?: number | null;
   seuilAlerte?: number;
+  uniteVente?: import("@maxi-equip/shared-types").UniteVente | null;
+  caracteristiques?: string | null;
+}
+
+// --- Catégories / sous-catégories / champs suggérés (fondations quincaillerie, Phase 2) ---
+// Jamais synchronisées au serveur (décision explicite, locales à ce poste pour cette phase).
+export interface Categorie {
+  id: string;
+  nom: string;
+  imageDataUrl: string | null;
+  ordre: number;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  nombreProduits: number;
+}
+
+export interface SousCategorie {
+  id: string;
+  categorieId: string;
+  nom: string;
+  ordre: number;
+  // Fondations quincaillerie (Phase 3 bis) — voir shared-types/categorie.ts.
+  modelePhysique: import("@maxi-equip/shared-types").ModelePhysiqueSousCategorie | null;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  nombreProduits: number;
+}
+
+export interface SousCategorieChamp {
+  id: string;
+  sousCategorieId: string;
+  nom: string;
+  // Fondations quincaillerie (Phase 3 bis) — voir shared-types/categorie.ts.
+  type: import("@maxi-equip/shared-types").TypeChampCaracteristique;
+  obligatoire: boolean;
+  valeursAutorisees: string[] | null;
+  uniteMesure: string | null;
+  role: import("@maxi-equip/shared-types").RoleChampCaracteristique | null;
+  ordre: number;
+  // Phase 5 (référentiel commun), sous-phase 5.6 — tombstone, jamais une suppression physique.
+  deletedAt: string | null;
+  deletedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RechercheGlobaleResultat {
+  categories: { id: string; nom: string }[];
+  produits: { id: string; modeleId: string | null; motif: string; reference: string; taille: string }[];
+}
+
+/**
+ * Phase 5 (référentiel commun), sous-phase 5.7 — diagnostic des doublons
+ * potentiels, strictement en lecture seule. Voir `catalogue:diagnostiquerDoublonsReferentiel`
+ * (ipc/metier.ts) pour les règles exactes de rapprochement.
+ */
+export interface OccurrenceDoublonCategorie {
+  id: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+export interface OccurrenceDoublonSousCategorie extends OccurrenceDoublonCategorie {
+  categorieParenteId: string;
+  categorieParenteNom: string | null;
+}
+export interface OccurrenceDoublonModele extends OccurrenceDoublonCategorie {
+  type: string;
+}
+export interface OccurrenceDoublonProduit extends OccurrenceDoublonCategorie {
+  modeleId: string | null;
+  modeleMotif: string | null;
+  taille: string;
+  prix: number;
+}
+export interface DiagnosticDoublonsReferentiel {
+  categories: { typeEntite: "categorie"; nom: string; occurrences: OccurrenceDoublonCategorie[] }[];
+  sousCategories: { typeEntite: "sous_categorie"; nom: string; occurrences: OccurrenceDoublonSousCategorie[] }[];
+  modeles: { typeEntite: "modele"; nom: string; occurrences: OccurrenceDoublonModele[] }[];
+  produits: { typeEntite: "produit"; nom: string; occurrences: OccurrenceDoublonProduit[] }[];
 }
 
 export interface ImageAffichable {
@@ -445,7 +537,7 @@ const maxiEquipApi = {
   },
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
-  genererFacturePdf: (factureId: string, format?: "a4" | "a5"): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
+  genererFacturePdf: (factureId: string, format?: "a4" | "a4-paysage"): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererPdf", factureId, format),
   genererDocumentInternePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererDocumentInternePdf", factureId),
@@ -458,8 +550,12 @@ const maxiEquipApi = {
         success: true;
         ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
         topProduits: { label: string; quantite: number }[];
-        mouvements: { totalEntrees: number; totalSorties: number };
-        stockParEmplacement: { emplacementId: string; nom: string; cartons: number }[];
+        // Fondations quincaillerie (Phase 4) — ventilé par unité, jamais un total unique mélangeant des unités différentes.
+        mouvements: {
+          entrees: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[];
+          sorties: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[];
+        };
+        stockParEmplacement: { emplacementId: string; nom: string; parUnite: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[] }[];
         produitsSousSeuilCount: number;
         promotionsActivesPendantPeriode: number;
         depots: { id: string; nom: string }[];
@@ -488,8 +584,11 @@ const maxiEquipApi = {
     donnees: {
       ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
       topProduits: { label: string; quantite: number }[];
-      mouvements: { totalEntrees: number; totalSorties: number };
-      stockParEmplacement: { emplacementId: string; nom: string; cartons: number }[];
+      mouvements: {
+        entrees: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[];
+        sorties: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[];
+      };
+      stockParEmplacement: { emplacementId: string; nom: string; parUnite: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[] }[];
       produitsSousSeuilCount: number;
       promotionsActivesPendantPeriode: number;
       depots: { id: string; nom: string }[];
@@ -692,11 +791,13 @@ const maxiEquipApi = {
     variantes: VarianteInput[];
     stagedImages?: string[];
     principaleStagingId?: string | null;
+    sousCategorieId?: string | null;
+    marque?: string | null;
   }): Promise<{ success: boolean; id?: string; message?: string }> =>
     ipcRenderer.invoke("catalogue:creerModele", input),
   modifierModeleProduit: (
     modeleId: string,
-    input: { motif?: string; type?: string }
+    input: { motif?: string; type?: string; sousCategorieId?: string | null; marque?: string | null }
   ): Promise<{ success: boolean; message?: string }> =>
     ipcRenderer.invoke("catalogue:modifierModele", modeleId, input),
   supprimerModeleProduit: (modeleId: string): Promise<{ success: boolean; message?: string }> =>
@@ -713,6 +814,61 @@ const maxiEquipApi = {
     ipcRenderer.invoke("catalogue:modifierVariante", varianteId, input),
   supprimerVariante: (varianteId: string): Promise<{ success: boolean; message?: string }> =>
     ipcRenderer.invoke("catalogue:supprimerVariante", varianteId),
+
+  // --- Catégories / sous-catégories / champs suggérés (fondations quincaillerie, Phase 2) ---
+  listerCategories: (): Promise<Categorie[]> => ipcRenderer.invoke("catalogue:listCategories"),
+  creerCategorie: (input: { nom: string; imageDataUrl?: string | null; ordre?: number }): Promise<{ success: boolean; id?: string; message?: string }> =>
+    ipcRenderer.invoke("catalogue:creerCategorie", input),
+  modifierCategorie: (id: string, input: { nom?: string; imageDataUrl?: string | null; ordre?: number }): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("catalogue:modifierCategorie", id, input),
+  supprimerCategorie: (id: string): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("catalogue:supprimerCategorie", id),
+  listerSousCategories: (categorieId?: string): Promise<SousCategorie[]> => ipcRenderer.invoke("catalogue:listSousCategories", categorieId),
+  creerSousCategorie: (input: { categorieId: string; nom: string; ordre?: number }): Promise<{ success: boolean; id?: string; message?: string }> =>
+    ipcRenderer.invoke("catalogue:creerSousCategorie", input),
+  modifierSousCategorie: (id: string, input: { nom?: string; ordre?: number }): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("catalogue:modifierSousCategorie", id, input),
+  supprimerSousCategorie: (id: string): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("catalogue:supprimerSousCategorie", id),
+  listerChampsSousCategories: (): Promise<Record<string, SousCategorieChamp[]>> => ipcRenderer.invoke("catalogue:listChampsSousCategories"),
+  creerChampSousCategorie: (input: {
+    sousCategorieId: string;
+    nom: string;
+    // Fondations quincaillerie (Phase 3 bis).
+    type?: import("@maxi-equip/shared-types").TypeChampCaracteristique;
+    obligatoire?: boolean;
+    valeursAutorisees?: string[] | null;
+    uniteMesure?: string | null;
+    role?: import("@maxi-equip/shared-types").RoleChampCaracteristique | null;
+  }): Promise<{ success: boolean; id?: string; message?: string }> => ipcRenderer.invoke("catalogue:creerChampSousCategorie", input),
+  modifierChampSousCategorie: (
+    id: string,
+    input: {
+      nom?: string;
+      type?: import("@maxi-equip/shared-types").TypeChampCaracteristique;
+      obligatoire?: boolean;
+      valeursAutorisees?: string[] | null;
+      uniteMesure?: string | null;
+      role?: import("@maxi-equip/shared-types").RoleChampCaracteristique | null;
+      ordre?: number;
+    }
+  ): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("catalogue:modifierChampSousCategorie", id, input),
+  // Phase 5 (référentiel commun), sous-phase 5.6 — `confirmationObligatoire` n'est exigé (et vérifié côté main) que si le champ est obligatoire ; `requiresConfirmation` signale ce refus à l'appelant, pour afficher l'avertissement renforcé avant de rappeler avec `true`.
+  supprimerChampSousCategorie: (id: string, confirmationObligatoire?: boolean): Promise<{ success: boolean; message?: string; requiresConfirmation?: boolean }> =>
+    ipcRenderer.invoke("catalogue:supprimerChampSousCategorie", id, confirmationObligatoire),
+
+  // Fondations quincaillerie (Phase 3 bis) — unités de vente autorisées par sous-catégorie.
+  listerUnitesSousCategories: (): Promise<Record<string, import("@maxi-equip/shared-types").ConfigurationUnitesSousCategorie>> =>
+    ipcRenderer.invoke("catalogue:listUnitesSousCategories"),
+  definirUnitesSousCategorie: (
+    sousCategorieId: string,
+    unites: import("@maxi-equip/shared-types").UniteVente[]
+  ): Promise<{ success: boolean; message?: string }> => ipcRenderer.invoke("catalogue:definirUnitesSousCategorie", sousCategorieId, unites),
+  reinitialiserUnitesSousCategorie: (sousCategorieId: string): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke("catalogue:reinitialiserUnitesSousCategorie", sousCategorieId),
+
+  rechercherGlobalCatalogue: (terme: string): Promise<RechercheGlobaleResultat> => ipcRenderer.invoke("catalogue:rechercherGlobal", terme),
+
+  // Phase 5 (référentiel commun), sous-phase 5.7 — diagnostic des doublons, strictement en lecture seule.
+  diagnostiquerDoublonsReferentiel: (): Promise<DiagnosticDoublonsReferentiel> => ipcRenderer.invoke("catalogue:diagnostiquerDoublonsReferentiel"),
 
   // --- Promotions ---
   // Lister et gérer les promotions : mutation réservée aux Administrateurs,

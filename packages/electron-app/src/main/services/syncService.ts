@@ -191,7 +191,16 @@ export class SyncService {
    * encore connu — retentée au prochain cycle, jamais bloquant.
    */
   private rattrapageCatalogue?: {
-    modeleRepository: { creerDepuisServeur(modele: { id: string; motif: string; type: string; ordreVitrine: number | null }): void };
+    modeleRepository: {
+      creerDepuisServeur(modele: {
+        id: string;
+        motif: string;
+        type: string;
+        ordreVitrine: number | null;
+        sousCategorieId?: string | null;
+        marque?: string | null;
+      }): void;
+    };
     produitRepository: {
       creerDepuisServeur(produit: {
         id: string;
@@ -202,14 +211,29 @@ export class SyncService {
         hauteur: number | null;
         reference: string;
         prix: number;
+        uniteVente?: "carton" | "piece" | "sac" | "metre" | "kg" | "litre" | null;
+        caracteristiques?: string | null;
+        marque?: string | null;
       }): boolean;
     };
     catalogueSyncService: {
       recupererCatalogue(): Promise<
         | {
             success: true;
-            modeles: { id: string; motif: string; type: string; ordreVitrine: number | null }[];
-            produits: { id: string; modeleId: string; taille: string; tailleTri: number; largeur: number | null; hauteur: number | null; reference: string; prix: number }[];
+            modeles: { id: string; motif: string; type: string; ordreVitrine: number | null; sousCategorieId?: string | null; marque?: string | null }[];
+            produits: {
+              id: string;
+              modeleId: string;
+              taille: string;
+              tailleTri: number;
+              largeur: number | null;
+              hauteur: number | null;
+              reference: string;
+              prix: number;
+              uniteVente?: "carton" | "piece" | "sac" | "metre" | "kg" | "litre" | null;
+              caracteristiques?: string | null;
+              marque?: string | null;
+            }[];
           }
         | { success: false; message: string }
       >;
@@ -217,7 +241,16 @@ export class SyncService {
   };
 
   definirRattrapageCatalogue(
-    modeleRepository: { creerDepuisServeur(modele: { id: string; motif: string; type: string; ordreVitrine: number | null }): void },
+    modeleRepository: {
+      creerDepuisServeur(modele: {
+        id: string;
+        motif: string;
+        type: string;
+        ordreVitrine: number | null;
+        sousCategorieId?: string | null;
+        marque?: string | null;
+      }): void;
+    },
     produitRepository: {
       creerDepuisServeur(produit: {
         id: string;
@@ -228,20 +261,182 @@ export class SyncService {
         hauteur: number | null;
         reference: string;
         prix: number;
+        uniteVente?: "carton" | "piece" | "sac" | "metre" | "kg" | "litre" | null;
+        caracteristiques?: string | null;
+        marque?: string | null;
       }): boolean;
     },
     catalogueSyncService: {
       recupererCatalogue(): Promise<
         | {
             success: true;
-            modeles: { id: string; motif: string; type: string; ordreVitrine: number | null }[];
-            produits: { id: string; modeleId: string; taille: string; tailleTri: number; largeur: number | null; hauteur: number | null; reference: string; prix: number }[];
+            modeles: { id: string; motif: string; type: string; ordreVitrine: number | null; sousCategorieId?: string | null; marque?: string | null }[];
+            produits: {
+              id: string;
+              modeleId: string;
+              taille: string;
+              tailleTri: number;
+              largeur: number | null;
+              hauteur: number | null;
+              reference: string;
+              prix: number;
+              uniteVente?: "carton" | "piece" | "sac" | "metre" | "kg" | "litre" | null;
+              caracteristiques?: string | null;
+              marque?: string | null;
+            }[];
           }
         | { success: false; message: string }
       >;
     }
   ): void {
     this.rattrapageCatalogue = { modeleRepository, produitRepository, catalogueSyncService };
+  }
+
+  /**
+   * Phase 5 (référentiel commun), sous-phase 5.4 — même forme exacte que
+   * `definirRattrapageCatalogue` ci-dessus. Ordre d'application dans
+   * `executerSynchronisation` : catégorie → sous-catégorie → champ (même
+   * raisonnement que modèle avant produit ci-dessus — chaque niveau
+   * dépend du précédent via une clé étrangère locale, voir migrate.ts).
+   * `sousCategorieRepository.creerDepuisServeur` applique en plus, dans
+   * la MÊME opération transactionnelle, la configuration d'unités reçue
+   * en sous-objet (voir SousCategorieRepository.creerDepuisServeur) —
+   * jamais un point d'entrée séparé pour les unités.
+   */
+  private rattrapageReferentiel?: {
+    categorieRepository: {
+      creerDepuisServeur(categorie: { id: string; nom: string; imageDataUrl: string | null; ordre: number; updatedAt: string; deletedAt?: string | null }): void;
+    };
+    sousCategorieRepository: {
+      creerDepuisServeur(
+        sousCategorie: {
+          id: string;
+          categorieId: string;
+          nom: string;
+          ordre: number;
+          modelePhysique: "carreau" | null;
+          updatedAt: string;
+          deletedAt?: string | null;
+        },
+        unitesAutorisees: Array<"carton" | "piece" | "sac" | "metre" | "kg" | "litre"> | null
+      ): boolean;
+    };
+    sousCategorieChampRepository: {
+      creerDepuisServeur(champ: {
+        id: string;
+        sousCategorieId: string;
+        nom: string;
+        type: "texte" | "nombre" | "liste";
+        obligatoire: boolean;
+        valeursAutorisees: string[] | null;
+        uniteMesure: string | null;
+        role: "descriptif" | "physique" | "calcul" | null;
+        ordre: number;
+        updatedAt: string;
+        deletedAt?: string | null;
+      }): boolean;
+    };
+    referentielSyncService: {
+      recupererReferentiel(): Promise<
+        | {
+            success: true;
+            categories: { id: string; nom: string; imageDataUrl: string | null; ordre: number; updatedAt: string; deletedAt?: string | null }[];
+            sousCategories: {
+              id: string;
+              categorieId: string;
+              nom: string;
+              ordre: number;
+              modelePhysique: "carreau" | null;
+              unitesAutorisees: Array<"carton" | "piece" | "sac" | "metre" | "kg" | "litre"> | null;
+              updatedAt: string;
+              deletedAt?: string | null;
+            }[];
+            sousCategorieChamps: {
+              id: string;
+              sousCategorieId: string;
+              nom: string;
+              type: "texte" | "nombre" | "liste";
+              obligatoire: boolean;
+              valeursAutorisees: string[] | null;
+              uniteMesure: string | null;
+              role: "descriptif" | "physique" | "calcul" | null;
+              ordre: number;
+              updatedAt: string;
+              deletedAt?: string | null;
+            }[];
+          }
+        | { success: false; message: string }
+      >;
+    };
+  };
+
+  definirRattrapageReferentiel(
+    categorieRepository: {
+      creerDepuisServeur(categorie: { id: string; nom: string; imageDataUrl: string | null; ordre: number; updatedAt: string; deletedAt?: string | null }): void;
+    },
+    sousCategorieRepository: {
+      creerDepuisServeur(
+        sousCategorie: {
+          id: string;
+          categorieId: string;
+          nom: string;
+          ordre: number;
+          modelePhysique: "carreau" | null;
+          updatedAt: string;
+          deletedAt?: string | null;
+        },
+        unitesAutorisees: Array<"carton" | "piece" | "sac" | "metre" | "kg" | "litre"> | null
+      ): boolean;
+    },
+    sousCategorieChampRepository: {
+      creerDepuisServeur(champ: {
+        id: string;
+        sousCategorieId: string;
+        nom: string;
+        type: "texte" | "nombre" | "liste";
+        obligatoire: boolean;
+        valeursAutorisees: string[] | null;
+        uniteMesure: string | null;
+        role: "descriptif" | "physique" | "calcul" | null;
+        ordre: number;
+        updatedAt: string;
+        deletedAt?: string | null;
+      }): boolean;
+    },
+    referentielSyncService: {
+      recupererReferentiel(): Promise<
+        | {
+            success: true;
+            categories: { id: string; nom: string; imageDataUrl: string | null; ordre: number; updatedAt: string; deletedAt?: string | null }[];
+            sousCategories: {
+              id: string;
+              categorieId: string;
+              nom: string;
+              ordre: number;
+              modelePhysique: "carreau" | null;
+              unitesAutorisees: Array<"carton" | "piece" | "sac" | "metre" | "kg" | "litre"> | null;
+              updatedAt: string;
+              deletedAt?: string | null;
+            }[];
+            sousCategorieChamps: {
+              id: string;
+              sousCategorieId: string;
+              nom: string;
+              type: "texte" | "nombre" | "liste";
+              obligatoire: boolean;
+              valeursAutorisees: string[] | null;
+              uniteMesure: string | null;
+              role: "descriptif" | "physique" | "calcul" | null;
+              ordre: number;
+              updatedAt: string;
+              deletedAt?: string | null;
+            }[];
+          }
+        | { success: false; message: string }
+      >;
+    }
+  ): void {
+    this.rattrapageReferentiel = { categorieRepository, sousCategorieRepository, sousCategorieChampRepository, referentielSyncService };
   }
 
   /**
@@ -326,6 +521,27 @@ export class SyncService {
           // Même principe que les rattrapages ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
           // eslint-disable-next-line no-console
           console.error("[sync] rattrapage du catalogue impossible :", err instanceof Error ? err.message : err);
+        }
+      }
+
+      // Phase 5 (référentiel commun), sous-phase 5.4 — même principe
+      // exact que le bloc catalogue ci-dessus (try/catch indépendant,
+      // jamais bloquant). Ordre d'application : catégorie → sous-
+      // catégorie (+ unités, dans la même opération transactionnelle) →
+      // champ, pour que chaque niveau trouve sa clé étrangère locale déjà
+      // posée (voir le commentaire de `definirRattrapageReferentiel`).
+      if (this.rattrapageReferentiel) {
+        try {
+          const resultat = await this.rattrapageReferentiel.referentielSyncService.recupererReferentiel();
+          if (resultat.success) {
+            for (const c of resultat.categories) this.rattrapageReferentiel.categorieRepository.creerDepuisServeur(c);
+            for (const sc of resultat.sousCategories) this.rattrapageReferentiel.sousCategorieRepository.creerDepuisServeur(sc, sc.unitesAutorisees);
+            for (const champ of resultat.sousCategorieChamps) this.rattrapageReferentiel.sousCategorieChampRepository.creerDepuisServeur(champ);
+          }
+        } catch (err) {
+          // Même principe que les rattrapages ci-dessus — jamais faire échouer la synchronisation pour ça, retenté au prochain cycle.
+          // eslint-disable-next-line no-console
+          console.error("[sync] rattrapage du référentiel impossible :", err instanceof Error ? err.message : err);
         }
       }
 

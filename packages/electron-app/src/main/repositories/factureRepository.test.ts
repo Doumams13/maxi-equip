@@ -423,3 +423,84 @@ describe("FactureRepository.getRepartitionDepots / aRepartitionDepot — base r�
     expect(facture.aRepartitionDepot).toBe(false);
   });
 });
+
+// Fondations quincaillerie (Phase 3) — persistance/relecture unite_vente/caracteristiques (base réelle).
+describe("FactureRepository — persistance et relecture de unite_vente / caracteristiques (Phase 3 quincaillerie)", () => {
+  let db: Database.Database;
+  let repository: FactureRepository;
+
+  beforeEach(() => {
+    db = ouvrirBaseDeTest();
+    repository = new FactureRepository(db);
+    creerEmplacementShop(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  afterAll(() => {
+    if (existsSync(CHEMIN_DB)) unlinkSync(CHEMIN_DB);
+  });
+
+  it("persiste puis relit uniteVente et caracteristiques pour une ligne non-carreau", () => {
+    const factureId = creerFacture(repository, {
+      numero: "FAC-UNITE-1",
+      date: "2026-01-01T00:00:00.000Z",
+      total: 6500,
+      lignes: [
+        ligne({
+          reference: "CIM-50KG",
+          motif: "Ciment CPJ 45",
+          taille: "Sac 50kg",
+          quantite: 1,
+          prixUnitaire: 6500,
+          uniteVente: "sac",
+          caracteristiques: JSON.stringify([{ cle: "Poids", valeur: "50 kg" }]),
+        }),
+      ],
+    });
+
+    const facture = repository.findById(factureId)!;
+    expect(facture.lignes[0]!.uniteVente).toBe("sac");
+    expect(facture.lignes[0]!.caracteristiques).toBe(JSON.stringify([{ cle: "Poids", valeur: "50 kg" }]));
+  });
+
+  it("une ligne carreau historique (uniteVente/caracteristiques absents) reste parfaitement lisible, les deux valant null", () => {
+    const factureId = creerFacture(repository, {
+      numero: "FAC-UNITE-2",
+      date: "2026-01-01T00:00:00.000Z",
+      total: 8000,
+      lignes: [ligne({ reference: "MB-6060", motif: "Marbre Blanc", taille: "60x60", quantite: 1, prixUnitaire: 8000 })],
+    });
+
+    const facture = repository.findById(factureId)!;
+    expect(facture.lignes[0]!.uniteVente).toBeNull();
+    expect(facture.lignes[0]!.caracteristiques).toBeNull();
+    // Le reste de la ligne (snapshot carreau) reste inchangé.
+    expect(facture.lignes[0]!.reference).toBe("MB-6060");
+    expect(facture.lignes[0]!.motif).toBe("Marbre Blanc");
+  });
+
+  it("une facture insérée AVANT cette évolution (colonnes NULL en base, jamais écrites par un ancien code) reste lisible sans exception", () => {
+    // Simule une ligne de facture historique en insérant directement en
+    // base SANS passer par unite_vente/caracteristiques (comme l'aurait
+    // fait le code avant cette Phase 3) — vérifie que la lecture ne lève
+    // jamais d'exception et retombe proprement sur `null`.
+    const maintenant = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO factures (id, numero, date, emplacement_id, client_nom, vendeur_utilisateur_id, mode_reglement, total, remise, statut_paiement, montant_paye, statut_livraison, created_at, updated_at)
+       VALUES ('f-legacy', 'FAC-LEGACY', ?, 'shop', 'Client Historique', 'u1', 'Espèces', 1000, 0, 'payee', 1000, 'en_attente', ?, ?)`
+    ).run(maintenant, maintenant, maintenant);
+    db.prepare(
+      `INSERT INTO lignes_facture (id, facture_id, motif, reference, taille, quantite, prix_unitaire)
+       VALUES ('l-legacy', 'f-legacy', 'Marbre Blanc', 'MB-LEGACY', '60x60', 1, 8000)`
+    ).run();
+
+    const facture = repository.findById("f-legacy")!;
+    expect(facture.lignes).toHaveLength(1);
+    expect(facture.lignes[0]!.uniteVente).toBeNull();
+    expect(facture.lignes[0]!.caracteristiques).toBeNull();
+    expect(facture.lignes[0]!.motif).toBe("Marbre Blanc");
+  });
+});

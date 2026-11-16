@@ -2,8 +2,14 @@ import { useState } from "react";
 import { Card, Button, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { FileDown, Calendar } from "lucide-react";
 import { PdfPreviewModal } from "../components/PdfPreviewModal.js";
+import { formaterVentilationUnites, type UniteVente } from "@maxi-equip/shared-types";
 
 type Preset = "jour" | "semaine" | "mois" | "personnalise";
+
+interface VentilationUnite {
+  unite: UniteVente;
+  quantite: number;
+}
 
 interface BilanDetailProduit {
   produitId: string;
@@ -18,8 +24,9 @@ interface BilanDetailProduit {
 interface BilanDonnees {
   ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
   topProduits: { label: string; quantite: number }[];
-  mouvements: { totalEntrees: number; totalSorties: number };
-  stockParEmplacement: { emplacementId: string; nom: string; cartons: number }[];
+  /** Fondations quincaillerie (Phase 4) — ventilé par unité, jamais un total unique mélangeant des unités différentes. */
+  mouvements: { entrees: VentilationUnite[]; sorties: VentilationUnite[] };
+  stockParEmplacement: { emplacementId: string; nom: string; parUnite: VentilationUnite[] }[];
   produitsSousSeuilCount: number;
   promotionsActivesPendantPeriode: number;
   depots: { id: string; nom: string }[];
@@ -218,8 +225,8 @@ export function BilanScreen() {
             <Card style={{ flex: 1, minWidth: 300 }}>
               <h2 style={{ margin: "0 0 14px", fontFamily: defaultTokens.typography.display, fontSize: 15 }}>Mouvements de stock</h2>
               <div style={{ display: "flex", gap: 20 }}>
-                <KpiBloc label="Total entrées" value={donnees.mouvements.totalEntrees} />
-                <KpiBloc label="Total sorties" value={donnees.mouvements.totalSorties} />
+                <KpiBloc label="Total entrées" value={formaterVentilationUnites(donnees.mouvements.entrees) ?? "Aucune entrée"} />
+                <KpiBloc label="Total sorties" value={formaterVentilationUnites(donnees.mouvements.sorties) ?? "Aucune sortie"} />
               </div>
             </Card>
 
@@ -229,7 +236,7 @@ export function BilanScreen() {
               </h2>
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
                 {donnees.stockParEmplacement.map((d) => (
-                  <KpiBloc key={d.emplacementId} label={`Stock ${d.nom}`} value={`${d.cartons} ct.`} />
+                  <KpiBloc key={d.emplacementId} label={`Stock ${d.nom}`} value={formaterVentilationUnites(d.parUnite) ?? "Aucun stock"} />
                 ))}
                 <KpiBloc label="Produits en alerte" value={donnees.produitsSousSeuilCount} />
               </div>

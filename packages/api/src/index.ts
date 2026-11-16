@@ -20,6 +20,7 @@ import { stockCentralRoute } from "./routes/v1/app/operations/stock.js";
 import { emplacementsListRoute } from "./routes/v1/app/emplacements/list.js";
 import { comptesListRoute } from "./routes/v1/app/comptes/list.js";
 import { catalogueListRoute } from "./routes/v1/app/catalogue/list.js";
+import { referentielListRoute } from "./routes/v1/app/referentiel/list.js";
 import { postesListRoute } from "./routes/v1/app/postes/list.js";
 import { postesMoiRoute } from "./routes/v1/app/postes/moi.js";
 import { postesDefinirNomRoute } from "./routes/v1/app/postes/definir-nom.js";
@@ -51,6 +52,7 @@ export function createRouter(): Router {
   router.register(emplacementsListRoute);
   router.register(comptesListRoute);
   router.register(catalogueListRoute);
+  router.register(referentielListRoute);
   router.register(postesListRoute);
   router.register(postesMoiRoute);
   router.register(postesDefinirNomRoute);

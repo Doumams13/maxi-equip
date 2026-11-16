@@ -7,6 +7,14 @@ export interface ModeleCatalogueCatchup {
   motif: string;
   type: string;
   ordreVitrine: number | null;
+  /**
+   * Phase 5 (référentiel commun), sous-phase 5.5. Optionnels : un serveur
+   * antérieur à cette sous-phase ne les renvoie pas du tout — absence
+   * traitée comme `null` par `ModeleRepository.creerDepuisServeur`,
+   * jamais une valeur inventée (rétrocompatibilité imposée).
+   */
+  sousCategorieId?: string | null;
+  marque?: string | null;
 }
 
 export interface ProduitCatalogueCatchup {
@@ -18,6 +26,10 @@ export interface ProduitCatalogueCatchup {
   hauteur: number | null;
   reference: string;
   prix: number;
+  /** Phase 5 (référentiel commun), sous-phase 5.5 — voir ModeleCatalogueCatchup ci-dessus pour la règle de rétrocompatibilité. */
+  uniteVente?: "carton" | "piece" | "sac" | "metre" | "kg" | "litre" | null;
+  caracteristiques?: string | null;
+  marque?: string | null;
 }
 
 export type ResultatLectureCatalogue =

@@ -14,7 +14,7 @@
  * par l'appelant (services de la couche application, Phase 2/3).
  */
 
-import type { LigneFacture, LigneReleveInterne } from "@maxi-equip/shared-types";
+import type { LigneFacture, LigneReleveInterne, UniteVente } from "@maxi-equip/shared-types";
 
 export class InvalidInvoiceLineError extends Error {
   constructor(message: string) {
@@ -47,6 +47,15 @@ export interface VenteLigneSource {
   promotionValeur?: number | null;
   /** Surface d'un carton de ce produit en m², au moment de la vente — voir shared-types/facture.ts. */
   surfaceCartonM2?: number | null;
+  /**
+   * Fondations quincaillerie (Phase 1) — snapshot au moment de la vente,
+   * même principe que surfaceCartonM2 ci-dessus. `null`/absent =
+   * comportement historique carreau (voir shared-types/produit.ts,
+   * uniteVenteEffective()) — jamais réinterprété autrement ici.
+   */
+  uniteVente?: UniteVente | null;
+  /** Snapshot des caractéristiques au moment de la vente, même principe que ci-dessus. */
+  caracteristiques?: string | null;
 }
 
 function assertCoherentSource(source: VenteLigneSource): void {
@@ -86,6 +95,8 @@ export function buildLigneFacture(source: VenteLigneSource): LigneFacture {
     promotionType: source.promotionType ?? null,
     promotionValeur: source.promotionValeur ?? null,
     surfaceCartonM2: source.surfaceCartonM2 ?? null,
+    uniteVente: source.uniteVente ?? null,
+    caracteristiques: source.caracteristiques ?? null,
   };
 }
 

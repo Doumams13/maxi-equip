@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Card, Button, ConfirmDialog, useToast, defaultTokens } from "@maxi-equip/design-system";
 import { Plus, Trash2, Pencil, CheckCircle2, X, RotateCcw } from "lucide-react";
 import type { Produit, Emplacement, Promotion } from "@maxi-equip/shared-types";
+import { uniteVenteEffective, LIBELLE_UNITE_VENTE, caracteristiquesAffichage } from "@maxi-equip/shared-types";
 import { pricing as domainPricing } from "@maxi-equip/domain";
 import { ProduitSelector } from "../components/ProduitSelector.js";
 
@@ -713,15 +714,27 @@ export function VentesScreen({
               // deux champs (Quantité et Surface souhaitée, voir plus bas).
               const produitLigne = produits.find((p) => p.id === ligne.produitId);
               const surfaceCartonLigne = surfaceCartonProduit(produitLigne);
+              // Fondations quincaillerie (Phase 3) — seul point de lecture de
+              // l'unité effective pour cet écran (jamais une relecture brute
+              // de produit.uniteVente ailleurs). "carton" = comportement
+              // historique carreau, intégralement préservé ci-dessous.
+              const uniteLigne = produitLigne ? uniteVenteEffective(produitLigne) : "carton";
+              const estCarton = uniteLigne === "carton";
+              const caracteristiquesLigne = produitLigne ? caracteristiquesAffichage(produitLigne.caracteristiques) : "";
               return (
                 <div key={index} style={{ border: `1px solid ${defaultTokens.colors.borderSoft}`, borderRadius: defaultTokens.radius.md, padding: 12 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: estCarton ? "2fr 1fr 1fr 1fr 1fr auto" : "2fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
                     <div>
                       <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Produit</label>
                       <ProduitSelector produits={produits} value={ligne.produitId} onChange={(id) => handleProduitChange(index, id)} />
+                      {caracteristiquesLigne && (
+                        <p style={{ margin: "4px 0 0", fontSize: 11, color: defaultTokens.colors.textFaint }}>{caracteristiquesLigne}</p>
+                      )}
                     </div>
                     <div>
-                      <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Quantité</label>
+                      <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>
+                        {estCarton ? "Quantité" : `Quantité (${LIBELLE_UNITE_VENTE[uniteLigne].pluriel})`}
+                      </label>
                       <input
                         style={inputStyle}
                         type="number"
@@ -743,39 +756,41 @@ export function VentesScreen({
                         }}
                       />
                     </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Surface souhaitée (m²)</label>
-                      <input
-                        style={{ ...inputStyle, opacity: surfaceCartonLigne === null ? 0.5 : 1 }}
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        disabled={surfaceCartonLigne === null}
-                        title={surfaceCartonLigne === null ? "Carreaux/carton ou dimensions non renseignés pour ce produit" : undefined}
-                        value={ligne.surfaceSouhaitee}
-                        onChange={(e) => {
-                          const brut = e.target.value;
-                          if (surfaceCartonLigne === null) return;
-                          const m2 = Number(brut) || 0;
-                          const nombreCartons = m2 > 0 ? Math.ceil(m2 / surfaceCartonLigne) : 0;
-                          updateLigne(index, {
-                            surfaceSouhaitee: brut,
-                            quantite: nombreCartons > 0 ? String(nombreCartons) : ligne.quantite,
-                          });
-                        }}
-                      />
-                    </div>
+                    {estCarton && (
+                      <div>
+                        <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Surface souhaitée (m²)</label>
+                        <input
+                          style={{ ...inputStyle, opacity: surfaceCartonLigne === null ? 0.5 : 1 }}
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          disabled={surfaceCartonLigne === null}
+                          title={surfaceCartonLigne === null ? "Carreaux/carton ou dimensions non renseignés pour ce produit" : undefined}
+                          value={ligne.surfaceSouhaitee}
+                          onChange={(e) => {
+                            const brut = e.target.value;
+                            if (surfaceCartonLigne === null) return;
+                            const m2 = Number(brut) || 0;
+                            const nombreCartons = m2 > 0 ? Math.ceil(m2 / surfaceCartonLigne) : 0;
+                            updateLigne(index, {
+                              surfaceSouhaitee: brut,
+                              quantite: nombreCartons > 0 ? String(nombreCartons) : ligne.quantite,
+                            });
+                          }}
+                        />
+                      </div>
+                    )}
                     <div>
                       {(() => {
                         const prod = produits.find((p) => p.id === ligne.produitId);
                         const promoInfo = prod ? getPrixEffectif(prod.prix, promotions, ligne.produitId) : null;
                         return (
                           <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>
-                            Prix / carton
+                            {estCarton ? "Prix / carton" : `Prix / ${LIBELLE_UNITE_VENTE[uniteLigne].singulier}`}
                             {promoInfo?.isPromoActive && prod && (
                               <>
                                 <span style={{ marginLeft: 6, textDecoration: "line-through", color: defaultTokens.colors.textFaint, fontWeight: 400 }}>
-                                  {prod.prix.toLocaleString("fr-FR")} FCFA/m²
+                                  {prod.prix.toLocaleString("fr-FR")} FCFA{estCarton ? "/m²" : ""}
                                 </span>
                                 <span style={{ marginLeft: 4, color: defaultTokens.colors.danger, fontWeight: 700, fontSize: 10, letterSpacing: 0.3 }}>
                                   PROMO
@@ -796,31 +811,33 @@ export function VentesScreen({
                         }}
                       />
                     </div>
-                    <div>
-                      {(() => {
-                        const prod = produits.find((p) => p.id === ligne.produitId);
-                        const surface = surfaceCartonProduit(prod);
-                        const prixM2 = surface !== null && ligne.prixUnitaire ? domainPricing.calculerPrixM2DepuisPrixCarton(Number(ligne.prixUnitaire) || 0, surface) : null;
-                        return (
-                          <>
-                            <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Prix / m²</label>
-                            <input
-                              style={{ ...inputStyle, opacity: surface === null ? 0.5 : 1 }}
-                              type="number"
-                              min={0}
-                              disabled={surface === null}
-                              title={surface === null ? "Carreaux/carton ou dimensions non renseignés pour ce produit" : undefined}
-                              value={prixM2 !== null ? String(prixM2) : ""}
-                              onChange={(e) => {
-                                if (surface === null) return;
-                                const valeur = Number(e.target.value) || 0;
-                                updateLigne(index, { prixUnitaire: valeur ? String(domainPricing.calculerPrixCartonDepuisPrixM2(valeur, surface)) : "" });
-                              }}
-                            />
-                          </>
-                        );
-                      })()}
-                    </div>
+                    {estCarton && (
+                      <div>
+                        {(() => {
+                          const prod = produits.find((p) => p.id === ligne.produitId);
+                          const surface = surfaceCartonProduit(prod);
+                          const prixM2 = surface !== null && ligne.prixUnitaire ? domainPricing.calculerPrixM2DepuisPrixCarton(Number(ligne.prixUnitaire) || 0, surface) : null;
+                          return (
+                            <>
+                              <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>Prix / m²</label>
+                              <input
+                                style={{ ...inputStyle, opacity: surface === null ? 0.5 : 1 }}
+                                type="number"
+                                min={0}
+                                disabled={surface === null}
+                                title={surface === null ? "Carreaux/carton ou dimensions non renseignés pour ce produit" : undefined}
+                                value={prixM2 !== null ? String(prixM2) : ""}
+                                onChange={(e) => {
+                                  if (surface === null) return;
+                                  const valeur = Number(e.target.value) || 0;
+                                  updateLigne(index, { prixUnitaire: valeur ? String(domainPricing.calculerPrixCartonDepuisPrixM2(valeur, surface)) : "" });
+                                }}
+                              />
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                     <Button type="button" variant="ghost" onClick={() => setLignes((prev) => prev.filter((_, i) => i !== index))}>
                       <Trash2 size={15} />
                     </Button>

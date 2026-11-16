@@ -27,6 +27,12 @@ import {
   type CompteCatchupRow,
   type PosteRow,
   type ResultatCreationPosteAnnexe,
+  type CategorieCataloguePayload,
+  type CategorieRow,
+  type SousCategorieCataloguePayload,
+  type SousCategorieRow,
+  type SousCategorieChampCataloguePayload,
+  type SousCategorieChampRow,
 } from "./serverStorage.js";
 
 const { Pool } = pg;
@@ -90,10 +96,70 @@ export class PostgresServerStorage implements ServerStorage {
         hauteur    DOUBLE PRECISION,
         reference  TEXT NOT NULL,
         prix       INTEGER NOT NULL,
+        -- Fondations quincaillerie (Phase 1) — colonnes posées au niveau
+        -- schéma seulement, jamais encore écrites (aucun INSERT/UPDATE ne
+        -- les renseigne à ce stade) : le câblage de la validation/synchro
+        -- (validationCatalogueSync.ts, enqueueProduitSync) est une phase
+        -- ultérieure, volontairement hors périmètre ici.
+        unite_vente TEXT,
+        caracteristiques TEXT,
         deleted_at TEXT,
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_catalogue_produits_modele ON catalogue_produits (modele_id);
+
+      -- Référentiel commun du catalogue — Phase 5 (voir
+      -- PHASE_5_CAHIER_DES_CHARGES.md). Tables de projection DÉDIÉES,
+      -- jamais fusionnées dans catalogue_modeles/catalogue_produits —
+      -- jamais exposées à publicCatalog.ts. Voir serverStorage.ts
+      -- (CategorieCataloguePayload et suivants) pour le raisonnement
+      -- complet, notamment l'absence volontaire de deleted_by (aucune
+      -- projection existante, modèle/compte/emplacement compris, ne la
+      -- transmet ni ne la stocke côté serveur).
+      CREATE TABLE IF NOT EXISTS catalogue_categories (
+        id             TEXT PRIMARY KEY,
+        nom            TEXT NOT NULL,
+        image_data_url TEXT,
+        ordre          INTEGER NOT NULL DEFAULT 0,
+        deleted_at     TEXT,
+        updated_at     TEXT NOT NULL
+      );
+
+      -- unites_autorisees : JSON (tableau de chaînes) ou NULL — NULL
+      -- signifie "non configurée" (les 6 unités restent proposées par
+      -- défaut, voir shared-types/categorie.ts côté app). Colonne,
+      -- jamais une table séparée (décision définitive, §4.6 du cahier
+      -- des charges).
+      CREATE TABLE IF NOT EXISTS catalogue_sous_categories (
+        id                TEXT PRIMARY KEY,
+        categorie_id      TEXT NOT NULL,
+        nom               TEXT NOT NULL,
+        ordre             INTEGER NOT NULL DEFAULT 0,
+        modele_physique   TEXT,
+        unites_autorisees TEXT,
+        deleted_at        TEXT,
+        updated_at        TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_catalogue_sous_categories_categorie ON catalogue_sous_categories (categorie_id);
+
+      -- Tombstone dès la conception (deleted_at) — jamais une
+      -- suppression physique côté serveur, pour que la suppression d'un
+      -- champ soit répliquable par upsert LWW comme toute autre
+      -- modification (§9 du cahier des charges).
+      CREATE TABLE IF NOT EXISTS catalogue_sous_categorie_champs (
+        id                 TEXT PRIMARY KEY,
+        sous_categorie_id  TEXT NOT NULL,
+        nom                TEXT NOT NULL,
+        type               TEXT NOT NULL,
+        obligatoire        BOOLEAN NOT NULL DEFAULT FALSE,
+        valeurs_autorisees TEXT,
+        unite_mesure       TEXT,
+        role               TEXT,
+        ordre              INTEGER NOT NULL DEFAULT 0,
+        deleted_at         TEXT,
+        updated_at         TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_catalogue_sous_categorie_champs_sous_categorie ON catalogue_sous_categorie_champs (sous_categorie_id);
 
       CREATE TABLE IF NOT EXISTS catalogue_images (
         id             TEXT PRIMARY KEY,
@@ -231,6 +297,24 @@ export class PostgresServerStorage implements ServerStorage {
     await this.pool.query(`
       ALTER TABLE catalogue_modeles ADD COLUMN IF NOT EXISTS ordre_vitrine INTEGER;
     `);
+
+    // Fondations quincaillerie (Phase 1) — même raisonnement que ci-dessus
+    // pour une base déjà déployée. Colonnes dormantes (voir commentaire du
+    // CREATE TABLE catalogue_produits plus haut).
+    await this.pool.query(`
+      ALTER TABLE catalogue_produits ADD COLUMN IF NOT EXISTS unite_vente TEXT;
+      ALTER TABLE catalogue_produits ADD COLUMN IF NOT EXISTS caracteristiques TEXT;
+    `);
+
+    // Phase 5 (référentiel commun) — même raisonnement que ci-dessus pour
+    // une base déjà déployée avant cette évolution. Voir serverStorage.ts
+    // (ModeleCataloguePayload/ProduitCataloguePayload) pour le
+    // raisonnement complet.
+    await this.pool.query(`
+      ALTER TABLE catalogue_modeles ADD COLUMN IF NOT EXISTS sous_categorie_id TEXT;
+      ALTER TABLE catalogue_modeles ADD COLUMN IF NOT EXISTS marque TEXT;
+      ALTER TABLE catalogue_produits ADD COLUMN IF NOT EXISTS marque TEXT;
+    `);
   }
 
   async fermer(): Promise<void> {
@@ -298,17 +382,19 @@ export class PostgresServerStorage implements ServerStorage {
     const slug = await this.slugUnique(payload.motif, payload.modeleId);
 
     const res = await this.pool.query(
-      `INSERT INTO catalogue_modeles (id, motif, type, slug, ordre_vitrine, deleted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO catalogue_modeles (id, motif, type, slug, ordre_vitrine, sous_categorie_id, marque, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (id) DO UPDATE SET
          motif = excluded.motif,
          type = excluded.type,
          slug = excluded.slug,
          ordre_vitrine = excluded.ordre_vitrine,
+         sous_categorie_id = excluded.sous_categorie_id,
+         marque = excluded.marque,
          deleted_at = excluded.deleted_at,
          updated_at = excluded.updated_at
        WHERE excluded.updated_at >= catalogue_modeles.updated_at`,
-      [payload.modeleId, payload.motif, payload.type, slug, payload.ordreVitrine, deletedAt, payload.updatedAt]
+      [payload.modeleId, payload.motif, payload.type, slug, payload.ordreVitrine, payload.sousCategorieId, payload.marque, deletedAt, payload.updatedAt]
     );
 
     return { applique: (res.rowCount ?? 0) > 0 };
@@ -318,8 +404,8 @@ export class PostgresServerStorage implements ServerStorage {
     const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
 
     const res = await this.pool.query(
-      `INSERT INTO catalogue_produits (id, modele_id, taille, taille_tri, largeur, hauteur, reference, prix, deleted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO catalogue_produits (id, modele_id, taille, taille_tri, largeur, hauteur, reference, prix, unite_vente, caracteristiques, marque, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (id) DO UPDATE SET
          modele_id = excluded.modele_id,
          taille = excluded.taille,
@@ -328,10 +414,27 @@ export class PostgresServerStorage implements ServerStorage {
          hauteur = excluded.hauteur,
          reference = excluded.reference,
          prix = excluded.prix,
+         unite_vente = excluded.unite_vente,
+         caracteristiques = excluded.caracteristiques,
+         marque = excluded.marque,
          deleted_at = excluded.deleted_at,
          updated_at = excluded.updated_at
        WHERE excluded.updated_at >= catalogue_produits.updated_at`,
-      [payload.produitId, payload.modeleId, payload.taille, payload.tailleTri, payload.largeur, payload.hauteur, payload.reference, payload.prix, deletedAt, payload.updatedAt]
+      [
+        payload.produitId,
+        payload.modeleId,
+        payload.taille,
+        payload.tailleTri,
+        payload.largeur,
+        payload.hauteur,
+        payload.reference,
+        payload.prix,
+        payload.uniteVente,
+        payload.caracteristiques,
+        payload.marque,
+        deletedAt,
+        payload.updatedAt,
+      ]
     );
 
     return { applique: (res.rowCount ?? 0) > 0 };
@@ -455,14 +558,15 @@ export class PostgresServerStorage implements ServerStorage {
 
   async listerModelesActifs(): Promise<ModeleRow[]> {
     const res = await this.pool.query(
-      "SELECT id, motif, type, slug, ordre_vitrine as \"ordreVitrine\", updated_at as \"updatedAt\" FROM catalogue_modeles WHERE deleted_at IS NULL ORDER BY type, motif"
+      `SELECT id, motif, type, slug, ordre_vitrine as "ordreVitrine", sous_categorie_id as "sousCategorieId", marque, updated_at as "updatedAt"
+       FROM catalogue_modeles WHERE deleted_at IS NULL ORDER BY type, motif`
     );
     return res.rows as ModeleRow[];
   }
 
   async listerProduitsActifs(): Promise<ProduitRow[]> {
     const res = await this.pool.query(
-      `SELECT id, modele_id as "modeleId", taille, taille_tri as "tailleTri", largeur, hauteur, reference, prix
+      `SELECT id, modele_id as "modeleId", taille, taille_tri as "tailleTri", largeur, hauteur, reference, prix, unite_vente as "uniteVente", caracteristiques, marque
        FROM catalogue_produits WHERE deleted_at IS NULL ORDER BY taille_tri`
     );
     return res.rows as ProduitRow[];
@@ -492,6 +596,156 @@ export class PostgresServerStorage implements ServerStorage {
       resultat.push({ ...r, produitIds });
     }
     return resultat;
+  }
+
+  // ==========================================================
+  // Référentiel commun du catalogue — Phase 5. Voir serverStorage.ts
+  // (CategorieCataloguePayload et suivants) pour le raisonnement complet.
+  // ==========================================================
+
+  async appliquerOperationCategorie(payload: CategorieCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const res = await this.pool.query(
+      `INSERT INTO catalogue_categories (id, nom, image_data_url, ordre, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO UPDATE SET
+         nom = excluded.nom,
+         image_data_url = excluded.image_data_url,
+         ordre = excluded.ordre,
+         deleted_at = excluded.deleted_at,
+         updated_at = excluded.updated_at
+       WHERE excluded.updated_at >= catalogue_categories.updated_at`,
+      [payload.categorieId, payload.nom, payload.imageDataUrl, payload.ordre, deletedAt, payload.updatedAt]
+    );
+    return { applique: (res.rowCount ?? 0) > 0 };
+  }
+
+  async listerCategoriesActives(): Promise<CategorieRow[]> {
+    // Phase 5 (référentiel commun), sous-phase 5.6 — plus de filtre deleted_at : les tombstones doivent être transmis.
+    const res = await this.pool.query(
+      `SELECT id, nom, image_data_url as "imageDataUrl", ordre, deleted_at as "deletedAt", updated_at as "updatedAt"
+       FROM catalogue_categories ORDER BY ordre, nom`
+    );
+    return res.rows as CategorieRow[];
+  }
+
+  async appliquerOperationSousCategorie(payload: SousCategorieCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const unitesAutoriseesJson = payload.unitesAutorisees ? JSON.stringify(payload.unitesAutorisees) : null;
+    const res = await this.pool.query(
+      `INSERT INTO catalogue_sous_categories (id, categorie_id, nom, ordre, modele_physique, unites_autorisees, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO UPDATE SET
+         categorie_id = excluded.categorie_id,
+         nom = excluded.nom,
+         ordre = excluded.ordre,
+         modele_physique = excluded.modele_physique,
+         unites_autorisees = excluded.unites_autorisees,
+         deleted_at = excluded.deleted_at,
+         updated_at = excluded.updated_at
+       WHERE excluded.updated_at >= catalogue_sous_categories.updated_at`,
+      [payload.sousCategorieId, payload.categorieId, payload.nom, payload.ordre, payload.modelePhysique, unitesAutoriseesJson, deletedAt, payload.updatedAt]
+    );
+    return { applique: (res.rowCount ?? 0) > 0 };
+  }
+
+  async listerSousCategoriesActives(): Promise<SousCategorieRow[]> {
+    // Phase 5 (référentiel commun), sous-phase 5.6 — plus de filtre deleted_at (voir listerCategoriesActives ci-dessus).
+    const res = await this.pool.query(
+      `SELECT id, categorie_id as "categorieId", nom, ordre, modele_physique as "modelePhysique",
+              unites_autorisees as "unitesAutoriseesJson", deleted_at as "deletedAt", updated_at as "updatedAt"
+       FROM catalogue_sous_categories ORDER BY ordre, nom`
+    );
+    const rows = res.rows as {
+      id: string;
+      categorieId: string;
+      nom: string;
+      ordre: number;
+      modelePhysique: SousCategorieRow["modelePhysique"];
+      unitesAutoriseesJson: string | null;
+      deletedAt: string | null;
+      updatedAt: string;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      categorieId: r.categorieId,
+      nom: r.nom,
+      ordre: r.ordre,
+      modelePhysique: r.modelePhysique,
+      unitesAutorisees: r.unitesAutoriseesJson ? (JSON.parse(r.unitesAutoriseesJson) as SousCategorieRow["unitesAutorisees"]) : null,
+      deletedAt: r.deletedAt,
+      updatedAt: r.updatedAt,
+    }));
+  }
+
+  async appliquerOperationSousCategorieChamp(payload: SousCategorieChampCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const valeursAutoriseesJson = payload.valeursAutorisees ? JSON.stringify(payload.valeursAutorisees) : null;
+    const res = await this.pool.query(
+      `INSERT INTO catalogue_sous_categorie_champs (id, sous_categorie_id, nom, type, obligatoire, valeurs_autorisees, unite_mesure, role, ordre, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (id) DO UPDATE SET
+         sous_categorie_id = excluded.sous_categorie_id,
+         nom = excluded.nom,
+         type = excluded.type,
+         obligatoire = excluded.obligatoire,
+         valeurs_autorisees = excluded.valeurs_autorisees,
+         unite_mesure = excluded.unite_mesure,
+         role = excluded.role,
+         ordre = excluded.ordre,
+         deleted_at = excluded.deleted_at,
+         updated_at = excluded.updated_at
+       WHERE excluded.updated_at >= catalogue_sous_categorie_champs.updated_at`,
+      [
+        payload.champId,
+        payload.sousCategorieId,
+        payload.nom,
+        payload.type,
+        payload.obligatoire,
+        valeursAutoriseesJson,
+        payload.uniteMesure,
+        payload.role,
+        payload.ordre,
+        deletedAt,
+        payload.updatedAt,
+      ]
+    );
+    return { applique: (res.rowCount ?? 0) > 0 };
+  }
+
+  async listerSousCategorieChampsActifs(): Promise<SousCategorieChampRow[]> {
+    // Phase 5 (référentiel commun), sous-phase 5.6 — plus de filtre deleted_at (voir listerCategoriesActives ci-dessus).
+    const res = await this.pool.query(
+      `SELECT id, sous_categorie_id as "sousCategorieId", nom, type, obligatoire,
+              valeurs_autorisees as "valeursAutoriseesJson", unite_mesure as "uniteMesure", role, ordre, deleted_at as "deletedAt", updated_at as "updatedAt"
+       FROM catalogue_sous_categorie_champs ORDER BY ordre, nom`
+    );
+    const rows = res.rows as {
+      id: string;
+      sousCategorieId: string;
+      nom: string;
+      type: SousCategorieChampRow["type"];
+      obligatoire: boolean;
+      valeursAutoriseesJson: string | null;
+      uniteMesure: string | null;
+      role: SousCategorieChampRow["role"];
+      ordre: number;
+      deletedAt: string | null;
+      updatedAt: string;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      sousCategorieId: r.sousCategorieId,
+      nom: r.nom,
+      type: r.type,
+      obligatoire: r.obligatoire,
+      valeursAutorisees: r.valeursAutoriseesJson ? (JSON.parse(r.valeursAutoriseesJson) as string[]) : null,
+      uniteMesure: r.uniteMesure,
+      role: r.role,
+      deletedAt: r.deletedAt,
+      ordre: r.ordre,
+      updatedAt: r.updatedAt,
+    }));
   }
 
   async appliquerOperationIdentite(payload: IdentiteCataloguePayload): Promise<{ applique: boolean }> {

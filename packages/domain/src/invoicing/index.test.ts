@@ -299,3 +299,54 @@ describe("Statut de paiement — Réservation / Acompte", () => {
     expect(calculerSoldeRestant(100000, 150000)).toBe(0);
   });
 });
+
+describe("Unité de vente et caractéristiques — snapshot (Phase 3 quincaillerie)", () => {
+  it("propage uniteVente et caracteristiques quand ils sont fournis par la source", () => {
+    const ligne = buildLigneFacture({
+      produitId: "p1",
+      motif: "Ciment CPJ 45",
+      reference: "REF-CIM-50KG",
+      taille: "Sac 50kg",
+      prixUnitaire: 6500,
+      quantiteInterne: 10,
+      quantiteExterne: 0,
+      uniteVente: "sac",
+      caracteristiques: JSON.stringify([{ cle: "Poids", valeur: "50 kg" }]),
+    });
+
+    expect(ligne.uniteVente).toBe("sac");
+    expect(ligne.caracteristiques).toBe(JSON.stringify([{ cle: "Poids", valeur: "50 kg" }]));
+  });
+
+  it("uniteVente et caracteristiques restent null quand absents de la source — comportement historique carreau préservé", () => {
+    const ligne = buildLigneFacture({
+      produitId: "p1",
+      motif: "Marbre Blanc",
+      reference: "REF-MB-6060",
+      taille: "60x60 cm",
+      prixUnitaire: 8500,
+      quantiteInterne: 20,
+      quantiteExterne: 0,
+    });
+
+    expect(ligne.uniteVente).toBeNull();
+    expect(ligne.caracteristiques).toBeNull();
+  });
+
+  it("uniteVente/caracteristiques explicitement null sur la source restent null sur la ligne (jamais une valeur inventée)", () => {
+    const ligne = buildLigneFacture({
+      produitId: "p1",
+      motif: "Marbre Blanc",
+      reference: "REF-MB-6060",
+      taille: "60x60 cm",
+      prixUnitaire: 8500,
+      quantiteInterne: 20,
+      quantiteExterne: 0,
+      uniteVente: null,
+      caracteristiques: null,
+    });
+
+    expect(ligne.uniteVente).toBeNull();
+    expect(ligne.caracteristiques).toBeNull();
+  });
+});

@@ -13,6 +13,7 @@ import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
 import { ParametresScreen } from "./screens/ParametresScreen.js";
 import { UtilisateursScreen } from "./screens/UtilisateursScreen.js";
 import { PostesScreen } from "./screens/PostesScreen.js";
+import { DiagnosticDoublonsScreen } from "./screens/DiagnosticDoublonsScreen.js";
 import { PromotionsScreen } from "./screens/PromotionsScreen.js";
 import { BilanScreen } from "./screens/BilanScreen.js";
 import { AlertesStockScreen } from "./screens/AlertesStockScreen.js";
@@ -170,6 +171,8 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
     // même garde que "Utilisateurs" (la protection réelle reste côté IPC,
     // checkAdminGuard, voir ipc/postes.ts).
     { id: "postes", label: "Postes", autorise: permissions.canManageUsers },
+    // Phase 5 (référentiel commun), sous-phase 5.7 — même garde que "Postes"/"Utilisateurs" (réservé à l'Administrateur), protection réelle côté IPC non requise ici (lecture seule, aucune donnée sensible).
+    { id: "doublons", label: "Doublons", autorise: permissions.canManageUsers },
     { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
     // Correction "bilan d'activité" (2026-10-21) — réservé à l'Administrateur
     // (décision confirmée), la protection réelle restant côté IPC
@@ -271,6 +274,9 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
       case "postes":
         if (!permissions!.canManageUsers) return null;
         return <PostesScreen />;
+      case "doublons":
+        if (!permissions!.canManageUsers) return null;
+        return <DiagnosticDoublonsScreen />;
       case "parametres":
         if (!permissions!.canEditCompanySettings) return null;
         return <ParametresScreen />;

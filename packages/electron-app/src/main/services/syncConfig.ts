@@ -87,12 +87,43 @@ export function definirConfigurationSyncLocale(config: ConfigurationLocalePersis
   writeFileSync(getFichierConfigLocale(), chiffre);
 }
 
-export function getConfigurationSync(): ConfigurationSync {
-  const local = lireConfigurationLocale();
-  if (local) {
-    return { apiUrl: local.apiUrl, jwt: local.jwt };
-  }
+/**
+ * Phase 5 (référentiel commun), sous-phase 5.8, chantier C — détecte une
+ * configuration HTTP non chiffré en dehors du développement local.
+ * Validation ROBUSTE via `URL` (jamais une comparaison approximative de
+ * chaînes, type `startsWith`, qui ne distinguerait pas une URL
+ * authentiquement HTTP d'un protocole arbitraire contenant la même
+ * sous-chaîne) — une URL absente ou malformée est traitée séparément,
+ * jamais confondue avec un simple avertissement HTTP. Pure et exportée
+ * pour rester testable indépendamment d'Electron/d'un environnement
+ * packagé réel.
+ *
+ * Avertissement UNIQUEMENT (jamais un blocage) : aucune décision validée
+ * ne prévoit d'empêcher le démarrage pour ce cas — voir §4 du cahier des
+ * charges de cette sous-phase ("ne bloque pas arbitrairement").
+ */
+export type ResultatValidationApiUrl = { type: "ok" } | { type: "avertissement_http_non_chiffre"; message: string } | { type: "url_malformee"; message: string };
 
+export function validerApiUrl(apiUrl: string | undefined | null, estPackage: boolean): ResultatValidationApiUrl {
+  if (!apiUrl || !apiUrl.trim()) {
+    return { type: "url_malformee", message: "Aucune URL de serveur de synchronisation configurée (MAXI_EQUIP_API_URL)." };
+  }
+  let url: URL;
+  try {
+    url = new URL(apiUrl);
+  } catch {
+    return { type: "url_malformee", message: `L'URL du serveur de synchronisation est malformée : "${apiUrl}".` };
+  }
+  if (url.protocol === "http:" && estPackage) {
+    return {
+      type: "avertissement_http_non_chiffre",
+      message: `Le serveur de synchronisation (${apiUrl}) utilise HTTP non chiffré en dehors d'un environnement de développement local — les données (dont le jeton d'authentification) transitent en clair sur le réseau. Utilisez une URL HTTPS.`,
+    };
+  }
+  return { type: "ok" };
+}
+
+export function getConfigurationSync(): ConfigurationSync {
   // Même garde qu'au-dessus : `app` peut être indisponible hors d'un vrai
   // runtime Electron (tests vitest) — jamais un accès direct non protégé.
   let estPackage = false;
@@ -101,10 +132,25 @@ export function getConfigurationSync(): ConfigurationSync {
   } catch {
     estPackage = false;
   }
+
+  const local = lireConfigurationLocale();
   const defautApiUrl = estPackage ? DEFAULT_API_URL_PRODUCTION : DEFAULT_API_URL_DEV;
+  const apiUrl = local ? local.apiUrl : (process.env["MAXI_EQUIP_API_URL"] ?? defautApiUrl);
+
+  const validation = validerApiUrl(apiUrl, estPackage);
+  if (validation.type === "avertissement_http_non_chiffre") {
+    // eslint-disable-next-line no-console
+    console.warn(`[sync-config] ${validation.message}`);
+  }
+  // Une URL malformée/absente n'est JAMAIS bloquante ici (ce cas ne
+  // devrait survenir qu'avec une configuration locale corrompue ou une
+  // variable d'environnement mal saisie) — la requête réseau elle-même
+  // échouera normalement et sera gérée par le mécanisme d'erreur déjà
+  // existant de SyncService, jamais une seconde logique de validation.
+
   return {
-    apiUrl: process.env["MAXI_EQUIP_API_URL"] ?? defautApiUrl,
-    jwt: process.env["MAXI_EQUIP_SYNC_JWT"] ?? null,
+    apiUrl,
+    jwt: local ? local.jwt : (process.env["MAXI_EQUIP_SYNC_JWT"] ?? null),
   };
 }
 

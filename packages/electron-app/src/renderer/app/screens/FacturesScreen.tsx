@@ -255,9 +255,11 @@ export function FacturesScreen({
   const [chargementAction, setChargementAction] = useState<string | null>(null);
   const [apercu, setApercu] = useState<{ chemin: string; nomSuggere: string; titre: string } | null>(null);
   const [factureAAnnuler, setFactureAAnnuler] = useState<FactureAvecVendeur | null>(null);
-  // Correction "choix du modèle d'impression" (2026-11-13) — A5 par
-  // défaut (décision utilisateur), appliqué à Voir/Imprimer/Télécharger.
-  const [formatImpression, setFormatImpression] = useState<"a5" | "a4">("a5");
+  // Correction "choix du modèle d'impression" (2026-11-13), mise à jour
+  // Phase 4 : "a5" (format indépendant) retiré — "a4-paysage" (deux
+  // exemplaires A5 construits dans le PDF) est désormais le défaut,
+  // appliqué à Voir/Imprimer/Télécharger.
+  const [formatImpression, setFormatImpression] = useState<"a4-paysage" | "a4">("a4-paysage");
 
   const [page, setPage] = useState(1);
 
@@ -534,11 +536,11 @@ export function FacturesScreen({
           <select
             style={inputStyle}
             value={formatImpression}
-            onChange={(e) => setFormatImpression(e.target.value as "a5" | "a4")}
+            onChange={(e) => setFormatImpression(e.target.value as "a4-paysage" | "a4")}
             title="Format utilisé pour Voir / Imprimer / Télécharger"
           >
-            <option value="a5">Modèle A5 (compact)</option>
-            <option value="a4">Modèle A4 (complet)</option>
+            <option value="a4-paysage">A4 paysage — 2 exemplaires</option>
+            <option value="a4">A4 portrait — complet</option>
           </select>
           {(recherche || statutFiltre !== "tous" || vendeurFiltreId !== null) && (
             <Button

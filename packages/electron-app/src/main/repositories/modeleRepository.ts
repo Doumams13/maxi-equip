@@ -7,6 +7,8 @@ interface ModeleRow {
   motif: string;
   type: string;
   ordre_vitrine: number | null;
+  sous_categorie_id: string | null;
+  marque: string | null;
   deleted_at: string | null;
   deleted_by: string | null;
   created_at: string;
@@ -19,6 +21,8 @@ function rowToModele(row: ModeleRow): ModeleProduit {
     motif: row.motif,
     type: row.type,
     ordreVitrine: row.ordre_vitrine,
+    sousCategorieId: row.sous_categorie_id,
+    marque: row.marque,
     deletedAt: row.deleted_at,
     deletedBy: row.deleted_by,
     createdAt: row.created_at,
@@ -41,12 +45,14 @@ export class ModeleRepository {
     return row ? rowToModele(row) : null;
   }
 
-  create(input: { motif: string; type: string }): string {
+  create(input: { motif: string; type: string; sousCategorieId?: string | null; marque?: string | null }): string {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
-      .prepare("INSERT INTO modeles_produit (id, motif, type, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?)")
-      .run(id, input.motif.trim(), input.type.trim(), now, now);
+      .prepare(
+        "INSERT INTO modeles_produit (id, motif, type, sous_categorie_id, marque, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)"
+      )
+      .run(id, input.motif.trim(), input.type.trim(), input.sousCategorieId ?? null, input.marque?.trim() || null, now, now);
     return id;
   }
 
@@ -62,30 +68,46 @@ export class ModeleRepository {
    * ici (contrairement à `ProduitRepository.creerDepuisServeur`
    * ci-dessous, dépendant de celle-ci).
    */
-  creerDepuisServeur(modele: { id: string; motif: string; type: string; ordreVitrine: number | null }): void {
+  creerDepuisServeur(modele: {
+    id: string;
+    motif: string;
+    type: string;
+    ordreVitrine: number | null;
+    // Phase 5 (référentiel commun), sous-phase 5.5 — absents (ancien serveur/ancien payload) traités comme null, jamais inventés.
+    sousCategorieId?: string | null;
+    marque?: string | null;
+  }): void {
     const now = new Date().toISOString();
+    const sousCategorieId = modele.sousCategorieId ?? null;
+    const marque = modele.marque ?? null;
     const existe = this.db.prepare("SELECT id FROM modeles_produit WHERE id = ?").get(modele.id) as { id: string } | undefined;
     if (existe) {
       this.db
-        .prepare("UPDATE modeles_produit SET motif = ?, type = ?, ordre_vitrine = ?, updated_at = ? WHERE id = ?")
-        .run(modele.motif, modele.type, modele.ordreVitrine, now, modele.id);
+        .prepare("UPDATE modeles_produit SET motif = ?, type = ?, ordre_vitrine = ?, sous_categorie_id = ?, marque = ?, updated_at = ? WHERE id = ?")
+        .run(modele.motif, modele.type, modele.ordreVitrine, sousCategorieId, marque, now, modele.id);
       return;
     }
     this.db
       .prepare(
-        `INSERT INTO modeles_produit (id, motif, type, ordre_vitrine, deleted_at, deleted_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)`
+        `INSERT INTO modeles_produit (id, motif, type, ordre_vitrine, sous_categorie_id, marque, deleted_at, deleted_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`
       )
-      .run(modele.id, modele.motif, modele.type, modele.ordreVitrine, now, now);
+      .run(modele.id, modele.motif, modele.type, modele.ordreVitrine, sousCategorieId, marque, now, now);
   }
 
-  update(id: string, input: { motif?: string; type?: string }): void {
+  update(id: string, input: { motif?: string; type?: string; sousCategorieId?: string | null; marque?: string | null }): void {
     const now = new Date().toISOString();
     if (input.motif !== undefined) {
       this.db.prepare("UPDATE modeles_produit SET motif = ?, updated_at = ? WHERE id = ?").run(input.motif.trim(), now, id);
     }
     if (input.type !== undefined) {
       this.db.prepare("UPDATE modeles_produit SET type = ?, updated_at = ? WHERE id = ?").run(input.type.trim(), now, id);
+    }
+    if (input.sousCategorieId !== undefined) {
+      this.db.prepare("UPDATE modeles_produit SET sous_categorie_id = ?, updated_at = ? WHERE id = ?").run(input.sousCategorieId, now, id);
+    }
+    if (input.marque !== undefined) {
+      this.db.prepare("UPDATE modeles_produit SET marque = ?, updated_at = ? WHERE id = ?").run(input.marque?.trim() || null, now, id);
     }
   }
 
@@ -133,5 +155,53 @@ export class ModeleRepository {
     return (
       this.db.prepare("SELECT DISTINCT type FROM modeles_produit WHERE deleted_at IS NULL ORDER BY type").all() as { type: string }[]
     ).map((r) => r.type);
+  }
+
+  /**
+   * Phase 5 (référentiel commun), sous-phase 5.6 — garde bloquante pour
+   * `catalogue:supprimerSousCategorie` : une sous-catégorie ne peut être
+   * supprimée tant qu'un modèle ACTIF (non supprimé) la référence
+   * encore. Équivalent exact à `modeles_produit.sous_categorie_id = ?
+   * AND deleted_at IS NULL` — simple test d'existence (`LIMIT 1`),
+   * jamais un comptage complet (inutile pour une garde booléenne). Les
+   * produits associés à ces modèles sont protégés PAR CETTE MÊME garde
+   * (un produit ne peut exister sans modèle actif) — jamais une
+   * deuxième règle redondante.
+   */
+  existeModeleActifPourSousCategorie(sousCategorieId: string): boolean {
+    const row = this.db.prepare("SELECT 1 FROM modeles_produit WHERE sous_categorie_id = ? AND deleted_at IS NULL LIMIT 1").get(sousCategorieId);
+    return row !== undefined;
+  }
+
+  /**
+   * Phase 5 (référentiel commun), sous-phase 5.6 — badge de
+   * classification orpheline : un modèle dont la sous-catégorie (ou,
+   * transitivement, la catégorie) référencée a été supprimée par un
+   * autre poste (tombstone reçu, voir SousCategorieRepository/
+   * CategorieRepository.creerDepuisServeur) reste PARFAITEMENT intact
+   * et lisible — seul un indicateur dérivé, calculé à la lecture via
+   * `LEFT JOIN` (jamais une colonne persistée, jamais un recalcul
+   * stocké), signale la situation à l'utilisateur. `sousCategorieId`
+   * `NULL` (modèle jamais classé) donne `sousCategorieSupprimee: false`
+   * (rien à signaler), cohérent avec le comportement historique.
+   */
+  listAvecStatutClassification(): Array<ModeleProduit & { sousCategorieSupprimee: boolean; categorieSupprimee: boolean }> {
+    const rows = this.db
+      .prepare(
+        `SELECT m.*,
+                CASE WHEN m.sous_categorie_id IS NOT NULL AND sc.deleted_at IS NOT NULL THEN 1 ELSE 0 END as sous_categorie_supprimee,
+                CASE WHEN m.sous_categorie_id IS NOT NULL AND c.deleted_at IS NOT NULL THEN 1 ELSE 0 END as categorie_supprimee
+         FROM modeles_produit m
+         LEFT JOIN sous_categories sc ON sc.id = m.sous_categorie_id
+         LEFT JOIN categories c ON c.id = sc.categorie_id
+         WHERE m.deleted_at IS NULL
+         ORDER BY m.type, m.motif`
+      )
+      .all() as (ModeleRow & { sous_categorie_supprimee: number; categorie_supprimee: number })[];
+    return rows.map((row) => ({
+      ...rowToModele(row),
+      sousCategorieSupprimee: row.sous_categorie_supprimee === 1,
+      categorieSupprimee: row.categorie_supprimee === 1,
+    }));
   }
 }

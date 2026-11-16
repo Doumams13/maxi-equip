@@ -3,6 +3,7 @@ import { createRouter } from "./index.js";
 import type { ApiRequest } from "./core/types.js";
 import { signerJwt } from "./core/jwt.js";
 import { initialiserStockageServeur, fermerStockageServeur, enregistrerOperations, listerOperationsDepuis } from "./core/storeServeur.js";
+import { reinitialiserLimitationPourTests } from "./core/rateLimiter.js";
 import { getIdentiteActuelle } from "./core/identiteStore.js";
 
 function req(overrides: Partial<ApiRequest>): ApiRequest {
@@ -22,6 +23,8 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     process.env["JWT_SIGNING_SECRET"] = SECRET_TEST;
     process.env["MAXI_EQUIP_ENV"] = "test";
     initialiserStockageServeur(":memory:");
+    // Phase 5 (référentiel commun), sous-phase 5.8, chantier E — voir le commentaire équivalent dans catalogSync.test.ts.
+    reinitialiserLimitationPourTests();
   });
   afterEach(() => {
     delete process.env["JWT_SIGNING_SECRET"];

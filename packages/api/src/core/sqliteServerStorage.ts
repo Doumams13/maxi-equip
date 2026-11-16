@@ -27,6 +27,12 @@ import {
   type CompteCatchupRow,
   type PosteRow,
   type ResultatCreationPosteAnnexe,
+  type CategorieCataloguePayload,
+  type CategorieRow,
+  type SousCategorieCataloguePayload,
+  type SousCategorieRow,
+  type SousCategorieChampCataloguePayload,
+  type SousCategorieChampRow,
 } from "./serverStorage.js";
 
 /**
@@ -49,13 +55,17 @@ export class SqliteServerStorage implements ServerStorage {
       );
 
       CREATE TABLE IF NOT EXISTS catalogue_modeles (
-        id            TEXT PRIMARY KEY,
-        motif         TEXT NOT NULL,
-        type          TEXT NOT NULL,
-        slug          TEXT NOT NULL,
-        ordre_vitrine INTEGER,
-        deleted_at    TEXT,
-        updated_at    TEXT NOT NULL
+        id                TEXT PRIMARY KEY,
+        motif             TEXT NOT NULL,
+        type              TEXT NOT NULL,
+        slug              TEXT NOT NULL,
+        ordre_vitrine     INTEGER,
+        -- Phase 5 (référentiel commun) — voir serverStorage.ts
+        -- (ModeleCataloguePayload) pour le raisonnement complet.
+        sous_categorie_id TEXT,
+        marque            TEXT,
+        deleted_at        TEXT,
+        updated_at        TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogue_modeles_slug ON catalogue_modeles (slug);
 
@@ -68,6 +78,12 @@ export class SqliteServerStorage implements ServerStorage {
         hauteur    REAL,
         reference  TEXT NOT NULL,
         prix       INTEGER NOT NULL,
+        -- Fondations quincaillerie (Phase 1) côté SQLite serveur,
+        -- câblées en écriture en Phase 5 — voir serverStorage.ts
+        -- (ProduitCataloguePayload) pour le raisonnement complet.
+        unite_vente      TEXT,
+        caracteristiques TEXT,
+        marque           TEXT,
         deleted_at TEXT,
         updated_at TEXT NOT NULL
       );
@@ -184,6 +200,58 @@ export class SqliteServerStorage implements ServerStorage {
         updated_at          TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_postes_role_shop_unique ON postes (role) WHERE role = 'shop';
+
+      -- Référentiel commun du catalogue — Phase 5 (voir
+      -- PHASE_5_CAHIER_DES_CHARGES.md). Tables de projection DÉDIÉES,
+      -- jamais fusionnées dans catalogue_modeles/catalogue_produits —
+      -- jamais exposées à publicCatalog.ts. Voir serverStorage.ts
+      -- (CategorieCataloguePayload et suivants) pour le raisonnement
+      -- complet, notamment l'absence volontaire de deleted_by.
+      CREATE TABLE IF NOT EXISTS catalogue_categories (
+        id             TEXT PRIMARY KEY,
+        nom            TEXT NOT NULL,
+        image_data_url TEXT,
+        ordre          INTEGER NOT NULL DEFAULT 0,
+        deleted_at     TEXT,
+        updated_at     TEXT NOT NULL
+      );
+
+      -- unites_autorisees : JSON (tableau de chaînes) ou NULL — NULL
+      -- signifie "non configurée" (les 6 unités restent proposées par
+      -- défaut), jamais une liste vide (refusée dès la saisie locale,
+      -- voir domain/catalogue, validerConfigurationUnites). Colonne,
+      -- jamais une table séparée (décision définitive, §4.6 du cahier
+      -- des charges).
+      CREATE TABLE IF NOT EXISTS catalogue_sous_categories (
+        id                TEXT PRIMARY KEY,
+        categorie_id      TEXT NOT NULL,
+        nom               TEXT NOT NULL,
+        ordre             INTEGER NOT NULL DEFAULT 0,
+        modele_physique   TEXT,
+        unites_autorisees TEXT,
+        deleted_at        TEXT,
+        updated_at        TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_catalogue_sous_categories_categorie ON catalogue_sous_categories (categorie_id);
+
+      -- Tombstone dès la conception (deleted_at) — jamais une
+      -- suppression physique côté serveur, pour que la suppression d'un
+      -- champ soit répliquable par upsert LWW comme toute autre
+      -- modification (§9 du cahier des charges).
+      CREATE TABLE IF NOT EXISTS catalogue_sous_categorie_champs (
+        id                 TEXT PRIMARY KEY,
+        sous_categorie_id  TEXT NOT NULL,
+        nom                TEXT NOT NULL,
+        type               TEXT NOT NULL,
+        obligatoire        INTEGER NOT NULL DEFAULT 0,
+        valeurs_autorisees TEXT,
+        unite_mesure       TEXT,
+        role               TEXT,
+        ordre              INTEGER NOT NULL DEFAULT 0,
+        deleted_at         TEXT,
+        updated_at         TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_catalogue_sous_categorie_champs_sous_categorie ON catalogue_sous_categorie_champs (sous_categorie_id);
     `);
 
     // Secours pour un fichier SQLite de dev déjà créé avant cette
@@ -192,6 +260,27 @@ export class SqliteServerStorage implements ServerStorage {
     const colonnesModeles = db.prepare("PRAGMA table_info(catalogue_modeles)").all() as { name: string }[];
     if (!colonnesModeles.some((c) => c.name === "ordre_vitrine")) {
       db.exec("ALTER TABLE catalogue_modeles ADD COLUMN ordre_vitrine INTEGER");
+    }
+    // Phase 5 (référentiel commun) — mêmes colonnes que
+    // postgresServerStorage.ts (sousCategorieId/marque sur le modèle ;
+    // unite_vente/caracteristiques/marque sur le produit — ces deux
+    // premières existaient déjà côté PostgreSQL mais pas encore ici,
+    // voir serverStorage.ts), même raisonnement de secours.
+    if (!colonnesModeles.some((c) => c.name === "sous_categorie_id")) {
+      db.exec("ALTER TABLE catalogue_modeles ADD COLUMN sous_categorie_id TEXT");
+    }
+    if (!colonnesModeles.some((c) => c.name === "marque")) {
+      db.exec("ALTER TABLE catalogue_modeles ADD COLUMN marque TEXT");
+    }
+    const colonnesProduits = db.prepare("PRAGMA table_info(catalogue_produits)").all() as { name: string }[];
+    if (!colonnesProduits.some((c) => c.name === "unite_vente")) {
+      db.exec("ALTER TABLE catalogue_produits ADD COLUMN unite_vente TEXT");
+    }
+    if (!colonnesProduits.some((c) => c.name === "caracteristiques")) {
+      db.exec("ALTER TABLE catalogue_produits ADD COLUMN caracteristiques TEXT");
+    }
+    if (!colonnesProduits.some((c) => c.name === "marque")) {
+      db.exec("ALTER TABLE catalogue_produits ADD COLUMN marque TEXT");
     }
   }
 
@@ -258,18 +347,30 @@ export class SqliteServerStorage implements ServerStorage {
 
     const resultat = this.db
       .prepare(
-        `INSERT INTO catalogue_modeles (id, motif, type, slug, ordre_vitrine, deleted_at, updated_at)
-         VALUES (@id, @motif, @type, @slug, @ordreVitrine, @deletedAt, @updatedAt)
+        `INSERT INTO catalogue_modeles (id, motif, type, slug, ordre_vitrine, sous_categorie_id, marque, deleted_at, updated_at)
+         VALUES (@id, @motif, @type, @slug, @ordreVitrine, @sousCategorieId, @marque, @deletedAt, @updatedAt)
          ON CONFLICT(id) DO UPDATE SET
            motif = excluded.motif,
            type = excluded.type,
            slug = excluded.slug,
            ordre_vitrine = excluded.ordre_vitrine,
+           sous_categorie_id = excluded.sous_categorie_id,
+           marque = excluded.marque,
            deleted_at = excluded.deleted_at,
            updated_at = excluded.updated_at
          WHERE excluded.updated_at >= catalogue_modeles.updated_at`
       )
-      .run({ id: payload.modeleId, motif: payload.motif, type: payload.type, slug, ordreVitrine: payload.ordreVitrine, deletedAt, updatedAt: payload.updatedAt });
+      .run({
+        id: payload.modeleId,
+        motif: payload.motif,
+        type: payload.type,
+        slug,
+        ordreVitrine: payload.ordreVitrine,
+        sousCategorieId: payload.sousCategorieId,
+        marque: payload.marque,
+        deletedAt,
+        updatedAt: payload.updatedAt,
+      });
 
     return { applique: resultat.changes > 0 };
   }
@@ -279,8 +380,8 @@ export class SqliteServerStorage implements ServerStorage {
 
     const resultat = this.db
       .prepare(
-        `INSERT INTO catalogue_produits (id, modele_id, taille, taille_tri, largeur, hauteur, reference, prix, deleted_at, updated_at)
-         VALUES (@id, @modeleId, @taille, @tailleTri, @largeur, @hauteur, @reference, @prix, @deletedAt, @updatedAt)
+        `INSERT INTO catalogue_produits (id, modele_id, taille, taille_tri, largeur, hauteur, reference, prix, unite_vente, caracteristiques, marque, deleted_at, updated_at)
+         VALUES (@id, @modeleId, @taille, @tailleTri, @largeur, @hauteur, @reference, @prix, @uniteVente, @caracteristiques, @marque, @deletedAt, @updatedAt)
          ON CONFLICT(id) DO UPDATE SET
            modele_id = excluded.modele_id,
            taille = excluded.taille,
@@ -289,6 +390,9 @@ export class SqliteServerStorage implements ServerStorage {
            hauteur = excluded.hauteur,
            reference = excluded.reference,
            prix = excluded.prix,
+           unite_vente = excluded.unite_vente,
+           caracteristiques = excluded.caracteristiques,
+           marque = excluded.marque,
            deleted_at = excluded.deleted_at,
            updated_at = excluded.updated_at
          WHERE excluded.updated_at >= catalogue_produits.updated_at`
@@ -302,6 +406,9 @@ export class SqliteServerStorage implements ServerStorage {
         hauteur: payload.hauteur,
         reference: payload.reference,
         prix: payload.prix,
+        uniteVente: payload.uniteVente,
+        caracteristiques: payload.caracteristiques,
+        marque: payload.marque,
         deletedAt,
         updatedAt: payload.updatedAt,
       });
@@ -408,14 +515,16 @@ export class SqliteServerStorage implements ServerStorage {
 
   async listerModelesActifs(): Promise<ModeleRow[]> {
     return this.db
-      .prepare("SELECT id, motif, type, slug, ordre_vitrine as ordreVitrine, updated_at as updatedAt FROM catalogue_modeles WHERE deleted_at IS NULL ORDER BY type, motif")
+      .prepare(
+        "SELECT id, motif, type, slug, ordre_vitrine as ordreVitrine, sous_categorie_id as sousCategorieId, marque, updated_at as updatedAt FROM catalogue_modeles WHERE deleted_at IS NULL ORDER BY type, motif"
+      )
       .all() as ModeleRow[];
   }
 
   async listerProduitsActifs(): Promise<ProduitRow[]> {
     return this.db
       .prepare(
-        "SELECT id, modele_id as modeleId, taille, taille_tri as tailleTri, largeur, hauteur, reference, prix FROM catalogue_produits WHERE deleted_at IS NULL ORDER BY taille_tri"
+        "SELECT id, modele_id as modeleId, taille, taille_tri as tailleTri, largeur, hauteur, reference, prix, unite_vente as uniteVente, caracteristiques, marque FROM catalogue_produits WHERE deleted_at IS NULL ORDER BY taille_tri"
       )
       .all() as ProduitRow[];
   }
@@ -444,6 +553,173 @@ export class SqliteServerStorage implements ServerStorage {
               (p) => p.produit_id
             )
           : [],
+    }));
+  }
+
+  // ==========================================================
+  // Référentiel commun du catalogue — Phase 5. Voir serverStorage.ts
+  // (CategorieCataloguePayload et suivants) pour le raisonnement complet.
+  // ==========================================================
+
+  async appliquerOperationCategorie(payload: CategorieCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const resultat = this.db
+      .prepare(
+        `INSERT INTO catalogue_categories (id, nom, image_data_url, ordre, deleted_at, updated_at)
+         VALUES (@id, @nom, @imageDataUrl, @ordre, @deletedAt, @updatedAt)
+         ON CONFLICT(id) DO UPDATE SET
+           nom = excluded.nom,
+           image_data_url = excluded.image_data_url,
+           ordre = excluded.ordre,
+           deleted_at = excluded.deleted_at,
+           updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= catalogue_categories.updated_at`
+      )
+      .run({ id: payload.categorieId, nom: payload.nom, imageDataUrl: payload.imageDataUrl, ordre: payload.ordre, deletedAt, updatedAt: payload.updatedAt });
+    return { applique: resultat.changes > 0 };
+  }
+
+  async listerCategoriesActives(): Promise<CategorieRow[]> {
+    // Phase 5 (référentiel commun), sous-phase 5.6 — plus de filtre
+    // deleted_at : les tombstones doivent être transmis aux autres
+    // postes (voir §3 du rapport de cette sous-phase), même principe LWW
+    // qu'une modification ordinaire.
+    return this.db
+      .prepare(
+        "SELECT id, nom, image_data_url as imageDataUrl, ordre, deleted_at as deletedAt, updated_at as updatedAt FROM catalogue_categories ORDER BY ordre, nom"
+      )
+      .all() as CategorieRow[];
+  }
+
+  async appliquerOperationSousCategorie(payload: SousCategorieCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const unitesAutoriseesJson = payload.unitesAutorisees ? JSON.stringify(payload.unitesAutorisees) : null;
+    const resultat = this.db
+      .prepare(
+        `INSERT INTO catalogue_sous_categories (id, categorie_id, nom, ordre, modele_physique, unites_autorisees, deleted_at, updated_at)
+         VALUES (@id, @categorieId, @nom, @ordre, @modelePhysique, @unitesAutoriseesJson, @deletedAt, @updatedAt)
+         ON CONFLICT(id) DO UPDATE SET
+           categorie_id = excluded.categorie_id,
+           nom = excluded.nom,
+           ordre = excluded.ordre,
+           modele_physique = excluded.modele_physique,
+           unites_autorisees = excluded.unites_autorisees,
+           deleted_at = excluded.deleted_at,
+           updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= catalogue_sous_categories.updated_at`
+      )
+      .run({
+        id: payload.sousCategorieId,
+        categorieId: payload.categorieId,
+        nom: payload.nom,
+        ordre: payload.ordre,
+        modelePhysique: payload.modelePhysique,
+        unitesAutoriseesJson,
+        deletedAt,
+        updatedAt: payload.updatedAt,
+      });
+    return { applique: resultat.changes > 0 };
+  }
+
+  async listerSousCategoriesActives(): Promise<SousCategorieRow[]> {
+    // Phase 5 (référentiel commun), sous-phase 5.6 — plus de filtre deleted_at (voir listerCategoriesActives ci-dessus).
+    const rows = this.db
+      .prepare(
+        `SELECT id, categorie_id as categorieId, nom, ordre, modele_physique as modelePhysique,
+                unites_autorisees as unitesAutoriseesJson, deleted_at as deletedAt, updated_at as updatedAt
+         FROM catalogue_sous_categories ORDER BY ordre, nom`
+      )
+      .all() as {
+      id: string;
+      categorieId: string;
+      nom: string;
+      ordre: number;
+      modelePhysique: SousCategorieRow["modelePhysique"];
+      unitesAutoriseesJson: string | null;
+      deletedAt: string | null;
+      updatedAt: string;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      categorieId: r.categorieId,
+      nom: r.nom,
+      ordre: r.ordre,
+      modelePhysique: r.modelePhysique,
+      unitesAutorisees: r.unitesAutoriseesJson ? (JSON.parse(r.unitesAutoriseesJson) as SousCategorieRow["unitesAutorisees"]) : null,
+      deletedAt: r.deletedAt,
+      updatedAt: r.updatedAt,
+    }));
+  }
+
+  async appliquerOperationSousCategorieChamp(payload: SousCategorieChampCataloguePayload): Promise<{ applique: boolean }> {
+    const deletedAt = payload.operation === "delete" ? payload.updatedAt : null;
+    const valeursAutoriseesJson = payload.valeursAutorisees ? JSON.stringify(payload.valeursAutorisees) : null;
+    const resultat = this.db
+      .prepare(
+        `INSERT INTO catalogue_sous_categorie_champs (id, sous_categorie_id, nom, type, obligatoire, valeurs_autorisees, unite_mesure, role, ordre, deleted_at, updated_at)
+         VALUES (@id, @sousCategorieId, @nom, @type, @obligatoire, @valeursAutoriseesJson, @uniteMesure, @role, @ordre, @deletedAt, @updatedAt)
+         ON CONFLICT(id) DO UPDATE SET
+           sous_categorie_id = excluded.sous_categorie_id,
+           nom = excluded.nom,
+           type = excluded.type,
+           obligatoire = excluded.obligatoire,
+           valeurs_autorisees = excluded.valeurs_autorisees,
+           unite_mesure = excluded.unite_mesure,
+           role = excluded.role,
+           ordre = excluded.ordre,
+           deleted_at = excluded.deleted_at,
+           updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= catalogue_sous_categorie_champs.updated_at`
+      )
+      .run({
+        id: payload.champId,
+        sousCategorieId: payload.sousCategorieId,
+        nom: payload.nom,
+        type: payload.type,
+        obligatoire: payload.obligatoire ? 1 : 0,
+        valeursAutoriseesJson,
+        uniteMesure: payload.uniteMesure,
+        role: payload.role,
+        ordre: payload.ordre,
+        deletedAt,
+        updatedAt: payload.updatedAt,
+      });
+    return { applique: resultat.changes > 0 };
+  }
+
+  async listerSousCategorieChampsActifs(): Promise<SousCategorieChampRow[]> {
+    // Phase 5 (référentiel commun), sous-phase 5.6 — plus de filtre deleted_at (voir listerCategoriesActives ci-dessus).
+    const rows = this.db
+      .prepare(
+        `SELECT id, sous_categorie_id as sousCategorieId, nom, type, obligatoire,
+                valeurs_autorisees as valeursAutoriseesJson, unite_mesure as uniteMesure, role, ordre, deleted_at as deletedAt, updated_at as updatedAt
+         FROM catalogue_sous_categorie_champs ORDER BY ordre, nom`
+      )
+      .all() as {
+      id: string;
+      sousCategorieId: string;
+      nom: string;
+      type: SousCategorieChampRow["type"];
+      obligatoire: number;
+      valeursAutoriseesJson: string | null;
+      uniteMesure: string | null;
+      role: SousCategorieChampRow["role"];
+      ordre: number;
+      deletedAt: string | null;
+      updatedAt: string;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      sousCategorieId: r.sousCategorieId,
+      nom: r.nom,
+      type: r.type,
+      obligatoire: r.obligatoire === 1,
+      valeursAutorisees: r.valeursAutoriseesJson ? (JSON.parse(r.valeursAutoriseesJson) as string[]) : null,
+      uniteMesure: r.uniteMesure,
+      role: r.role,
+      ordre: r.ordre,
+      deletedAt: r.deletedAt,
+      updatedAt: r.updatedAt,
     }));
   }
 

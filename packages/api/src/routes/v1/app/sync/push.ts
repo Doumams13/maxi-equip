@@ -2,12 +2,16 @@ import type { Route } from "../../../../core/types.js";
 import { validerRequetePush } from "../../../../core/validationSync.js";
 import { enregistrerOperations, type OperationRecue, type ResultatEnregistrement } from "../../../../core/storeServeur.js";
 import { getPosteEventBus } from "../../../../core/posteEventBus.js";
+import { verifierLimitation } from "../../../../core/rateLimiter.js";
+import { TooManyRequestsError } from "../../../../core/errors.js";
 import { validerOperationModele, validerOperationProduit, validerOperationPromotion, validerOperationIdentite } from "../../../../core/validationCatalogueSync.js";
 import { appliquerOperationModele, appliquerOperationProduit, appliquerOperationPromotion } from "../../../../core/catalogStore.js";
 import { appliquerOperationIdentite } from "../../../../core/identiteStore.js";
 import { appliquerOperationCompte } from "../../../../core/compteStore.js";
 import { appliquerOperationEmplacement } from "../../../../core/emplacementStore.js";
 import { validerOperationCompte, validerOperationEmplacement } from "../../../../core/validationCatalogueSync.js";
+import { validerOperationCategorie, validerOperationSousCategorie, validerOperationSousCategorieChamp } from "../../../../core/validationCatalogueSync.js";
+import { appliquerOperationCategorie, appliquerOperationSousCategorie, appliquerOperationSousCategorieChamp } from "../../../../core/referentielStore.js";
 
 /**
  * POST /v1/sync/push — Phase 3.6, Partie 3.
@@ -46,7 +50,13 @@ import { validerOperationCompte, validerOperationEmplacement } from "../../../..
  */
 
 const TYPES_CATALOGUE = new Set(["modele", "produit", "promotion"]);
-const TYPES_PROJECTION = new Set([...TYPES_CATALOGUE, "parametres_entreprise", "compte", "emplacement"]);
+// Phase 5 (référentiel commun), sous-phase 5.3 — "sous_categorie" porte
+// aussi, en sous-objet de son payload, la configuration d'unités
+// autorisées (voir validationCatalogueSync.ts/SousCategorieCataloguePayload) ;
+// jamais un 4ᵉ type "unites" séparé (décision définitive, voir
+// PHASE_5_CAHIER_DES_CHARGES.md §4.6/§7.3).
+const TYPES_REFERENTIEL = new Set(["categorie", "sous_categorie", "sous_categorie_champ"]);
+const TYPES_PROJECTION = new Set([...TYPES_CATALOGUE, "parametres_entreprise", "compte", "emplacement", ...TYPES_REFERENTIEL]);
 
 /**
  * Système multiposte fiable (2026-10-28) — ces 4 types génèrent une
@@ -61,11 +71,36 @@ const TYPES_PROJECTION = new Set([...TYPES_CATALOGUE, "parametres_entreprise", "
  */
 const TYPES_AVEC_ORIGINE_POSTE = new Set(["vente", "entree", "sortie", "transfert"]);
 
+// Phase 5 (référentiel commun), sous-phase 5.8, chantier E — l'API est
+// RÉELLEMENT exposée publiquement (déployée en production derrière
+// Nginx/Certbot, voir deploy/README.md) : l'ancienne analyse de
+// router.ts affirmant le contraire est obsolète (voir la correction
+// apportée à ce fichier dans le cadre de ce même chantier). Garde
+// applicative MINIMALE, réutilisant le mécanisme déjà existant
+// (core/rateLimiter.ts, déjà en place pour login/installation-
+// récupération/demandes du site) — jamais un second système inventé.
+// Clé = poste authentifié (`req.auth.sub`), jamais seulement l'IP :
+// plusieurs postes d'une même installation peuvent partager une IP
+// (NAT local), et un poste ne doit jamais être pénalisé par l'activité
+// d'un autre. Seuil DÉLIBÉRÉMENT généreux : une seule requête /sync/push
+// transporte déjà TOUT le lot en attente (jamais une requête par
+// entité, voir SyncService.effectuerPush côté app) — même un rattrapage
+// proactif massif (Phase 5.7) ou une rafale de signaux SSE déclenchant
+// des resynchronisations immédiates reste très en dessous de ce seuil
+// en usage normal.
+const MAX_PUSH_PAR_FENETRE = 30;
+const FENETRE_PUSH_MS = 60 * 1000;
+
 export const pushRoute: Route = {
   method: "POST",
   path: "/sync/push",
   trustLevel: "app",
   handler: async (req) => {
+    const limitation = verifierLimitation(req.auth ? `sync-push:${req.auth.sub}` : undefined, MAX_PUSH_PAR_FENETRE, FENETRE_PUSH_MS);
+    if (!limitation.autorise) {
+      throw new TooManyRequestsError(`Trop de requêtes de synchronisation — réessayez dans ${limitation.reessayerDansSecondes ?? 60} secondes.`);
+    }
+
     const operations = validerRequetePush(req.body);
 
     // Deux passes délibérées : TOUT valider d'abord (aucun effet de bord),
@@ -96,27 +131,66 @@ export const pushRoute: Route = {
                 ? validerOperationCompte(op.payload)
                 : op.entityType === "emplacement"
                   ? validerOperationEmplacement(op.payload)
-                  : validerOperationIdentite(op.payload);
+                  : op.entityType === "categorie"
+                    ? validerOperationCategorie(op.payload)
+                    : op.entityType === "sous_categorie"
+                      ? validerOperationSousCategorie(op.payload)
+                      : op.entityType === "sous_categorie_champ"
+                        ? validerOperationSousCategorieChamp(op.payload)
+                        : validerOperationIdentite(op.payload);
       operationsCatalogue.push({ index, entityType: op.entityType, payload });
     });
 
     const resultats: (ResultatEnregistrement | null)[] = new Array(operations.length).fill(null);
+    // Phase 5 (référentiel commun), sous-phase 5.8 — notification SSE
+    // immédiate pour les 3 types référentiels UNIQUEMENT (jamais
+    // modele/produit/promotion/compte/emplacement/parametres_entreprise,
+    // hors périmètre de ce chantier). `applique` (renvoyé par
+    // `appliquerOperationX`, voir core/referentielStore.ts) distingue une
+    // écriture RÉELLEMENT nouvelle d'une opération déjà traitée/rejetée
+    // par la condition LWW (`updatedAt` périmé) — jamais notifié dans ce
+    // second cas, contrairement au statut "cree" toujours renvoyé au
+    // client ci-dessous (qui lui n'a besoin que de confirmer son envoi).
+    const entityTypesANotifier: string[] = [];
 
     // Séquentiel (jamais Promise.all) — préserve l'ordre logique
     // d'application déjà garanti pour le lot hérité (Partie K de l'audit
     // pré-production : "respecter leur ordre logique et leur idempotence").
     for (const { index, entityType, payload } of operationsCatalogue) {
+      let applique = true;
       if (entityType === "modele") await appliquerOperationModele(payload as never);
       else if (entityType === "produit") await appliquerOperationProduit(payload as never);
       else if (entityType === "promotion") await appliquerOperationPromotion(payload as never);
       else if (entityType === "compte") await appliquerOperationCompte(payload as never);
       else if (entityType === "emplacement") await appliquerOperationEmplacement(payload as never);
+      else if (entityType === "categorie") ({ applique } = await appliquerOperationCategorie(payload as never));
+      else if (entityType === "sous_categorie") ({ applique } = await appliquerOperationSousCategorie(payload as never));
+      else if (entityType === "sous_categorie_champ") ({ applique } = await appliquerOperationSousCategorieChamp(payload as never));
       else await appliquerOperationIdentite(payload as never);
       // Idempotent par construction (upsert conditionné par updatedAt) —
       // toujours "cree" du point de vue du client, qui n'a besoin que de
       // savoir que l'opération a été acceptée pour marquer son envoi
       // local comme confirmé (voir SyncService.effectuerPush côté app).
       resultats[index] = { entityId: operations[index]!.entityId, statut: "cree" };
+      if (TYPES_REFERENTIEL.has(entityType) && applique) {
+        entityTypesANotifier.push(entityType);
+      }
+    }
+
+    if (entityTypesANotifier.length > 0) {
+      // Même bus, même erreur jamais propagée vers l'appelant (try/catch
+      // local) que pour le chemin hérité ci-dessous : une panne de
+      // diffusion SSE ne doit jamais compromettre l'application déjà
+      // effectuée de l'opération métier.
+      try {
+        const bus = getPosteEventBus();
+        for (const entityType of entityTypesANotifier) {
+          bus.diffuser({ type: entityType });
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[push] diffusion SSE référentiel impossible :", err instanceof Error ? err.message : err);
+      }
     }
 
     if (operationsHeritees.length > 0) {

@@ -4,6 +4,10 @@ import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProduitRepository } from "../repositories/produitRepository.js";
 import { ModeleRepository } from "../repositories/modeleRepository.js";
+import { CategorieRepository } from "../repositories/categorieRepository.js";
+import { SousCategorieRepository } from "../repositories/sousCategorieRepository.js";
+import { SousCategorieChampRepository } from "../repositories/sousCategorieChampRepository.js";
+import { SousCategorieUniteRepository } from "../repositories/sousCategorieUniteRepository.js";
 import { EmplacementRepository } from "../repositories/emplacementRepository.js";
 import { StockRepository } from "../repositories/stockRepository.js";
 import { MouvementRepository } from "../repositories/mouvementRepository.js";
@@ -21,8 +25,9 @@ import { genererFacturePdf } from "../services/factureDocumentService.js";
 import { genererDocumentInternePdf } from "../services/documentInterneDocumentService.js";
 import { genererBilanPdf } from "../services/bilanDocumentService.js";
 import { checkAdminGuard } from "../auth/checkAdminGuard.js";
-import { stock as domainStock } from "@maxi-equip/domain";
-import type { ModeleProduit, Produit, Emplacement } from "@maxi-equip/shared-types";
+import { stock as domainStock, catalogue as domainCatalogue } from "@maxi-equip/domain";
+import { parseCaracteristiques } from "@maxi-equip/shared-types";
+import type { ModeleProduit, Produit, Emplacement, UniteVente, ConfigurationUnitesSousCategorie, Categorie, SousCategorie, SousCategorieChamp } from "@maxi-equip/shared-types";
 
 /**
  * Canaux IPC métier (Phase 2). Chaque canal est nommé explicitement,
@@ -51,7 +56,11 @@ export function registerMetierIpcHandlers(
   imageService: ImageService,
   sessionManager: SessionManager,
   modeleRepository?: ModeleRepository,
-  promotionRepository?: PromotionRepository
+  promotionRepository?: PromotionRepository,
+  categorieRepository?: CategorieRepository,
+  sousCategorieRepository?: SousCategorieRepository,
+  sousCategorieChampRepository?: SousCategorieChampRepository,
+  sousCategorieUniteRepository?: SousCategorieUniteRepository
 ): void {
   // --- Catalogue ---
   ipcMain.handle("catalogue:list", () => {
@@ -77,7 +86,11 @@ export function registerMetierIpcHandlers(
   // --- Catalogue modèles (multi-format) ---
   ipcMain.handle("catalogue:listModeles", () => {
     if (!modeleRepository) return [];
-    const modeles = modeleRepository.list();
+    // Phase 5 (référentiel commun), sous-phase 5.6 — badge de
+    // classification orpheline : sousCategorieSupprimee/categorieSupprimee
+    // sont calculés à la lecture (LEFT JOIN, jamais une colonne
+    // persistée) et simplement reconduits via `...m` ci-dessous.
+    const modeles = modeleRepository.listAvecStatutClassification();
     return modeles.map((m) => {
       const variantes = produitRepository.listByModele(m.id);
       const varianteIds = variantes.map((v) => v.id);
@@ -99,6 +112,9 @@ export function registerMetierIpcHandlers(
           prix: v.prix,
           carreauxParCarton: v.carreauxParCarton,
           seuilAlerte: v.seuilAlerte,
+          uniteVente: v.uniteVente ?? null,
+          caracteristiques: v.caracteristiques ?? null,
+          marque: v.marque ?? null,
           deletedAt: v.deletedAt,
           stockTotal: stockTotaux.get(v.id) ?? 0,
         })),
@@ -129,19 +145,39 @@ export function registerMetierIpcHandlers(
     prix: number;
     carreauxParCarton?: number | null;
     seuilAlerte?: number;
+    // Fondations quincaillerie (Phase 2).
+    uniteVente?: Produit["uniteVente"];
+    caracteristiques?: string | null;
   };
 
   ipcMain.handle(
     "catalogue:creerModele",
     (
       _e,
-      input: { motif: string; type: string; variantes: VarianteInput[]; stagedImages?: string[]; principaleStagingId?: string | null }
+      input: {
+        motif: string;
+        type: string;
+        variantes: VarianteInput[];
+        stagedImages?: string[];
+        principaleStagingId?: string | null;
+        // Fondations quincaillerie (Phase 2).
+        sousCategorieId?: string | null;
+        marque?: string | null;
+      }
     ) => {
       if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
       const session = sessionManager.get();
       if (!session) return { success: false, message: "Session expirée." };
 
-      const modeleId = modeleRepository.create({ motif: input.motif, type: input.type });
+      // Cohérence métier du catalogue (Phase 3 bis) — validée AVANT toute
+      // création (modèle ET variantes), jamais après : un échec ne doit
+      // jamais laisser un modèle partiellement créé.
+      for (const v of input.variantes) {
+        const erreur = erreurValidationVariante(sousCategorieUniteRepository, sousCategorieChampRepository, input.sousCategorieId, v.uniteVente, v.caracteristiques);
+        if (erreur) return { success: false, message: erreur };
+      }
+
+      const modeleId = modeleRepository.create({ motif: input.motif, type: input.type, sousCategorieId: input.sousCategorieId, marque: input.marque });
       const modeleCree = modeleRepository.findById(modeleId)!;
       enqueueModeleSync(boiteEnvoiRepository, modeleCree, "create");
       for (const v of input.variantes) {
@@ -150,6 +186,7 @@ export function registerMetierIpcHandlers(
           modeleId,
           motif: input.motif,
           type: input.type,
+          marque: input.marque,
           taille: v.taille,
           tailleTri,
           largeur: v.largeur ?? null,
@@ -158,6 +195,8 @@ export function registerMetierIpcHandlers(
           prix: v.prix,
           carreauxParCarton: v.carreauxParCarton ?? null,
           seuilAlerte: v.seuilAlerte ?? 0,
+          uniteVente: v.uniteVente,
+          caracteristiques: v.caracteristiques,
         });
         enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(varianteId)!, "create");
       }
@@ -168,30 +207,65 @@ export function registerMetierIpcHandlers(
     }
   );
 
-  ipcMain.handle("catalogue:modifierModele", (_e, modeleId: string, input: { motif?: string; type?: string }) => {
-    if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
-    modeleRepository.update(modeleId, input);
-    enqueueModeleSync(boiteEnvoiRepository, modeleRepository.findById(modeleId)!, "update");
-    if (input.motif !== undefined || input.type !== undefined) {
-      const variantes = produitRepository.listByModele(modeleId);
-      for (const v of variantes) {
-        produitRepository.update(v.id, {
-          motif: input.motif,
-          type: input.type ?? v.type,
-          taille: v.taille,
-          tailleTri: v.tailleTri,
-          largeur: v.largeur,
-          hauteur: v.hauteur,
-          reference: v.reference,
-          prix: v.prix,
-          carreauxParCarton: v.carreauxParCarton,
-          seuilAlerte: v.seuilAlerte,
-        });
-        enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(v.id)!, "update");
+  ipcMain.handle(
+    "catalogue:modifierModele",
+    (_e, modeleId: string, input: { motif?: string; type?: string; sousCategorieId?: string | null; marque?: string | null }) => {
+      if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
+      const modeleExistant = modeleRepository.findById(modeleId);
+      if (!modeleExistant) return { success: false, message: "Modèle introuvable." };
+
+      // Cohérence métier du catalogue (Phase 3 bis) — UNIQUEMENT sur un
+      // changement EFFECTIF de sous-catégorie, jamais sur une
+      // modification ordinaire (motif/type/marque) qui la laisse
+      // inchangée : toutes les variantes existantes doivent rester
+      // compatibles (unité ET caractéristiques obligatoires) avec la
+      // NOUVELLE sous-catégorie avant d'accepter le changement — bloqué
+      // avec un message précis sinon, aucune donnée touchée.
+      if (domainCatalogue.valeurEffectivementModifiee(input.sousCategorieId, modeleExistant.sousCategorieId ?? null)) {
+        const nouvelleConfig = configurationUnitesPourSousCategorie(sousCategorieUniteRepository, input.sousCategorieId);
+        const nouveauxChamps = champsPourSousCategorie(sousCategorieChampRepository, input.sousCategorieId);
+        const problemes: string[] = [];
+        for (const v of produitRepository.listByModele(modeleId)) {
+          const uniteV = v.uniteVente ?? "carton";
+          if (!domainCatalogue.uniteEstCompatible(uniteV, nouvelleConfig)) {
+            problemes.push(`"${v.reference}" : unité "${uniteV}" non autorisée pour cette sous-catégorie`);
+          }
+          const manquants = domainCatalogue.champsObligatoiresManquants(nouveauxChamps, parseCaracteristiques(v.caracteristiques ?? null));
+          if (manquants.length > 0) {
+            problemes.push(`"${v.reference}" : caractéristiques obligatoires manquantes (${manquants.join(", ")})`);
+          }
+        }
+        if (problemes.length > 0) {
+          return { success: false, message: `Changement de sous-catégorie impossible — ${problemes.join(" · ")}.` };
+        }
       }
+
+      modeleRepository.update(modeleId, input);
+      enqueueModeleSync(boiteEnvoiRepository, modeleRepository.findById(modeleId)!, "update");
+      if (input.motif !== undefined || input.type !== undefined || input.marque !== undefined) {
+        const variantes = produitRepository.listByModele(modeleId);
+        for (const v of variantes) {
+          produitRepository.update(v.id, {
+            motif: input.motif,
+            type: input.type ?? v.type,
+            marque: input.marque !== undefined ? input.marque : v.marque,
+            taille: v.taille,
+            tailleTri: v.tailleTri,
+            largeur: v.largeur,
+            hauteur: v.hauteur,
+            reference: v.reference,
+            prix: v.prix,
+            carreauxParCarton: v.carreauxParCarton,
+            seuilAlerte: v.seuilAlerte,
+            uniteVente: v.uniteVente,
+            caracteristiques: v.caracteristiques,
+          });
+          enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(v.id)!, "update");
+        }
+      }
+      return { success: true };
     }
-    return { success: true };
-  });
+  );
 
   ipcMain.handle("catalogue:supprimerModele", (_e, modeleId: string) => {
     const session = sessionManager.get();
@@ -216,11 +290,19 @@ export function registerMetierIpcHandlers(
     if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
     const modele = modeleRepository.findById(modeleId);
     if (!modele) return { success: false, message: "Modèle introuvable." };
+
+    // Cohérence métier du catalogue (Phase 3 bis) — toujours validée à
+    // l'ajout d'une variante (il n'existe aucune valeur "actuelle" à
+    // comparer, contrairement à une modification — voir modifierVariante).
+    const erreurAjout = erreurValidationVariante(sousCategorieUniteRepository, sousCategorieChampRepository, modele.sousCategorieId, input.uniteVente, input.caracteristiques);
+    if (erreurAjout) return { success: false, message: erreurAjout };
+
     const tailleTri = input.tailleTri ?? input.largeur ?? (parseFloat(input.taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
     const id = produitRepository.create({
       modeleId,
       motif: modele.motif,
       type: modele.type,
+      marque: modele.marque,
       taille: input.taille,
       tailleTri,
       largeur: input.largeur ?? null,
@@ -229,6 +311,8 @@ export function registerMetierIpcHandlers(
       prix: input.prix,
       carreauxParCarton: input.carreauxParCarton ?? null,
       seuilAlerte: input.seuilAlerte ?? 0,
+      uniteVente: input.uniteVente,
+      caracteristiques: input.caracteristiques,
     });
     enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(id)!, "create");
     return { success: true, id };
@@ -239,12 +323,37 @@ export function registerMetierIpcHandlers(
     (_e, varianteId: string, input: Partial<VarianteInput & { motif?: string; type?: string }>) => {
       const existante = produitRepository.findById(varianteId);
       if (!existante) return { success: false, message: "Variante introuvable." };
+
+      // Cohérence métier du catalogue (Phase 3 bis) — UNIQUEMENT sur un
+      // changement EFFECTIF de l'unité ou des caractéristiques, jamais
+      // sur une modification ordinaire (ex. prix, stock) qui les laisse
+      // inchangées : rouvrir un produit existant pour corriger un prix
+      // ne doit jamais être bloqué par une restriction ajoutée après
+      // coup à sa sous-catégorie.
+      const sousCategorieId = existante.modeleId ? (modeleRepository?.findById(existante.modeleId)?.sousCategorieId ?? null) : null;
+      const uniteActuelle = existante.uniteVente ?? "carton";
+      if (domainCatalogue.valeurEffectivementModifiee(input.uniteVente, uniteActuelle)) {
+        try {
+          domainCatalogue.validerUniteCompatible(input.uniteVente ?? "carton", configurationUnitesPourSousCategorie(sousCategorieUniteRepository, sousCategorieId));
+        } catch (err) {
+          return { success: false, message: err instanceof Error ? err.message : "Unité de vente incompatible." };
+        }
+      }
+      if (domainCatalogue.valeurEffectivementModifiee(input.caracteristiques, existante.caracteristiques ?? null)) {
+        try {
+          domainCatalogue.validerCaracteristiquesObligatoires(champsPourSousCategorie(sousCategorieChampRepository, sousCategorieId), parseCaracteristiques(input.caracteristiques ?? null));
+        } catch (err) {
+          return { success: false, message: err instanceof Error ? err.message : "Caractéristiques obligatoires manquantes." };
+        }
+      }
+
       const taille = input.taille ?? existante.taille;
       const largeur = input.largeur !== undefined ? (input.largeur ?? null) : existante.largeur;
       const hauteur = input.hauteur !== undefined ? (input.hauteur ?? null) : existante.hauteur;
       const tailleTri = input.tailleTri ?? largeur ?? (parseFloat(taille.replace(/[^\d.,]/g, "").replace(",", ".")) || 0);
       produitRepository.update(varianteId, {
         type: input.type ?? existante.type,
+        marque: existante.marque,
         taille,
         tailleTri,
         largeur,
@@ -253,11 +362,373 @@ export function registerMetierIpcHandlers(
         prix: input.prix ?? existante.prix,
         carreauxParCarton: input.carreauxParCarton !== undefined ? (input.carreauxParCarton ?? null) : existante.carreauxParCarton,
         seuilAlerte: input.seuilAlerte ?? existante.seuilAlerte,
+        uniteVente: input.uniteVente !== undefined ? input.uniteVente : existante.uniteVente,
+        caracteristiques: input.caracteristiques !== undefined ? input.caracteristiques : existante.caracteristiques,
       });
       enqueueProduitSync(boiteEnvoiRepository, produitRepository.findById(varianteId)!, "update");
       return { success: true };
     }
   );
+
+  // --- Catégories / sous-catégories / champs suggérés (fondations quincaillerie, Phase 2) ---
+  // Phase 5 (référentiel commun) — catégories/sous-catégories/champs
+  // sont désormais synchronisées au serveur (enfilage dans boite_envoi
+  // après chaque création/modification/suppression ci-dessous) ; ce
+  // commentaire remplace la décision antérieure ("catégories locales à
+  // chaque poste"), explicitement révisée par cette phase.
+  ipcMain.handle("catalogue:listCategories", () => {
+    if (!categorieRepository) return [];
+    const compteurs = categorieRepository.compterModelesParCategorie();
+    return categorieRepository.list().map((c) => ({ ...c, nombreProduits: compteurs[c.id] ?? 0 }));
+  });
+
+  ipcMain.handle("catalogue:creerCategorie", (_e, input: { nom: string; imageDataUrl?: string | null; ordre?: number }) => {
+    if (!categorieRepository) return { success: false, message: "CategorieRepository non disponible." };
+    const id = categorieRepository.create(input);
+    const categorie = categorieRepository.findById(id);
+    if (categorie) enqueueCategorieSync(boiteEnvoiRepository, categorie, "create");
+    return { success: true, id };
+  });
+
+  ipcMain.handle("catalogue:modifierCategorie", (_e, id: string, input: { nom?: string; imageDataUrl?: string | null; ordre?: number }) => {
+    if (!categorieRepository) return { success: false, message: "CategorieRepository non disponible." };
+    categorieRepository.update(id, input);
+    const categorie = categorieRepository.findById(id);
+    if (categorie) enqueueCategorieSync(boiteEnvoiRepository, categorie, "update");
+    return { success: true };
+  });
+
+  ipcMain.handle("catalogue:supprimerCategorie", (_e, id: string) => {
+    const session = sessionManager.get();
+    if (!session) return { success: false, message: "Session expirée." };
+    if (!categorieRepository) return { success: false, message: "CategorieRepository non disponible." };
+    // Phase 5 (référentiel commun), sous-phase 5.6 — garde bloquante LOCALE
+    // uniquement : une suppression REÇUE d'un autre poste (tombstone via
+    // creerDepuisServeur) ne passe jamais par ce handler IPC, donc n'est
+    // jamais soumise à cette garde (voir §D du cahier des charges).
+    if (!sousCategorieRepository) return { success: false, message: "SousCategorieRepository non disponible." };
+    if (sousCategorieRepository.listByCategorie(id).length > 0) {
+      return { success: false, message: "Cette catégorie contient encore des sous-catégories actives : déplacez-les ou supprimez-les d'abord." };
+    }
+    categorieRepository.softDelete(id, session.userId);
+    const categorie = categorieRepository.findById(id);
+    if (categorie) enqueueCategorieSync(boiteEnvoiRepository, categorie, "delete");
+    return { success: true };
+  });
+
+  ipcMain.handle("catalogue:listSousCategories", (_e, categorieId?: string) => {
+    if (!sousCategorieRepository) return [];
+    const toutes = categorieId ? sousCategorieRepository.listByCategorie(categorieId) : sousCategorieRepository.list();
+    // BUG À ÉVITER ("Carreaux (0)") : compteur toujours calculé réellement, avec ou sans filtre de catégorie.
+    const compteurs = sousCategorieRepository.compterModelesParSousCategorie(categorieId);
+    return toutes.map((sc) => ({ ...sc, nombreProduits: compteurs[sc.id] ?? 0 }));
+  });
+
+  ipcMain.handle("catalogue:creerSousCategorie", (_e, input: { categorieId: string; nom: string; ordre?: number }) => {
+    if (!sousCategorieRepository) return { success: false, message: "SousCategorieRepository non disponible." };
+    const id = sousCategorieRepository.create(input);
+    enqueueSousCategorieApresEcriture(id, "create");
+    return { success: true, id };
+  });
+
+  ipcMain.handle("catalogue:modifierSousCategorie", (_e, id: string, input: { nom?: string; ordre?: number }) => {
+    if (!sousCategorieRepository) return { success: false, message: "SousCategorieRepository non disponible." };
+    sousCategorieRepository.update(id, input);
+    enqueueSousCategorieApresEcriture(id, "update");
+    return { success: true };
+  });
+
+  ipcMain.handle("catalogue:supprimerSousCategorie", (_e, id: string) => {
+    const session = sessionManager.get();
+    if (!session) return { success: false, message: "Session expirée." };
+    if (!sousCategorieRepository) return { success: false, message: "SousCategorieRepository non disponible." };
+    // Phase 5 (référentiel commun), sous-phase 5.6 — garde bloquante LOCALE
+    // uniquement (voir le commentaire équivalent sur catalogue:supprimerCategorie
+    // ci-dessus). Les produits associés sont protégés par CETTE MÊME garde
+    // (un produit ne peut exister sans modèle actif) — jamais une deuxième
+    // règle redondante (voir ModeleRepository.existeModeleActifPourSousCategorie).
+    if (!modeleRepository) return { success: false, message: "ModeleRepository non disponible." };
+    if (modeleRepository.existeModeleActifPourSousCategorie(id)) {
+      return { success: false, message: "Cette sous-catégorie contient encore des modèles actifs : déplacez-les ou supprimez-les d'abord." };
+    }
+    sousCategorieRepository.softDelete(id, session.userId);
+    enqueueSousCategorieApresEcriture(id, "delete");
+    return { success: true };
+  });
+
+  /**
+   * Phase 5 (référentiel commun) — relit systématiquement la sous-
+   * catégorie ET sa configuration d'unités à jour AU MOMENT de
+   * l'enfilage (jamais une valeur mise en cache), pour les 5 handlers qui
+   * modifient une sous-catégorie, directement ou via sa configuration
+   * d'unités (`catalogue:definirUnitesSousCategorie`/
+   * `catalogue:reinitialiserUnitesSousCategorie` ci-dessous) — évite de
+   * dupliquer cette logique à chaque site d'appel.
+   */
+  function enqueueSousCategorieApresEcriture(sousCategorieId: string, operation: "create" | "update" | "delete"): void {
+    if (!sousCategorieRepository) return;
+    const sousCategorie = sousCategorieRepository.findById(sousCategorieId);
+    if (!sousCategorie) return;
+    const unitesAutorisees = sousCategorieUniteRepository ? unitesAutoriseesPourPayload(sousCategorieUniteRepository.obtenirConfiguration(sousCategorieId)) : null;
+    enqueueSousCategorieSync(boiteEnvoiRepository, sousCategorie, unitesAutorisees, operation);
+  }
+
+  /**
+   * Champs de caractéristiques suggérés par sous-catégorie —
+   * `catalogue:listChampsSousCategories` (pluriel, SANS argument) renvoie
+   * TOUS les champs groupés par sous-catégorie en un seul appel — évite
+   * un aller-retour IPC par sous-catégorie quand le Renderer doit réagir
+   * à un changement de sélection (voir ProduitsScreen, fusionnerCaracteristiquesSuggerees).
+   */
+  ipcMain.handle("catalogue:listChampsSousCategories", () => {
+    if (!sousCategorieChampRepository) return {};
+    return sousCategorieChampRepository.listGroupesParSousCategorie();
+  });
+
+  ipcMain.handle(
+    "catalogue:creerChampSousCategorie",
+    (
+      _e,
+      input: {
+        sousCategorieId: string;
+        nom: string;
+        // Fondations quincaillerie (Phase 3 bis).
+        type?: "texte" | "nombre" | "liste";
+        obligatoire?: boolean;
+        valeursAutorisees?: string[] | null;
+        uniteMesure?: string | null;
+        role?: "descriptif" | "physique" | "calcul" | null;
+      }
+    ) => {
+      if (!sousCategorieChampRepository) return { success: false, message: "SousCategorieChampRepository non disponible." };
+      const existants = sousCategorieChampRepository.listBySousCategorie(input.sousCategorieId);
+      if (existants.some((c) => c.nom.trim().toLowerCase() === input.nom.trim().toLowerCase())) {
+        return { success: false, message: "Ce champ existe déjà pour cette sous-catégorie." };
+      }
+      const id = sousCategorieChampRepository.create({ ...input, ordre: existants.length });
+      const champ = sousCategorieChampRepository.findById(id);
+      if (champ) enqueueSousCategorieChampSync(boiteEnvoiRepository, champ, "create");
+      return { success: true, id };
+    }
+  );
+
+  ipcMain.handle(
+    "catalogue:modifierChampSousCategorie",
+    (
+      _e,
+      id: string,
+      input: {
+        nom?: string;
+        type?: "texte" | "nombre" | "liste";
+        obligatoire?: boolean;
+        valeursAutorisees?: string[] | null;
+        uniteMesure?: string | null;
+        role?: "descriptif" | "physique" | "calcul" | null;
+        ordre?: number;
+      }
+    ) => {
+      if (!sousCategorieChampRepository) return { success: false, message: "SousCategorieChampRepository non disponible." };
+      sousCategorieChampRepository.update(id, input);
+      const champ = sousCategorieChampRepository.findById(id);
+      if (champ) enqueueSousCategorieChampSync(boiteEnvoiRepository, champ, "update");
+      return { success: true };
+    }
+  );
+
+  ipcMain.handle("catalogue:supprimerChampSousCategorie", (_e, id: string, confirmationObligatoire?: boolean) => {
+    const session = sessionManager.get();
+    if (!session) return { success: false, message: "Session expirée." };
+    if (!sousCategorieChampRepository) return { success: false, message: "SousCategorieChampRepository non disponible." };
+    const champ = sousCategorieChampRepository.findById(id);
+    if (!champ) return { success: false, message: "Champ introuvable." };
+    // Phase 5 (référentiel commun), sous-phase 5.6 — un champ OBLIGATOIRE
+    // exige une confirmation explicite distincte, transmise par
+    // l'appelant IPC (jamais déduite côté serveur/main) : refus sans
+    // modification tant qu'elle n'est pas fournie. Un champ facultatif
+    // conserve le comportement de suppression normal (tombstone direct).
+    if (champ.obligatoire && confirmationObligatoire !== true) {
+      return {
+        success: false,
+        requiresConfirmation: true,
+        message: "Ce champ est obligatoire : confirmez explicitement sa suppression. Les valeurs déjà enregistrées sur les produits existants ne seront pas supprimées.",
+      };
+    }
+    // Tombstone (jamais une suppression physique, voir
+    // SousCategorieChampRepository.delete) : le champ reste lisible
+    // AVANT comme APRÈS l'écriture (deleted_at/deleted_by renseignés,
+    // toutes les autres propriétés préservées) — relu une seconde fois
+    // pour enfiler l'état exact matérialisé (updatedAt réellement
+    // persisté, pas une approximation locale).
+    sousCategorieChampRepository.delete(id, session.userId);
+    const champSupprime = sousCategorieChampRepository.findById(id);
+    if (champSupprime) enqueueSousCategorieChampSync(boiteEnvoiRepository, champSupprime, "delete");
+    return { success: true };
+  });
+
+  /**
+   * Configuration des unités de vente autorisées par sous-catégorie —
+   * fondations quincaillerie (Phase 3 bis). Même principe que les
+   * champs ci-dessus : `catalogue:listUnitesSousCategories` (pluriel,
+   * sans argument) renvoie tout en un seul aller-retour.
+   */
+  ipcMain.handle("catalogue:listUnitesSousCategories", () => {
+    if (!sousCategorieUniteRepository) return {};
+    return sousCategorieUniteRepository.listGroupesParSousCategorie();
+  });
+
+  ipcMain.handle("catalogue:definirUnitesSousCategorie", (_e, sousCategorieId: string, unites: UniteVente[]) => {
+    if (!sousCategorieUniteRepository) return { success: false, message: "SousCategorieUniteRepository non disponible." };
+    try {
+      sousCategorieUniteRepository.definir(sousCategorieId, unites);
+      // Point critique Phase 5 (référentiel commun) — identifié par
+      // l'audit : ce gestionnaire modifie la sous-catégorie (via
+      // `sous_categories.unites_configurees`/`updated_at`, voir
+      // SousCategorieUniteRepository.definir) SANS passer par
+      // `sousCategorieRepository.update()` — un enfilage par analogie
+      // avec les 3 gestionnaires "sous-catégorie" ci-dessus l'aurait
+      // manqué. Traité ici explicitement, jamais supposé couvert.
+      enqueueSousCategorieApresEcriture(sousCategorieId, "update");
+      return { success: true };
+    } catch (err) {
+      return { success: false, message: err instanceof Error ? err.message : "Configuration invalide." };
+    }
+  });
+
+  ipcMain.handle("catalogue:reinitialiserUnitesSousCategorie", (_e, sousCategorieId: string) => {
+    if (!sousCategorieUniteRepository) return { success: false, message: "SousCategorieUniteRepository non disponible." };
+    sousCategorieUniteRepository.reinitialiser(sousCategorieId);
+    // Même point critique que ci-dessus — réinitialiser la configuration
+    // modifie aussi `sous_categories.updated_at`, jamais un enfilage
+    // implicite.
+    enqueueSousCategorieApresEcriture(sousCategorieId, "update");
+    return { success: true };
+  });
+
+  /**
+   * Phase 5 (référentiel commun), sous-phase 5.7 — diagnostic des
+   * doublons potentiels, STRICTEMENT en lecture seule (aucune écriture,
+   * aucune synchronisation déclenchée). Interroge les repositories
+   * locaux ACTIFS (chaque `list()` filtre déjà `deleted_at IS NULL`,
+   * jamais un deuxième filtre ici) : une fois le rattrapage proactif et
+   * le catch-up habituel exécutés sur un poste, ces tables locales
+   * reflètent l'état fusionné de TOUS les postes (chaque entité garde
+   * son id d'origine — jamais une fusion par upsert entre deux id
+   * différents), ce qui rend un diagnostic purement LOCAL suffisant
+   * pour détecter un doublon créé indépendamment sur deux postes.
+   *
+   * Règles de rapprochement (§3.2 du cahier des charges) : comparaison
+   * du nom insensible à la casse (`domainCatalogue.detecterDoublonsPotentiels`,
+   * module pur sans dépendance base de données) ; jamais deux occurrences
+   * partageant le même id ; les sous-catégories sont rapprochées
+   * UNIQUEMENT au sein d'une même catégorie parente (`cleScope`). Pour
+   * les produits, c'est `reference` qui sert de "nom" comparé — jamais
+   * `motif` (dénormalisé depuis le modèle, intentionnellement partagé
+   * par toutes les variantes d'un même modèle : l'utiliser produirait un
+   * faux-positif systématique sur chaque modèle multi-format).
+   */
+  ipcMain.handle("catalogue:diagnostiquerDoublonsReferentiel", () => {
+    const categories = categorieRepository?.list() ?? [];
+    const groupesCategories = domainCatalogue.detecterDoublonsPotentiels(categories);
+
+    const sousCategories = sousCategorieRepository?.list() ?? [];
+    const categorieNomParId = new Map(categories.map((c) => [c.id, c.nom]));
+    const groupesSousCategories = domainCatalogue.detecterDoublonsPotentiels(sousCategories, (sc) => sc.categorieId);
+
+    const modeles = modeleRepository?.list() ?? [];
+    const modelesComparables = modeles.map((m) => ({ ...m, nom: m.motif }));
+    const groupesModeles = domainCatalogue.detecterDoublonsPotentiels(modelesComparables);
+
+    // Phase 5 (référentiel commun), sous-phase 5.7 — le "nom" comparé pour
+    // un produit est le `motif` (dénormalisé depuis le modèle, voir
+    // commentaire plus haut) : `reference` est délibérément EXCLU malgré
+    // son nom — une contrainte UNIQUE réelle (`idx_produits_reference_actif`,
+    // voir schema.sql) empêche structurellement deux produits ACTIFS d'un
+    // même poste de jamais partager la même référence, rendant ce champ
+    // impropre à toute détection de doublon. Pour ne jamais produire un
+    // faux-positif sur les variantes LÉGITIMES d'un même modèle (qui
+    // partagent intentionnellement le même motif ET le même modeleId),
+    // un seul produit REPRÉSENTANT est retenu par modèle avant comparaison
+    // — jamais un par variante.
+    const modeleInfoParId = new Map(modeles.map((m) => [m.id, { motif: m.motif, type: m.type }]));
+    const produitsActifs = produitRepository.list();
+    const representantParModele = new Map<string, (typeof produitsActifs)[number]>();
+    for (const p of produitsActifs) {
+      const cleModele = p.modeleId ?? p.id; // sans modèle (catalogue legacy) : chaque produit reste son propre représentant.
+      if (!representantParModele.has(cleModele)) representantParModele.set(cleModele, p);
+    }
+    const produitsComparables = [...representantParModele.values()].map((p) => ({ ...p, nom: p.motif }));
+    const groupesProduits = domainCatalogue.detecterDoublonsPotentiels(produitsComparables);
+
+    return {
+      categories: groupesCategories.map((g) => ({
+        typeEntite: "categorie" as const,
+        nom: g.nom,
+        occurrences: g.occurrences.map((o) => ({ id: o.id, createdAt: o.createdAt ?? null, updatedAt: o.updatedAt ?? null })),
+      })),
+      sousCategories: groupesSousCategories.map((g) => ({
+        typeEntite: "sous_categorie" as const,
+        nom: g.nom,
+        occurrences: g.occurrences.map((o) => ({
+          id: o.id,
+          createdAt: o.createdAt ?? null,
+          updatedAt: o.updatedAt ?? null,
+          categorieParenteId: o.categorieId,
+          categorieParenteNom: categorieNomParId.get(o.categorieId) ?? null,
+        })),
+      })),
+      modeles: groupesModeles.map((g) => ({
+        typeEntite: "modele" as const,
+        nom: g.nom,
+        occurrences: g.occurrences.map((o) => ({ id: o.id, createdAt: o.createdAt ?? null, updatedAt: o.updatedAt ?? null, type: o.type })),
+      })),
+      produits: groupesProduits.map((g) => ({
+        typeEntite: "produit" as const,
+        nom: g.nom,
+        occurrences: g.occurrences.map((o) => ({
+          id: o.id,
+          createdAt: o.createdAt ?? null,
+          updatedAt: o.updatedAt ?? null,
+          modeleId: o.modeleId,
+          modeleMotif: o.modeleId ? (modeleInfoParId.get(o.modeleId)?.motif ?? null) : null,
+          taille: o.taille,
+          prix: o.prix,
+        })),
+      })),
+    };
+  });
+
+  /**
+   * Recherche globale catégories + sous-catégories + produits (motif,
+   * référence, marque) — fondations quincaillerie (Phase 2). Recherche
+   * simple (LIKE), suffisante pour les volumes réels de l'app.
+   */
+  ipcMain.handle("catalogue:rechercherGlobal", (_e, terme: string) => {
+    const t = terme.trim();
+    if (!t || !categorieRepository || !sousCategorieRepository) {
+      return { categories: [], produits: [] };
+    }
+    const aiguille = `%${t}%`;
+
+    const categoriesTrouvees = categorieRepository
+      .list()
+      .filter((c) => c.nom.toLowerCase().includes(t.toLowerCase()))
+      .map((c) => ({ id: c.id, nom: c.nom }));
+
+    const sousCategoriesParNom = sousCategorieRepository.list().filter((sc) => sc.nom.toLowerCase().includes(t.toLowerCase()));
+    for (const sc of sousCategoriesParNom) {
+      if (!categoriesTrouvees.some((c) => c.id === sc.categorieId)) {
+        const parente = categorieRepository.findById(sc.categorieId);
+        if (parente) categoriesTrouvees.push({ id: parente.id, nom: parente.nom });
+      }
+    }
+
+    const produitsTrouves = produitRepository
+      .listParMotifReferenceOuMarque(aiguille)
+      .slice(0, 20)
+      .map((p) => ({ id: p.id, modeleId: p.modeleId, motif: p.motif, reference: p.reference, taille: p.taille }));
+
+    return { categories: categoriesTrouvees, produits: produitsTrouves };
+  });
 
   ipcMain.handle("catalogue:supprimerVariante", (_e, varianteId: string) => {
     const session = sessionManager.get();
@@ -509,9 +980,11 @@ export function registerMetierIpcHandlers(
   }
 
   // Correction "choix du modèle d'impression" (2026-11-13) — "a5" par
-  // défaut si l'appelant n'en précise pas (décision utilisateur), voir
-  // FacturesScreen.tsx (sélecteur A5/A4).
-  ipcMain.handle("factures:genererPdf", async (_e, factureId: string, format?: "a4" | "a5") => {
+  // défaut si l'appelant n'en précise pas. Fondations quincaillerie
+  // (Phase 4) : "a5" (format indépendant) retiré, remplacé par
+  // "a4-paysage" (deux exemplaires A5 construits dans le PDF) — voir
+  // FacturesScreen.tsx (sélecteur A4 paysage/A4 portrait).
+  ipcMain.handle("factures:genererPdf", async (_e, factureId: string, format?: "a4" | "a4-paysage") => {
     const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
     // Correction Phase Finale, Bloc 6 — l'identité HISTORIQUE (capturée à
@@ -592,14 +1065,18 @@ export function registerMetierIpcHandlers(
     return {
       ventes: factureRepository.bilanVentesEntre(debut, fin),
       topProduits: factureRepository.topProduitsVendusEntre(debut, fin, 10),
+      // Fondations quincaillerie (Phase 4) — correction "le bilan
+      // additionne des quantités d'unités différentes" : jamais une
+      // somme brute, toujours ventilée par unité de vente réelle du
+      // produit (voir StockRepository/MouvementRepository ci-dessus).
       mouvements: {
-        totalEntrees: mouvementRepository.sommeQuantiteParTypeEntre("entree", debut, fin),
-        totalSorties: mouvementRepository.sommeQuantiteParTypeEntre("sortie", debut, fin),
+        entrees: mouvementRepository.sommeQuantiteParTypeEtUniteEntre("entree", debut, fin),
+        sorties: mouvementRepository.sommeQuantiteParTypeEtUniteEntre("sortie", debut, fin),
       },
       stockParEmplacement: depots.map((e) => ({
         emplacementId: e.id,
         nom: e.nom,
-        cartons: stockRepository.listByEmplacement(e.id).reduce((s, r) => s + r.quantite, 0),
+        parUnite: stockRepository.getQuantitesParUniteParEmplacement(e.id),
       })),
       produitsSousSeuilCount: produitRepository.countSousSeuilDepots(depotIds),
       promotionsActivesPendantPeriode: promotionRepository ? promotionRepository.compterChevauchantPeriode(debut, fin) : 0,
@@ -1230,6 +1707,60 @@ export function enqueueEmplacementSync(boiteEnvoiRepository: BoiteEnvoiRepositor
   });
 }
 
+/**
+ * Cohérence métier du catalogue (unités de vente, caractéristiques
+ * obligatoires) — fondations quincaillerie (Phase 3 bis). Fonctions
+ * top-level exportées (même principe que `enqueueModeleSync`/
+ * `enqueueProduitSync` ci-dessous) : testables directement, sans mocker
+ * `ipcMain`/`electron` (jamais fait dans ce projet). Une sous-catégorie
+ * absente/`null` (produit non classé) n'est jamais restreinte —
+ * configuration par défaut, comportement historique.
+ */
+export function configurationUnitesPourSousCategorie(
+  sousCategorieUniteRepository: SousCategorieUniteRepository | undefined,
+  sousCategorieId: string | null | undefined
+): ConfigurationUnitesSousCategorie {
+  if (!sousCategorieId || !sousCategorieUniteRepository) return { configuree: false, unites: [] };
+  return sousCategorieUniteRepository.obtenirConfiguration(sousCategorieId);
+}
+
+export function champsPourSousCategorie(sousCategorieChampRepository: SousCategorieChampRepository | undefined, sousCategorieId: string | null | undefined) {
+  if (!sousCategorieId || !sousCategorieChampRepository) return [];
+  return sousCategorieChampRepository.listBySousCategorie(sousCategorieId);
+}
+
+/**
+ * Valide UNE variante (unité + caractéristiques obligatoires) pour une
+ * sous-catégorie donnée — retourne le message d'erreur si invalide,
+ * `null` sinon. Centralise les deux vérifications pour ne jamais les
+ * dupliquer entre création de modèle et ajout de variante (toutes deux
+ * INCONDITIONNELLES, contrairement à une modification — voir
+ * `catalogue:modifierVariante`/`catalogue:modifierModele`, qui
+ * n'appliquent cette même validation que sur un changement effectif,
+ * via `domainCatalogue.valeurEffectivementModifiee`).
+ */
+export function erreurValidationVariante(
+  sousCategorieUniteRepository: SousCategorieUniteRepository | undefined,
+  sousCategorieChampRepository: SousCategorieChampRepository | undefined,
+  sousCategorieId: string | null | undefined,
+  uniteVente: UniteVente | null | undefined,
+  caracteristiques: string | null | undefined
+): string | null {
+  const config = configurationUnitesPourSousCategorie(sousCategorieUniteRepository, sousCategorieId);
+  try {
+    domainCatalogue.validerUniteCompatible(uniteVente ?? "carton", config);
+  } catch (err) {
+    return err instanceof Error ? err.message : "Unité de vente incompatible.";
+  }
+  const champs = champsPourSousCategorie(sousCategorieChampRepository, sousCategorieId);
+  try {
+    domainCatalogue.validerCaracteristiquesObligatoires(champs, parseCaracteristiques(caracteristiques ?? null));
+  } catch (err) {
+    return err instanceof Error ? err.message : "Caractéristiques obligatoires manquantes.";
+  }
+  return null;
+}
+
 export function enqueueModeleSync(boiteEnvoiRepository: BoiteEnvoiRepository, modele: ModeleProduit, operation: "create" | "update" | "delete"): void {
   boiteEnvoiRepository.creer("modele", modele.id, {
     operation,
@@ -1237,6 +1768,9 @@ export function enqueueModeleSync(boiteEnvoiRepository: BoiteEnvoiRepository, mo
     motif: modele.motif,
     type: modele.type,
     ordreVitrine: modele.ordreVitrine,
+    // Phase 5 (référentiel commun), sous-phase 5.5 : absents/null tant que le modèle n'a pas été classé/marqué.
+    sousCategorieId: modele.sousCategorieId ?? null,
+    marque: modele.marque ?? null,
     updatedAt: modele.updatedAt,
   });
 }
@@ -1259,8 +1793,77 @@ export function enqueueProduitSync(boiteEnvoiRepository: BoiteEnvoiRepository, p
     hauteur: produit.hauteur,
     reference: produit.reference,
     prix: produit.prix,
+    // Phase 5 (référentiel commun), sous-phase 5.5 : absents/null tant que le produit n'a pas été renseigné.
+    uniteVente: produit.uniteVente ?? null,
+    caracteristiques: produit.caracteristiques ?? null,
+    marque: produit.marque ?? null,
     updatedAt: produit.updatedAt,
   });
+}
+
+/**
+ * Phase 5 (référentiel commun) — même mécanisme générique que
+ * `enqueueModeleSync`/`enqueueProduitSync` ci-dessus (payload construit
+ * champ par champ, `boiteEnvoiRepository.creer(...)`), pour les 3
+ * entités référentielles (catégorie, sous-catégorie, champ).
+ */
+export function enqueueCategorieSync(boiteEnvoiRepository: BoiteEnvoiRepository, categorie: Categorie, operation: "create" | "update" | "delete"): void {
+  boiteEnvoiRepository.creer("categorie", categorie.id, {
+    operation,
+    categorieId: categorie.id,
+    nom: categorie.nom,
+    imageDataUrl: categorie.imageDataUrl,
+    ordre: categorie.ordre,
+    updatedAt: categorie.updatedAt,
+  });
+}
+
+/**
+ * `unitesAutorisees` : `null` si la sous-catégorie n'est pas configurée
+ * (les 6 unités restent proposées par défaut), un tableau non vide sinon
+ * — JAMAIS une opération indépendante (décision définitive,
+ * PHASE_5_CAHIER_DES_CHARGES.md §4.6/§7.3) : transmise comme sous-objet
+ * du payload de la sous-catégorie elle-même. L'appelant doit relire la
+ * configuration au moment de l'enfilage (voir les 5 sites d'appel
+ * ci-dessous), jamais une valeur mise en cache.
+ */
+export function enqueueSousCategorieSync(
+  boiteEnvoiRepository: BoiteEnvoiRepository,
+  sousCategorie: SousCategorie,
+  unitesAutorisees: UniteVente[] | null,
+  operation: "create" | "update" | "delete"
+): void {
+  boiteEnvoiRepository.creer("sous_categorie", sousCategorie.id, {
+    operation,
+    sousCategorieId: sousCategorie.id,
+    categorieId: sousCategorie.categorieId,
+    nom: sousCategorie.nom,
+    ordre: sousCategorie.ordre,
+    modelePhysique: sousCategorie.modelePhysique,
+    unitesAutorisees,
+    updatedAt: sousCategorie.updatedAt,
+  });
+}
+
+export function enqueueSousCategorieChampSync(boiteEnvoiRepository: BoiteEnvoiRepository, champ: SousCategorieChamp, operation: "create" | "update" | "delete"): void {
+  boiteEnvoiRepository.creer("sous_categorie_champ", champ.id, {
+    operation,
+    champId: champ.id,
+    sousCategorieId: champ.sousCategorieId,
+    nom: champ.nom,
+    type: champ.type,
+    obligatoire: champ.obligatoire,
+    valeursAutorisees: champ.valeursAutorisees,
+    uniteMesure: champ.uniteMesure,
+    role: champ.role,
+    ordre: champ.ordre,
+    updatedAt: champ.updatedAt,
+  });
+}
+
+/** Convertit `{configuree, unites}` (ConfigurationUnitesSousCategorie, voir SousCategorieUniteRepository) vers la forme transmise au serveur — jamais une logique dupliquée aux 5 sites d'appel. */
+function unitesAutoriseesPourPayload(config: ConfigurationUnitesSousCategorie): UniteVente[] | null {
+  return config.configuree ? config.unites : null;
 }
 
 type StockErrorReason = "INSUFFICIENT_STOCK" | "INVALID_QUANTITY" | "VALIDATION_ERROR" | "CONNEXION_REQUISE" | "UNKNOWN";

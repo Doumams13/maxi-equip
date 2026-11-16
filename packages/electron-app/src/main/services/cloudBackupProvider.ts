@@ -8,10 +8,16 @@
  * Backblaze B2, DigitalOcean Spaces, ou un serveur de test local) — seul
  * `S3CloudBackupProvider` (ci-après) connaît ce détail.
  */
+/** Un objet distant tel que listé par le fournisseur — `taille` nécessaire à la gestion d'espace (rétention cloud, voir cloudBackupService.ts), déjà renvoyée gratuitement par l'opération de listage S3 sous-jacente. */
+export interface ObjetCloud {
+  cle: string;
+  taille: number;
+}
+
 export interface CloudBackupProvider {
   upload(cle: string, donnees: Buffer): Promise<void>;
   download(cle: string): Promise<Buffer>;
-  list(prefixe: string): Promise<string[]>;
+  list(prefixe: string): Promise<ObjetCloud[]>;
   delete(cle: string): Promise<void>;
   exists(cle: string): Promise<boolean>;
 }

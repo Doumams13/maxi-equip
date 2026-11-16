@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calculerSauvegardesAConserver, type EntreeRotation, type PolitiqueRotation } from "./backupRotation.js";
+import { calculerSauvegardesAConserver, POLITIQUE_ROTATION_CLOUD_PAR_DEFAUT, type EntreeRotation, type PolitiqueRotation } from "./backupRotation.js";
 
 /**
  * Tests de la politique de rotation — correction Phase Finale, Bloc 5
@@ -103,5 +103,37 @@ describe("calculerSauvegardesAConserver", () => {
 
   it("liste vide : ne plante jamais, renvoie un ensemble vide", () => {
     expect(calculerSauvegardesAConserver([], POLITIQUE_PETITE).size).toBe(0);
+  });
+
+  describe("politique cloud par défaut (7 quotidien / 2 hebdomadaire / 0 mensuel) — audit stockage B2, 2026-11-14", () => {
+    it("exactement 7 quotidiennes consécutives, aucune promotion nécessaire", () => {
+      const entrees = Array.from({ length: 7 }, (_, i) => entreeIlYA(i));
+      const conserves = calculerSauvegardesAConserver(entrees, POLITIQUE_ROTATION_CLOUD_PAR_DEFAUT);
+      expect(conserves.size).toBe(7);
+    });
+
+    it("2 semaines distinctes conservées au palier hebdomadaire, jamais 2 de la même semaine", () => {
+      // 7 quotidiennes (j0..j6) + j15 et j25 (2 semaines distinctes plus anciennes) + j35 (3e semaine, au-delà du palier=2, donc jamais conservée : mensuel=0).
+      const entrees = [...Array.from({ length: 7 }, (_, i) => entreeIlYA(i)), entreeIlYA(15), entreeIlYA(25), entreeIlYA(35)];
+      const conserves = calculerSauvegardesAConserver(entrees, POLITIQUE_ROTATION_CLOUD_PAR_DEFAUT);
+      expect(conserves.has("backup-j15")).toBe(true);
+      expect(conserves.has("backup-j25")).toBe(true);
+      expect(conserves.has("backup-j35")).toBe(false); // mensuel=0 : jamais promue au-delà du palier hebdomadaire.
+      expect(conserves.size).toBe(9); // 7 quotidiennes + 2 hebdomadaires, jamais plus.
+    });
+
+    it("les 7 quotidiennes ne sont jamais recomptées comme des semaines distinctes au palier hebdomadaire", () => {
+      const entrees = Array.from({ length: 7 }, (_, i) => entreeIlYA(i));
+      const conserves = calculerSauvegardesAConserver(entrees, POLITIQUE_ROTATION_CLOUD_PAR_DEFAUT);
+      // Avec seulement 7 entrées (toutes dans le palier quotidien), aucune ne doit apparaître une seconde fois via le palier hebdomadaire.
+      expect(conserves.size).toBe(7);
+      expect(new Set(conserves).size).toBe(7);
+    });
+
+    it("aucun palier mensuel : une entrée très ancienne, au-delà des 2 semaines, n'est jamais conservée", () => {
+      const entrees = [...Array.from({ length: 7 }, (_, i) => entreeIlYA(i)), entreeIlYA(10), entreeIlYA(20), entreeIlYA(200)];
+      const conserves = calculerSauvegardesAConserver(entrees, POLITIQUE_ROTATION_CLOUD_PAR_DEFAUT);
+      expect(conserves.has("backup-j200")).toBe(false);
+    });
   });
 });

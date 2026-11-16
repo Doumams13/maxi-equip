@@ -45,6 +45,24 @@ export const POLITIQUE_ROTATION_PAR_DEFAUT: PolitiqueRotation = {
   mensuel: 12,
 };
 
+/**
+ * Politique de rétention CLOUD (audit stockage B2 du 2026-11-14) —
+ * volontairement plus légère que la rétention locale : le cloud sert la
+ * reprise sur sinistre/vol (voir docs/architecture), pas l'historique fin
+ * (c'est le rôle du local, déjà couvert par `POLITIQUE_ROTATION_PAR_DEFAUT`
+ * ci-dessus). Aucun palier mensuel (`mensuel: 0`) — `calculerSauvegardesAConserver`
+ * gère déjà ce cas nativement (la boucle mensuelle s'arrête dès sa
+ * première itération), aucune modification de l'algorithme nécessaire.
+ * 7 quotidiennes + 2 hebdomadaires = 9 sauvegardes cloud max à tout
+ * instant, dimensionné pour rester sous le plafond de stockage B2 du
+ * compte (voir cloudBackupService.ts, verifierEspaceCloudSuffisant).
+ */
+export const POLITIQUE_ROTATION_CLOUD_PAR_DEFAUT: PolitiqueRotation = {
+  quotidien: 7,
+  hebdomadaire: 2,
+  mensuel: 0,
+};
+
 function cleSemaine(date: Date): string {
   const debutAnnee = Date.UTC(date.getUTCFullYear(), 0, 1);
   const joursEcoules = Math.floor((date.getTime() - debutAnnee) / 86_400_000);

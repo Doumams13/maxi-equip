@@ -6,7 +6,7 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
-import type { CloudBackupProvider } from "./cloudBackupProvider.js";
+import type { CloudBackupProvider, ObjetCloud } from "./cloudBackupProvider.js";
 
 export interface S3CloudBackupConfig {
   bucket: string;
@@ -87,10 +87,12 @@ export class S3CloudBackupProvider implements CloudBackupProvider {
     });
   }
 
-  async list(prefixe: string): Promise<string[]> {
+  async list(prefixe: string): Promise<ObjetCloud[]> {
     return avecRetry(async () => {
       const reponse = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefixe }));
-      return (reponse.Contents ?? []).map((o) => o.Key!).filter(Boolean);
+      return (reponse.Contents ?? [])
+        .filter((o): o is typeof o & { Key: string } => !!o.Key)
+        .map((o) => ({ cle: o.Key, taille: o.Size ?? 0 }));
     });
   }
 

@@ -117,6 +117,25 @@ export function getConfigurationSync(): ConfigurationSync {
  * sources n'est configurée — comportement inchangé pour un poste où la
  * sauvegarde cloud n'est simplement pas activée.
  */
+/**
+ * Plafond d'espace cloud pour les sauvegardes SQLite (audit stockage B2,
+ * 2026-11-14) — ne PEUT PAS interroger le vrai plafond du compte B2 (pas
+ * d'API générique pour ça via le protocole S3) : c'est donc un budget
+ * propre à l'application, délibérément fixé EN DESSOUS du plafond B2
+ * réel du compte (10 Go au moment de cet audit) pour laisser une marge.
+ * Avec la politique de rétention cloud par défaut (7 quotidiennes + 2
+ * hebdomadaires, ~750-800 Mo chacune), l'usage réel attendu est de 7 à 9
+ * Go — ce plafond de 9 Go sert de garde-fou si la base grossit plus vite
+ * que prévu, jamais une valeur qu'on s'attend à atteindre en usage normal.
+ */
+const PLAFOND_CLOUD_BACKUP_PAR_DEFAUT_OCTETS = 9 * 1024 * 1024 * 1024;
+
+export function getPlafondCloudBackupOctets(): number {
+  const valeur = process.env["CLOUD_BACKUP_PLAFOND_OCTETS"];
+  const parsed = valeur ? Number(valeur) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : PLAFOND_CLOUD_BACKUP_PAR_DEFAUT_OCTETS;
+}
+
 export function getConfigurationCloudBackup(): ConfigurationCloudBackup | null {
   const local = lireConfigurationLocale();
   if (local?.cloudBackup) return local.cloudBackup;

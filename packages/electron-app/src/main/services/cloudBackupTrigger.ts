@@ -1,8 +1,9 @@
-import { basename } from "node:path";
+import { basename, join } from "node:path";
+import { statSync } from "node:fs";
 import type { BackupService } from "./backupService.js";
 import { S3CloudBackupProvider } from "./s3CloudBackupProvider.js";
 import { CloudBackupService } from "./cloudBackupService.js";
-import { getConfigurationCloudBackup } from "./syncConfig.js";
+import { getConfigurationCloudBackup, getPlafondCloudBackupOctets } from "./syncConfig.js";
 
 /**
  * Correction Phase Finale, Bloc 4 (remédiation pré-production — backup
@@ -18,6 +19,27 @@ import { getConfigurationCloudBackup } from "./syncConfig.js";
  * `declencherSauvegardeAutoEtCloudSiNecessaire` ci-dessous, elle-même
  * appelée depuis le cycle de synchronisation (voir son commentaire).
  */
+/**
+ * Verrou en mémoire — protection contre deux envois cloud qui se
+ * chevaucheraient dans CE processus (audit stockage B2, 2026-11-14).
+ *
+ * ANALYSE (pourquoi un verrou interprocessus n'est PAS nécessaire ici) :
+ * la création LOCALE du backup (`creerSauvegardeAutomatiqueSiNecessaire`,
+ * appelée synchrone dans `declencherSauvegardeAutoEtCloudSiNecessaire`
+ * ci-dessous) s'auto-protège déjà — Node étant mono-thread, deux appels
+ * ne peuvent jamais s'exécuter en parallèle, et le second verra toujours
+ * le backup local que le premier vient de créer (seuil de 24h déjà
+ * franchi). Les doublons réellement observés le 17 et le 21 octobre
+ * dataient d'AVANT cette garde (système introduit le 28/10) et
+ * correspondent à des LANCEMENTS DISTINCTS de l'application (processus
+ * différents, état local indépendant) — aucun verrou dans un seul
+ * processus ne peut empêcher ça. Ce verrou reste une protection en
+ * défense en profondeur pour l'envoi cloud lui-même (async, donc pas
+ * protégé par le mono-threading de la même façon), pas un correctif du
+ * problème historique.
+ */
+let sauvegardeCloudEnCours = false;
+
 export async function envoyerBackupVersCloudSiConfigure(cheminDossierBackup: string): Promise<void> {
   // Config locale persistée (restaurée après un vol/panne) en priorité,
   // sinon variables d'environnement — voir syncConfig.ts. Comportement
@@ -25,22 +47,67 @@ export async function envoyerBackupVersCloudSiConfigure(cheminDossierBackup: str
   const config = getConfigurationCloudBackup();
   if (!config) return;
 
+  if (sauvegardeCloudEnCours) {
+    // eslint-disable-next-line no-console
+    console.error("[backup-cloud] un envoi est déjà en cours, ce déclenchement est ignoré (jamais un envoi concurrent).");
+    return;
+  }
+  sauvegardeCloudEnCours = true;
+
   try {
     const provider = new S3CloudBackupProvider({
       bucket: config.bucket,
       region: config.region,
       endpoint: config.endpoint,
+      // BUG RÉEL CORRIGÉ (audit stockage B2, 2026-11-14) : jamais passé
+      // ici jusqu'ici, alors que `S3CloudBackupConfig` le prévoit déjà
+      // (voir s3CloudBackupProvider.ts) — l'absence fait retomber le SDK
+      // AWS sur l'adressage "virtual-hosted-style" par défaut
+      // (`bucket.endpoint`), qui échoue silencieusement (connexion
+      // bloquée, jamais d'erreur explicite) contre un service S3-
+      // compatible non-AWS servant uniquement du "path-style"
+      // (`endpoint/bucket`) — c'est le cas de B2 et du serveur de test
+      // s3rver utilisé par les tests réels de ce fichier. Toujours vrai
+      // ici : ce provider ne parle jamais à AWS S3 lui-même, uniquement
+      // à un point de terminaison personnalisé (voir CLOUD_BACKUP_ENDPOINT).
+      forcePathStyle: true,
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,
     });
-    const resultat = await new CloudBackupService(provider).sauvegarderVersLeCloud(cheminDossierBackup, basename(cheminDossierBackup));
+    const service = new CloudBackupService(provider);
+    const nomBackup = basename(cheminDossierBackup);
+
+    // Gestion d'espace AVANT toute tentative d'upload (point 6, audit du
+    // 2026-11-14) — jamais de libération d'espace automatique ici : si
+    // insuffisant, on interrompt plutôt que de supprimer pour compenser
+    // (règle impérative — voir cloudBackupService.ts).
+    const tailleNouvelleSauvegardeOctets = statSync(join(cheminDossierBackup, "database.sqlite")).size;
+    const plafondOctets = getPlafondCloudBackupOctets();
+    const espace = await service.verifierEspaceCloudSuffisant(tailleNouvelleSauvegardeOctets, plafondOctets);
+    if (!espace.suffisant) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[backup-cloud] espace cloud insuffisant pour cette sauvegarde, envoi annulé (aucune suppression automatique) :",
+        { ...espace, nomBackup }
+      );
+      return;
+    }
+
+    const resultat = await service.sauvegarderVersLeCloud(cheminDossierBackup, nomBackup);
     if (!resultat.success) {
       // eslint-disable-next-line no-console
       console.error("[backup-cloud] envoi impossible :", resultat.message);
+      return; // jamais de purge après un échec d'upload ou de vérification.
     }
+
+    // Purge UNIQUEMENT après succès + vérification d'intégrité déjà
+    // effectuée dans sauvegarderVersLeCloud (règle impérative).
+    await service.purgerAnciennesSauvegardesCloud();
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[backup-cloud] envoi impossible :", err instanceof Error ? err.message : err);
+  } finally {
+    sauvegardeCloudEnCours = false;
   }
 }
 

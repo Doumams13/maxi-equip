@@ -143,6 +143,10 @@ export function runMigrations(db: Database.Database): void {
   // 5.6) — ces colonnes ne sont écrites ici que par le chemin de
   // réception, jamais par `delete()`.
   ajouterColonnesDeletedSousCategorieChampsSiAbsentes(db);
+  // Nettoyage incident 2026-11-17 (doublons "(copie)") — PRÉPARÉE, VOLONTAIREMENT
+  // PAS ENCORE ACTIVÉE. Voir `reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes`
+  // ci-dessous pour le raisonnement complet avant de décocher cette ligne :
+  // reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes(db);
   setSchemaVersion(db);
 }
 
@@ -508,6 +512,69 @@ function ajouterColonnesDeletedSousCategorieChampsSiAbsentes(db: Database.Databa
   if (!columns.some((c) => c.name === "deleted_by")) {
     db.exec("ALTER TABLE sous_categorie_champs ADD COLUMN deleted_by TEXT");
   }
+}
+
+/**
+ * PRÉPARÉE, PAS ENCORE ACTIVÉE (voir `runMigrations` ci-dessus — non
+ * appelée tant que l'activation n'a pas été décidée explicitement).
+ * Exportée uniquement pour rester compilable tant qu'elle n'est pas
+ * appelée (sinon TypeScript la signale comme "jamais utilisée") et pour
+ * permettre un test dédié avant son activation — jamais utilisée ailleurs
+ * que par `runMigrations`, une fois la ligne d'appel ci-dessus décommentée.
+ *
+ * Nettoyage de l'incident réel du 2026-11-17 (deux postes, PC Shop et
+ * Renams, ayant démarré la 0.12.0 à quelques minutes d'intervalle ont
+ * chacun créé localement leur propre jeu des 20 catégories prédéfinies
+ * — voir le correctif de `CatalogueAccueilScreen.tsx` pour le diagnostic
+ * complet). Les 20 doublons ont été renommés "<nom> (copie)" directement
+ * sur le référentiel serveur (correctif d'urgence, sans redéploiement)
+ * pour lever leur masquage à l'affichage ; ils restent néanmoins des
+ * catégories/sous-catégories bien réelles, potentiellement porteuses de
+ * modèles sur l'un ou l'autre poste.
+ *
+ * Cette migration réaffecte, UNIQUEMENT EN LOCAL, tout modèle encore
+ * attaché à une sous-catégorie "(copie)" vers son équivalent de même nom
+ * sous la catégorie non suffixée — jamais l'inverse (le nom SANS
+ * "(copie)" est toujours la cible). AUCUNE suppression, AUCUN tombstone
+ * émis ici : une suppression émise par CE poste pendant que l'AUTRE
+ * poste n'a pas encore exécuté cette même réaffectation s'appliquerait
+ * chez lui sans la garde bloquante locale habituelle (suppression REÇUE
+ * via `creerDepuisServeur`, jamais soumise à cette garde — voir
+ * `catalogue:supprimerSousCategorie` dans `ipc/metier.ts`), ce qui
+ * reproduirait exactement l'incident corrigé ici. Les catégories/sous-
+ * catégories "(copie)", une fois vidées de tout modèle sur les DEUX
+ * postes, resteront donc intactes mais vides — à supprimer plus tard
+ * MANUELLEMENT depuis "Gérer les catégories" une fois cette version
+ * installée partout (leur compteur de produits affichera alors 0 de
+ * façon fiable, confirmant qu'il n'y a plus rien à perdre).
+ *
+ * Idempotente comme `migrerModelesNonClassesVersDiversSiAbsent` :
+ * exécutée à chaque démarrage, sans effet dès qu'aucun modèle local ne
+ * référence plus une sous-catégorie "(copie)".
+ */
+export function reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes(db: Database.Database): void {
+  const paires = db
+    .prepare(
+      `SELECT scCopie.id AS idCopie, scCible.id AS idCible
+       FROM sous_categories scCopie
+       JOIN categories catCopie ON catCopie.id = scCopie.categorie_id
+       JOIN categories catCible ON catCible.nom = substr(catCopie.nom, 1, length(catCopie.nom) - length(' (copie)'))
+       JOIN sous_categories scCible ON scCible.categorie_id = catCible.id AND scCible.nom = scCopie.nom
+       WHERE catCopie.nom LIKE '% (copie)'
+         AND scCopie.deleted_at IS NULL AND catCopie.deleted_at IS NULL
+         AND scCible.deleted_at IS NULL AND catCible.deleted_at IS NULL
+         AND scCible.id != scCopie.id`
+    )
+    .all() as { idCopie: string; idCible: string }[];
+
+  if (paires.length === 0) return;
+
+  const reaffecter = db.transaction(() => {
+    for (const { idCopie, idCible } of paires) {
+      db.prepare("UPDATE modeles_produit SET sous_categorie_id = ? WHERE sous_categorie_id = ? AND deleted_at IS NULL").run(idCible, idCopie);
+    }
+  });
+  reaffecter();
 }
 
 /**

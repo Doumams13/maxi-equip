@@ -81,19 +81,48 @@ export function CatalogueAccueilScreen({ onOuvrirCategorie, onOuvrirProduit }: C
    * fusionne seulement l'affichage. Une catégorie réelle consommée par
    * une correspondance initiale n'apparaît pas une seconde fois dans les
    * "supplémentaires".
+   *
+   * CORRECTION (incident réel, 2026-11-17) : deux postes démarrant la
+   * 0.12.0 à quelques minutes d'intervalle ont chacun créé localement
+   * leur propre jeu des 20 catégories prédéfinies (UUID différent par
+   * poste, jamais réconcilié par la synchronisation qui travaille par
+   * identifiant, jamais par nom) — la base contenait alors DEUX
+   * catégories réelles nommées "Carrelage et revêtements", chacune avec
+   * son propre "Carreaux". L'ancienne implémentation indexait les
+   * catégories réelles par nom dans une simple `Map` : la seconde
+   * catégorie du même nom écrasait silencieusement la première dans
+   * cette `Map`, qui disparaissait alors totalement de l'affichage —
+   * sans erreur, sans compteur à zéro, juste absente — alors que ses
+   * produits restaient parfaitement intacts en base (toujours vendables,
+   * invisibles seulement ici). Une catégorie réelle ne doit donc plus
+   * jamais être perdue en cas de doublon de nom : toutes les catégories
+   * partageant un même nom sont désormais regroupées, celle avec le plus
+   * de produits occupe la case "initiale" correspondante, et toute
+   * catégorie supplémentaire du même nom (doublon vide ou non) reste
+   * affichée parmi les "supplémentaires", jamais silencieusement perdue.
    */
   const cartes = useMemo<CarteCatalogue[]>(() => {
-    const restantes = new Map(categories.map((c) => [normaliserNomCategorie(c.nom), c]));
+    const parNom = new Map<string, Categorie[]>();
+    for (const c of categories) {
+      const cle = normaliserNomCategorie(c.nom);
+      const groupe = parNom.get(cle);
+      if (groupe) groupe.push(c);
+      else parNom.set(cle, [c]);
+    }
+
     const initiales: CarteCatalogue[] = CATEGORIES_INITIALES.map((init) => {
       const cle = normaliserNomCategorie(init.nom);
-      const reelle = restantes.get(cle);
-      if (reelle) {
-        restantes.delete(cle);
+      const groupe = parNom.get(cle);
+      if (groupe && groupe.length > 0) {
+        groupe.sort((a, b) => b.nombreProduits - a.nombreProduits);
+        const reelle = groupe.shift()!;
+        if (groupe.length === 0) parNom.delete(cle);
         return { statut: "reelle", id: reelle.id, nom: reelle.nom, nombreProduits: reelle.nombreProduits, illustration: illustrationCategorie(reelle) };
       }
       return { statut: "aConfigurer", nom: init.nom, illustration: init.image };
     });
-    const supplementaires: CarteCatalogue[] = [...restantes.values()]
+    const supplementaires: CarteCatalogue[] = [...parNom.values()]
+      .flat()
       .sort((a, b) => a.ordre - b.ordre || a.nom.localeCompare(b.nom))
       .map((c) => ({ statut: "reelle", id: c.id, nom: c.nom, nombreProduits: c.nombreProduits, illustration: illustrationCategorie(c) }));
     return [...initiales, ...supplementaires];

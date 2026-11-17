@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, defaultTokens, useToast } from "@maxi-equip/design-system";
 import { Search, X, ArrowRight, Package, Grid3x3, List } from "lucide-react";
 import type { Categorie, RechercheGlobaleResultat } from "../../../preload/index.js";
@@ -63,6 +63,11 @@ export function CatalogueAccueilScreen({ onOuvrirCategorie, onOuvrirProduit }: C
   const [resultats, setResultats] = useState<RechercheGlobaleResultat | null>(null);
   const [recherchant, setRecherchant] = useState(false);
   const [categorieSurvolee, setCategorieSurvolee] = useState<string | null>(null);
+  // Évite qu'une réponse lente d'une recherche précédente n'écrase le
+  // résultat d'une recherche plus récente déjà affichée (ex. "c" puis
+  // "ca" tapés vite, réponse de "c" arrivant après celle de "ca") —
+  // seule la dernière recherche lancée est autorisée à appliquer son résultat.
+  const derniereRechercheIdRef = useRef(0);
 
   async function recharger() {
     const cats = await window.maxiEquip.listerCategories();
@@ -139,6 +144,7 @@ export function CatalogueAccueilScreen({ onOuvrirCategorie, onOuvrirProduit }: C
   async function lancerRecherche(terme: string) {
     setRecherche(terme);
     const t = terme.trim();
+    const idRecherche = ++derniereRechercheIdRef.current;
     if (!t) {
       setResultats(null);
       return;
@@ -146,9 +152,10 @@ export function CatalogueAccueilScreen({ onOuvrirCategorie, onOuvrirProduit }: C
     setRecherchant(true);
     try {
       const r = await window.maxiEquip.rechercherGlobalCatalogue(t);
+      if (idRecherche !== derniereRechercheIdRef.current) return; // réponse obsolète — une recherche plus récente a déjà pris le relais
       setResultats(r);
     } finally {
-      setRecherchant(false);
+      if (idRecherche === derniereRechercheIdRef.current) setRecherchant(false);
     }
   }
 

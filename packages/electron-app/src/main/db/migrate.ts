@@ -143,10 +143,10 @@ export function runMigrations(db: Database.Database): void {
   // 5.6) — ces colonnes ne sont écrites ici que par le chemin de
   // réception, jamais par `delete()`.
   ajouterColonnesDeletedSousCategorieChampsSiAbsentes(db);
-  // Nettoyage incident 2026-11-17 (doublons "(copie)") — PRÉPARÉE, VOLONTAIREMENT
-  // PAS ENCORE ACTIVÉE. Voir `reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes`
-  // ci-dessous pour le raisonnement complet avant de décocher cette ligne :
-  // reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes(db);
+  // Nettoyage incident 2026-11-17 (doublons "(copie)") — ACTIVÉE (voir
+  // `reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes`
+  // ci-dessous pour le raisonnement complet).
+  reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes(db);
   setSchemaVersion(db);
 }
 
@@ -515,12 +515,8 @@ function ajouterColonnesDeletedSousCategorieChampsSiAbsentes(db: Database.Databa
 }
 
 /**
- * PRÉPARÉE, PAS ENCORE ACTIVÉE (voir `runMigrations` ci-dessus — non
- * appelée tant que l'activation n'a pas été décidée explicitement).
- * Exportée uniquement pour rester compilable tant qu'elle n'est pas
- * appelée (sinon TypeScript la signale comme "jamais utilisée") et pour
- * permettre un test dédié avant son activation — jamais utilisée ailleurs
- * que par `runMigrations`, une fois la ligne d'appel ci-dessus décommentée.
+ * ACTIVÉE (voir l'appel dans `runMigrations` ci-dessus). Exportée
+ * également pour un test dédié.
  *
  * Nettoyage de l'incident réel du 2026-11-17 (deux postes, PC Shop et
  * Renams, ayant démarré la 0.12.0 à quelques minutes d'intervalle ont
@@ -820,7 +816,7 @@ function ajouterSourceEntityIdDemandesSiAbsent(db: Database.Database): void {
  * plus tard, par la restauration (Phase 3.9) pour valider la
  * compatibilité d'une sauvegarde avant de l'appliquer.
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 function setSchemaVersion(db: Database.Database): void {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);

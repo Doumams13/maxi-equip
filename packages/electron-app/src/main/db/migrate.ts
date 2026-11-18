@@ -374,28 +374,67 @@ function ajouterSousCategorieIdModelesSiAbsent(db: Database.Database): void {
  * Décision explicite du client (fondations quincaillerie, Phase 1) :
  * tout modèle existant doit être rattaché automatiquement à la
  * catégorie "Carrelage et revêtements" à la migration — rien ne doit
- * disparaître de la grille catalogue le premier jour. Idempotente : ne
- * s'exécute qu'une seule fois (tant que la table `categories` est
- * vide), ne touche ensuite plus jamais un modèle déjà classé
- * manuellement (seuls les modèles avec `sous_categorie_id IS NULL` sont
- * concernés, à chaque exécution — couvre aussi le cas d'un modèle créé
- * entre deux migrations sans classement).
+ * disparaître de la grille catalogue le premier jour.
+ *
+ * Durcissement (diagnostic "130 carreaux, 1 seul affiché", 2026-11-18) :
+ * cette migration était gardée par `COUNT(*) FROM categories === 0`,
+ * supposant qu'une table `categories` non vide signifiait "déjà migrée
+ * ici". Or la synchronisation du référentiel commun (catégories/
+ * sous-catégories reçues d'un AUTRE poste ou du serveur) peut remplir
+ * cette table AVANT que cette migration n'ait eu l'occasion de tourner
+ * sur CE poste pour une raison SANS AUCUN rapport avec "Carrelage et
+ * revêtements"/"Carreaux" — la condition se déclenchait alors à tort, et
+ * la migration restait sautée en permanence (elle ne retente jamais).
+ * Tout modèle legacy resterait alors avec `sous_categorie_id IS NULL`,
+ * récupéré ensuite par le filet de sécurité générique
+ * `migrerModelesNonClassesVersDiversSiAbsent` ci-dessous, qui l'enterre
+ * sous "Divers > Non classé" — un emplacement que personne ne consulte
+ * en cherchant des carreaux. Ce mécanisme reste une cause possible, mais
+ * NON confirmée sur la base réelle concernée (voir le rapport d'incident
+ * du 2026-11-18 — l'explication retenue pour ce cas précis est la
+ * scission des catalogues entre les deux sous-catégories "Carreaux"
+ * dupliquées de l'incident du 2026-11-17, déjà traitée par
+ * `reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes`).
+ * Ce durcissement reste appliqué par prudence, sans données à déplacer
+ * automatiquement ici (voir cette fonction — aucun rattrapage rétroactif
+ * n'accompagne ce changement, pour ne jamais risquer de reclasser à tort
+ * un modèle déjà égaré sous "Divers > Non classé" pour une AUTRE raison).
+ *
+ * Corrigée : la condition "première fois sur ce poste" se vérifie
+ * désormais PAR NOM, spécifiquement sur "Carrelage et revêtements" >
+ * "Carreaux" (même principe que `initialiserCategoriesQuincailleriePredefiniesSiAbsentes`
+ * — jamais de doublon par nom) — jamais sur le contenu de toute la table
+ * `categories`, qu'une tout autre sous-catégorie reçue par ailleurs ne
+ * doit jamais pouvoir fausser. Le balayage ponctuel des modèles
+ * `sous_categorie_id IS NULL` ne s'effectue QUE lorsque "Carreaux" vient
+ * d'être créée ici (comportement "une seule fois" inchangé) : un modèle
+ * créé plus tard, sans classement, reste la responsabilité du filet de
+ * sécurité générique `migrerModelesNonClassesVersDiversSiAbsent`
+ * ci-dessous (jamais réaffecté ici après ce premier passage).
  */
 function migrerCarrelageVersCategorieParDefautSiAbsent(db: Database.Database): void {
-  const aucuneCategorie = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n === 0;
-  if (!aucuneCategorie) return;
-
   const now = new Date().toISOString();
   const migrer = db.transaction(() => {
-    const categorieId = randomUUID();
-    db.prepare(
-      "INSERT INTO categories (id, nom, image_data_url, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, NULL, 0, NULL, NULL, ?, ?)"
-    ).run(categorieId, "Carrelage et revêtements", now, now);
+    let categorie = db.prepare("SELECT id FROM categories WHERE nom = ? AND deleted_at IS NULL").get("Carrelage et revêtements") as
+      | { id: string }
+      | undefined;
+    if (!categorie) {
+      const id = randomUUID();
+      db.prepare(
+        "INSERT INTO categories (id, nom, image_data_url, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, NULL, 0, NULL, NULL, ?, ?)"
+      ).run(id, "Carrelage et revêtements", now, now);
+      categorie = { id };
+    }
+
+    const sousCategorieExistante = db
+      .prepare("SELECT id FROM sous_categories WHERE categorie_id = ? AND nom = ? AND deleted_at IS NULL")
+      .get(categorie.id, "Carreaux") as { id: string } | undefined;
+    if (sousCategorieExistante) return; // déjà passée ici (ou reçue identique via sync) — jamais de second balayage.
 
     const sousCategorieId = randomUUID();
     db.prepare(
       "INSERT INTO sous_categories (id, categorie_id, nom, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)"
-    ).run(sousCategorieId, categorieId, "Carreaux", now, now);
+    ).run(sousCategorieId, categorie.id, "Carreaux", now, now);
 
     db.prepare("UPDATE modeles_produit SET sous_categorie_id = ? WHERE sous_categorie_id IS NULL").run(sousCategorieId);
   });

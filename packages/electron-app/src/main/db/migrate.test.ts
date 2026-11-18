@@ -351,6 +351,58 @@ describe("Fondations quincaillerie (Phase 1) — categories/sous_categories, uni
     db.close();
   });
 
+  it("RÉGRESSION diagnostic '130 carreaux, 1 seul affiché' (2026-11-18) : des modèles legacy sont tout de même rattachés à 'Carrelage et revêtements' > 'Carreaux' même si la table categories contient déjà une AUTRE catégorie avant le premier passage (reproduction de l'ancien bug de garde)", () => {
+    const db = new Database(":memory:");
+
+    // Simule une base créée AVANT l'extension quincaillerie : modeles_produit
+    // existe déjà, avec des modèles jamais classés (comme les anciens carreaux
+    // enregistrés avant la colonne sous_categorie_id).
+    db.exec(`
+      CREATE TABLE modeles_produit (
+        id TEXT PRIMARY KEY, motif TEXT NOT NULL, type TEXT NOT NULL,
+        deleted_at TEXT, deleted_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+    `);
+    const ancien = "2026-01-01T00:00:00.000Z";
+    for (let i = 0; i < 3; i++) {
+      db.prepare("INSERT INTO modeles_produit (id, motif, type, created_at, updated_at) VALUES (?, ?, 'Grès cérame', ?, ?)").run(
+        `m-legacy-${i}`,
+        `Carreau legacy ${i}`,
+        ancien,
+        ancien
+      );
+    }
+
+    // Reproduit l'ancien déclencheur du bug : une catégorie SANS RAPPORT avec
+    // les carreaux existe déjà (ex. reçue via le référentiel commun) AVANT
+    // que cette base n'ait jamais exécuté la migration Phase 1 une seule
+    // fois — l'ancienne garde `COUNT(*) FROM categories === 0` sautait alors
+    // la classification par défaut à tort.
+    db.exec(`
+      CREATE TABLE categories (
+        id TEXT PRIMARY KEY, nom TEXT NOT NULL, image_data_url TEXT, ordre INTEGER NOT NULL DEFAULT 0,
+        deleted_at TEXT, deleted_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      "INSERT INTO categories (id, nom, ordre, created_at, updated_at) VALUES ('cat-etrangere', 'Plomberie et évacuation', 1, ?, ?)"
+    ).run(ancien, ancien);
+
+    runMigrations(db);
+
+    const modeles = db.prepare("SELECT sous_categorie_id FROM modeles_produit WHERE id LIKE 'm-legacy-%'").all() as { sous_categorie_id: string }[];
+    expect(modeles).toHaveLength(3);
+    for (const m of modeles) {
+      const sousCategorie = db.prepare("SELECT nom, categorie_id FROM sous_categories WHERE id = ?").get(m.sous_categorie_id) as
+        | { nom: string; categorie_id: string }
+        | undefined;
+      expect(sousCategorie?.nom).toBe("Carreaux"); // jamais "Non classé" : la présence d'une AUTRE catégorie ne doit plus jamais faire sauter ce rattachement.
+      const categorie = db.prepare("SELECT nom FROM categories WHERE id = ?").get(sousCategorie!.categorie_id) as { nom: string };
+      expect(categorie.nom).toBe("Carrelage et revêtements");
+    }
+    db.close();
+  });
+
   it("lignes_facture gagne unite_vente/caracteristiques sur une base existante, sans perdre les snapshots déjà présents (surface_carton_m2)", () => {
     const db = new Database(":memory:");
     db.exec(`

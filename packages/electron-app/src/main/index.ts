@@ -46,7 +46,7 @@ import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { ValidationStockDistanteService } from "./services/validationStockDistanteService.js";
 import { registerInitialisationStockCentralIpcHandlers } from "./ipc/initialisationStockCentral.js";
-import { registerMetierIpcHandlers } from "./ipc/metier.js";
+import { registerMetierIpcHandlers, enqueueModeleSync } from "./ipc/metier.js";
 import { ImageProduitRepository } from "./repositories/imageProduitRepository.js";
 import { ImageService } from "./services/imageService.js";
 import { registerImageIpcHandlers } from "./ipc/images.js";
@@ -273,7 +273,7 @@ app.whenReady().then(async () => {
   let mainWindow: BrowserWindow;
   try {
     const db = openDatabase();
-    runMigrations(db);
+    const idsModelesReclassesParMigration = runMigrations(db);
     registerIpcHandlers(db);
 
     // Authentification (Phase 1) : dépôt SQLite + hasher Argon2id réel +
@@ -282,6 +282,26 @@ app.whenReady().then(async () => {
     const hasher = new Argon2idPasswordHasher();
     const sessionManager = new SessionManager();
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
+
+    // Correction (audit "130 carreaux, 1 affiché", 2026-11-19) : les
+    // migrations de classification ci-dessus (migrate.ts) modifient
+    // `modeles_produit.sous_categorie_id` en SQL brut, AVANT que
+    // `boiteEnvoiRepository` n'existe — ce reclassement restait donc
+    // jusqu'ici purement local, jamais remonté au serveur central ni aux
+    // autres postes (racine du bug : un modèle reclassé "Carreaux" ou
+    // "Divers > Non classé" sur UN poste y reste indéfiniment sur tous
+    // les autres). Rejoué à CHAQUE démarrage (contrairement au rattrapage
+    // "compte" plus bas) — sans risque : les migrations elles-mêmes sont
+    // déjà idempotentes et ne renvoient des ids que les rares fois où
+    // elles reclassent réellement quelque chose, donc ce tableau est vide
+    // la quasi-totalité du temps.
+    if (idsModelesReclassesParMigration.length > 0) {
+      const modeleRepositoryMigration = new ModeleRepository(db);
+      for (const id of idsModelesReclassesParMigration) {
+        const modele = modeleRepositoryMigration.findById(id);
+        if (modele) enqueueModeleSync(boiteEnvoiRepository, modele, "update");
+      }
+    }
     const validationStockDistanteService = new ValidationStockDistanteService();
     const loginCentralService = new LoginCentralService();
     const authService = new AuthService(utilisateurRepository, hasher, sessionManager, loginCentralService);

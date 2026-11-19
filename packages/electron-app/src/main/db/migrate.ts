@@ -78,8 +78,19 @@ function colonnesEnCommun(db: Database.Database, tableSource: string, colonnesCi
  * puis les évolutions de schéma ultérieures, elles aussi idempotentes et
  * jamais destructrices (§14 du prompt Phase 0 : "ne détruit aucune donnée
  * existante").
+ *
+ * CORRECTION (audit "130 carreaux, 1 affiché", 2026-11-19) : renvoie
+ * désormais les ids des modèles reclassés par balayage SQL brut
+ * (`migrerCarrelageVersCategorieParDefautSiAbsent` /
+ * `migrerModelesNonClassesVersDiversSiAbsent`) — ces deux migrations
+ * modifient `modeles_produit.sous_categorie_id` directement en base,
+ * jamais via `enqueueModeleSync` (boiteEnvoiRepository n'existe pas
+ * encore à ce stade du démarrage, voir main/index.ts), donc ce
+ * reclassement restait jusqu'ici purement local, sans jamais remonter au
+ * serveur central ni aux autres postes. L'appelant (main/index.ts, une
+ * fois boiteEnvoiRepository disponible) met ces ids en file de synchro.
  */
-export function runMigrations(db: Database.Database): void {
+export function runMigrations(db: Database.Database): string[] {
   executerSchemaDeFaconTolerante(db);
   addEstPrincipaleColumnIfMissing(db);
   fixReferenceUniqueConstraint(db);
@@ -120,9 +131,9 @@ export function runMigrations(db: Database.Database): void {
   ajouterUniteVenteEtCaracteristiquesLignesFactureSiAbsent(db);
   creerTablesCategoriesSiAbsentes(db);
   ajouterSousCategorieIdModelesSiAbsent(db);
-  migrerCarrelageVersCategorieParDefautSiAbsent(db);
+  const idsCarreauxReclasses = migrerCarrelageVersCategorieParDefautSiAbsent(db);
   creerTableSousCategorieChampsSiAbsente(db);
-  migrerModelesNonClassesVersDiversSiAbsent(db);
+  const idsDiversReclasses = migrerModelesNonClassesVersDiversSiAbsent(db);
   // Fondations quincaillerie (Phase 2)
   ajouterMarqueModelesSiAbsent(db);
   ajouterMarqueProduitsSiAbsent(db);
@@ -148,6 +159,7 @@ export function runMigrations(db: Database.Database): void {
   // ci-dessous pour le raisonnement complet).
   reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes(db);
   setSchemaVersion(db);
+  return [...idsCarreauxReclasses, ...idsDiversReclasses];
 }
 
 /**
@@ -412,9 +424,9 @@ function ajouterSousCategorieIdModelesSiAbsent(db: Database.Database): void {
  * sécurité générique `migrerModelesNonClassesVersDiversSiAbsent`
  * ci-dessous (jamais réaffecté ici après ce premier passage).
  */
-function migrerCarrelageVersCategorieParDefautSiAbsent(db: Database.Database): void {
+function migrerCarrelageVersCategorieParDefautSiAbsent(db: Database.Database): string[] {
   const now = new Date().toISOString();
-  const migrer = db.transaction(() => {
+  const migrer = db.transaction((): string[] => {
     let categorie = db.prepare("SELECT id FROM categories WHERE nom = ? AND deleted_at IS NULL").get("Carrelage et revêtements") as
       | { id: string }
       | undefined;
@@ -429,16 +441,22 @@ function migrerCarrelageVersCategorieParDefautSiAbsent(db: Database.Database): v
     const sousCategorieExistante = db
       .prepare("SELECT id FROM sous_categories WHERE categorie_id = ? AND nom = ? AND deleted_at IS NULL")
       .get(categorie.id, "Carreaux") as { id: string } | undefined;
-    if (sousCategorieExistante) return; // déjà passée ici (ou reçue identique via sync) — jamais de second balayage.
+    if (sousCategorieExistante) return []; // déjà passée ici (ou reçue identique via sync) — jamais de second balayage.
 
     const sousCategorieId = randomUUID();
     db.prepare(
       "INSERT INTO sous_categories (id, categorie_id, nom, ordre, deleted_at, deleted_by, created_at, updated_at) VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)"
     ).run(sousCategorieId, categorie.id, "Carreaux", now, now);
 
-    db.prepare("UPDATE modeles_produit SET sous_categorie_id = ? WHERE sous_categorie_id IS NULL").run(sousCategorieId);
+    // Capturés AVANT la mise à jour (plus NULL ensuite) — renvoyés pour
+    // que l'appelant mette ce reclassement en file vers le serveur
+    // central (voir le commentaire de `runMigrations` ci-dessus : ce
+    // balayage en SQL brut ne passe jamais par `enqueueModeleSync` ici).
+    const idsReclasses = (db.prepare("SELECT id FROM modeles_produit WHERE sous_categorie_id IS NULL").all() as { id: string }[]).map((r) => r.id);
+    db.prepare("UPDATE modeles_produit SET sous_categorie_id = ?, updated_at = ? WHERE sous_categorie_id IS NULL").run(sousCategorieId, now);
+    return idsReclasses;
   });
-  migrer();
+  return migrer();
 }
 
 /**
@@ -624,12 +642,12 @@ export function reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresen
  * "les produits non classés iront directement dans divers", jamais
  * silencieusement invisibles du catalogue.
  */
-function migrerModelesNonClassesVersDiversSiAbsent(db: Database.Database): void {
+function migrerModelesNonClassesVersDiversSiAbsent(db: Database.Database): string[] {
   const nonClasses = db.prepare("SELECT COUNT(*) as n FROM modeles_produit WHERE sous_categorie_id IS NULL AND deleted_at IS NULL").get() as { n: number };
-  if (nonClasses.n === 0) return;
+  if (nonClasses.n === 0) return [];
 
   const now = new Date().toISOString();
-  const migrer = db.transaction(() => {
+  const migrer = db.transaction((): string[] => {
     let categorieDivers = db.prepare("SELECT id FROM categories WHERE nom = ? AND deleted_at IS NULL").get("Divers") as { id: string } | undefined;
     if (!categorieDivers) {
       const id = randomUUID();
@@ -650,9 +668,14 @@ function migrerModelesNonClassesVersDiversSiAbsent(db: Database.Database): void 
       sousCategorieNonClasse = { id };
     }
 
-    db.prepare("UPDATE modeles_produit SET sous_categorie_id = ? WHERE sous_categorie_id IS NULL").run(sousCategorieNonClasse.id);
+    // Même raison que `migrerCarrelageVersCategorieParDefautSiAbsent`
+    // ci-dessus : capturés avant la mise à jour, renvoyés pour mise en
+    // file de synchro par l'appelant.
+    const idsReclasses = (db.prepare("SELECT id FROM modeles_produit WHERE sous_categorie_id IS NULL").all() as { id: string }[]).map((r) => r.id);
+    db.prepare("UPDATE modeles_produit SET sous_categorie_id = ?, updated_at = ? WHERE sous_categorie_id IS NULL").run(sousCategorieNonClasse.id, now);
+    return idsReclasses;
   });
-  migrer();
+  return migrer();
 }
 
 /** Fondations quincaillerie (Phase 2) — colonne ajoutée sur une base créée avant cette extension. */

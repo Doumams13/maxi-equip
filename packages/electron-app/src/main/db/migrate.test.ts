@@ -403,6 +403,29 @@ describe("Fondations quincaillerie (Phase 1) — categories/sous_categories, uni
     db.close();
   });
 
+  it("RATTRAPAGE SYNCHRO (audit 'carreaux introuvables après la mise à jour', 2026-11-19) : runMigrations renvoie les ids des modèles reclassés par balayage SQL brut, pour que l'appelant (main/index.ts) les remette en file vers le serveur central — ce classement local ne doit plus jamais rester invisible des autres postes", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE modeles_produit (
+        id TEXT PRIMARY KEY, motif TEXT NOT NULL, type TEXT NOT NULL,
+        deleted_at TEXT, deleted_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+    `);
+    const ancien = "2026-01-01T00:00:00.000Z";
+    db.prepare("INSERT INTO modeles_produit (id, motif, type, created_at, updated_at) VALUES ('m-legacy-sync', 'Carreau legacy', 'Grès cérame', ?, ?)").run(
+      ancien,
+      ancien
+    );
+
+    const idsReclasses = runMigrations(db);
+
+    // Premier passage sur une base neuve : "Carreaux" vient d'être créée
+    // ici, donc le balayage ponctuel s'applique — doit inclure ce modèle.
+    expect(idsReclasses).toContain("m-legacy-sync");
+
+    db.close();
+  });
+
   it("lignes_facture gagne unite_vente/caracteristiques sur une base existante, sans perdre les snapshots déjà présents (surface_carton_m2)", () => {
     const db = new Database(":memory:");
     db.exec(`

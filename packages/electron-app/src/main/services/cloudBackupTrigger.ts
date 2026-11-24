@@ -187,11 +187,56 @@ export async function diagnosticSauvegardeCloud(): Promise<DiagnosticSauvegardeC
   return diagnostiquer(lireEtatSauvegardeCloud(), config !== null);
 }
 
-export function declencherSauvegardeAutoEtCloudSiNecessaire(backupService: Pick<BackupService, "creerSauvegardeAutomatiqueSiNecessaire">): void {
+/**
+ * Nouvelle tentative d'envoi (0.12.5, 2026-11-24) — jusqu'ici, l'envoi
+ * cloud n'était tenté qu'au moment où une NOUVELLE sauvegarde locale
+ * automatique était créée (une fois par 24 h) : après un échec (ex. B2
+ * plein), plus rien n'était retenté avant le lendemain. Désormais, à
+ * chaque synchronisation, si la sauvegarde locale la plus récente est
+ * plus récente que la dernière réussite cloud connue, elle est renvoyée
+ * TELLE QUELLE (jamais une nouvelle sauvegarde créée pour ça), au plus
+ * une fois toutes les DELAI_ENTRE_TENTATIVES_MS.
+ */
+export const DELAI_ENTRE_TENTATIVES_MS = 15 * 60 * 1000;
+let derniereTentativeRenvoi = 0;
+
+export function doitRenvoyerDerniereSauvegarde(
+  derniereLocaleCreatedAt: string | null,
+  derniereReussiteCloud: string | null,
+  configuree: boolean,
+  derniereTentative: number,
+  maintenant: number
+): boolean {
+  if (!configuree || !derniereLocaleCreatedAt) return false;
+  if (maintenant - derniereTentative < DELAI_ENTRE_TENTATIVES_MS) return false;
+  if (!derniereReussiteCloud) return true;
+  return new Date(derniereLocaleCreatedAt).getTime() > new Date(derniereReussiteCloud).getTime();
+}
+
+export function declencherSauvegardeAutoEtCloudSiNecessaire(
+  backupService: Pick<BackupService, "creerSauvegardeAutomatiqueSiNecessaire"> & Partial<Pick<BackupService, "listerSauvegardesAutomatiques">>
+): void {
   try {
     const resultat = backupService.creerSauvegardeAutomatiqueSiNecessaire();
     if (resultat?.success && resultat.chemin) {
+      derniereTentativeRenvoi = Date.now();
       void envoyerBackupVersCloudSiConfigure(resultat.chemin);
+      return;
+    }
+    // Aucune nouvelle sauvegarde locale : renvoi de la dernière si le cloud n'a pas réussi à la recevoir.
+    const derniere = backupService.listerSauvegardesAutomatiques?.()[0];
+    if (
+      derniere &&
+      doitRenvoyerDerniereSauvegarde(
+        derniere.createdAt,
+        lireEtatSauvegardeCloud().derniereReussite,
+        getConfigurationCloudBackup() !== null,
+        derniereTentativeRenvoi,
+        Date.now()
+      )
+    ) {
+      derniereTentativeRenvoi = Date.now();
+      void envoyerBackupVersCloudSiConfigure(derniere.chemin);
     }
   } catch (err) {
     // eslint-disable-next-line no-console

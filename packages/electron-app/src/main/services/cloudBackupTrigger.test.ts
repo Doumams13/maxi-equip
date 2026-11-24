@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { declencherSauvegardeAutoEtCloudSiNecessaire } from "./cloudBackupTrigger.js";
+import { declencherSauvegardeAutoEtCloudSiNecessaire, doitRenvoyerDerniereSauvegarde, DELAI_ENTRE_TENTATIVES_MS } from "./cloudBackupTrigger.js";
 
 /**
  * Tests réels — système multiposte fiable (2026-10-28). Couvre la
@@ -50,5 +50,31 @@ describe("declencherSauvegardeAutoEtCloudSiNecessaire", () => {
     };
 
     expect(() => declencherSauvegardeAutoEtCloudSiNecessaire(backupService)).not.toThrow();
+  });
+
+  it("0.12.5 — sans nouvelle sauvegarde locale et sans cloud configuré : la dernière sauvegarde est consultée mais rien n'est envoyé, jamais d'exception", () => {
+    supprimerConfigCloudBackup();
+    const backupService = {
+      creerSauvegardeAutomatiqueSiNecessaire: vi.fn(() => null),
+      listerSauvegardesAutomatiques: vi.fn(() => [{ chemin: "/tmp/fake", createdAt: "2026-11-24T08:00:00.000Z", vulnerable: false }]),
+    };
+    expect(() => declencherSauvegardeAutoEtCloudSiNecessaire(backupService)).not.toThrow();
+    expect(backupService.listerSauvegardesAutomatiques).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("doitRenvoyerDerniereSauvegarde (0.12.5 — nouvelle tentative après échec)", () => {
+  const maintenant = new Date("2026-11-24T12:00:00.000Z").getTime();
+  const locale = "2026-11-24T08:00:00.000Z";
+  it("renvoie si la sauvegarde locale est plus récente que la dernière réussite cloud (cas PC Shop : 26 octobre)", () => {
+    expect(doitRenvoyerDerniereSauvegarde(locale, "2026-10-26T08:42:19.000Z", true, 0, maintenant)).toBe(true);
+    expect(doitRenvoyerDerniereSauvegarde(locale, null, true, 0, maintenant)).toBe(true);
+  });
+  it("ne renvoie pas si elle est déjà dans le cloud, si le cloud n'est pas configuré, ou si la dernière tentative est trop récente", () => {
+    expect(doitRenvoyerDerniereSauvegarde(locale, "2026-11-24T08:05:00.000Z", true, 0, maintenant)).toBe(false);
+    expect(doitRenvoyerDerniereSauvegarde(locale, null, false, 0, maintenant)).toBe(false);
+    expect(doitRenvoyerDerniereSauvegarde(null, null, true, 0, maintenant)).toBe(false);
+    expect(doitRenvoyerDerniereSauvegarde(locale, null, true, maintenant - DELAI_ENTRE_TENTATIVES_MS + 1000, maintenant)).toBe(false);
+    expect(doitRenvoyerDerniereSauvegarde(locale, null, true, maintenant - DELAI_ENTRE_TENTATIVES_MS - 1000, maintenant)).toBe(true);
   });
 });

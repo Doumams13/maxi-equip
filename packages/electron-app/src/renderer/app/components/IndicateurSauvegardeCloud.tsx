@@ -1,0 +1,123 @@
+import { useEffect, useRef, useState } from "react";
+import { defaultTokens } from "@maxi-equip/design-system";
+import { CloudOff } from "lucide-react";
+
+type Diagnostic = {
+  configuree: boolean;
+  probleme: boolean;
+  derniereReussite: string | null;
+  dernierEchec: { date: string; message: string } | null;
+};
+
+function ilYa(iso: string): string {
+  const jours = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (jours <= 0) return "aujourd'hui";
+  if (jours === 1) return "hier";
+  return `il y a ${jours} jours`;
+}
+
+function dateFr(iso: string): string {
+  return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+/**
+ * Alerte "sauvegarde cloud" de la barre du haut (2026-11-24) — correction
+ * "les sauvegardes B2 échouaient en silence depuis un mois". N'affiche
+ * RIEN tant que tout va bien (barre du haut inchangée au quotidien) ; en
+ * cas de problème (échec plus récent que la dernière réussite, ou plus de
+ * 3 jours sans nouvelle sauvegarde), un bouton rouge ouvre le détail.
+ * Vérifié toutes les 5 minutes.
+ */
+export function IndicateurSauvegardeCloud() {
+  const [diagnostic, setDiagnostic] = useState<Diagnostic | null>(null);
+  const [ouvert, setOuvert] = useState(false);
+  const conteneur = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let annule = false;
+    async function recharger() {
+      try {
+        const resultat = await window.maxiEquip.backupEtatCloud();
+        if (!annule) setDiagnostic(resultat);
+      } catch {
+        // Jamais bloquant : l'indicateur reste simplement masqué.
+      }
+    }
+    void recharger();
+    const intervalle = setInterval(() => void recharger(), 5 * 60 * 1000);
+    return () => {
+      annule = true;
+      clearInterval(intervalle);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ouvert) return;
+    const fermer = (e: MouseEvent) => {
+      if (conteneur.current && !conteneur.current.contains(e.target as Node)) setOuvert(false);
+    };
+    document.addEventListener("mousedown", fermer);
+    return () => document.removeEventListener("mousedown", fermer);
+  }, [ouvert]);
+
+  if (!diagnostic || !diagnostic.configuree || !diagnostic.probleme) return null;
+
+  return (
+    <div ref={conteneur} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOuvert((v) => !v)}
+        title="La sauvegarde cloud ne fonctionne plus"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 10px",
+          borderRadius: defaultTokens.radius.pill,
+          border: `1px solid ${defaultTokens.colors.danger}`,
+          background: defaultTokens.colors.dangerSoft,
+          color: defaultTokens.colors.danger,
+          fontSize: 12.5,
+          fontWeight: 700,
+          cursor: "pointer",
+          fontFamily: defaultTokens.typography.body,
+        }}
+      >
+        <CloudOff size={15} />
+        Sauvegarde cloud
+      </button>
+      {ouvert && (
+        <div
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "calc(100% + 8px)",
+            width: 340,
+            zIndex: 50,
+            background: "#fff",
+            border: `1px solid ${defaultTokens.colors.border}`,
+            borderRadius: defaultTokens.radius.md,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            padding: 14,
+            fontSize: 13,
+            color: defaultTokens.colors.text,
+          }}
+        >
+          <div style={{ fontWeight: 800, color: defaultTokens.colors.danger, marginBottom: 6 }}>La sauvegarde cloud ne fonctionne plus</div>
+          <p style={{ margin: "0 0 8px" }}>
+            {diagnostic.derniereReussite
+              ? `Dernière sauvegarde réussie : ${dateFr(diagnostic.derniereReussite)} (${ilYa(diagnostic.derniereReussite)}).`
+              : "Aucune sauvegarde réussie n'est connue pour ce poste."}
+          </p>
+          {diagnostic.dernierEchec && (
+            <p style={{ margin: "0 0 8px", color: defaultTokens.colors.textSoft }}>
+              Dernière erreur ({dateFr(diagnostic.dernierEchec.date)}) : {diagnostic.dernierEchec.message}
+            </p>
+          )}
+          <p style={{ margin: 0, color: defaultTokens.colors.textSoft }}>
+            Les ventes récentes ne sont pas protégées en cas de panne ou de vol du PC. Prévenez l'administrateur.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}

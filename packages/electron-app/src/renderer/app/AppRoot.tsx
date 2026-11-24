@@ -13,6 +13,7 @@ import { HistoriqueScreen } from "./screens/HistoriqueScreen.js";
 import { ParametresScreen } from "./screens/ParametresScreen.js";
 import { UtilisateursScreen } from "./screens/UtilisateursScreen.js";
 import { PostesScreen } from "./screens/PostesScreen.js";
+import { OngletsEcran, type OngletEcran } from "./components/OngletsEcran.js";
 import { DiagnosticDoublonsScreen } from "./screens/DiagnosticDoublonsScreen.js";
 import { PromotionsScreen } from "./screens/PromotionsScreen.js";
 import { BilanScreen } from "./screens/BilanScreen.js";
@@ -158,27 +159,57 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
   const navItems: NavItem[] = [
     { id: "dashboard", label: "Tableau de bord", autorise: permissions.canAccessOperationalDashboard },
     { id: "produits", label: "Catalogue", autorise: permissions.canOperateStock },
-    { id: "stock", label: "Entrée de stock", autorise: permissions.canOperateStock },
-    { id: "transferts", label: "Transferts", autorise: permissions.canOperateStock },
-    { id: "ventes", label: "Vente", autorise: permissions.canOperateSales },
+    // Allègement du menu (2026-11-24) — une entrée par famille, les écrans
+    // associés deviennent des onglets (voir GROUPES_ONGLETS plus bas).
+    { id: "stock", label: "Stock", autorise: permissions.canOperateStock, ecransAssocies: ["transferts"] },
+    { id: "ventes", label: "Ventes", autorise: permissions.canOperateSales, ecransAssocies: ["devis"] },
     { id: "factures", label: "Factures", autorise: permissions.canAccessHistory },
-    { id: "devis", label: "Devis", autorise: permissions.canOperateSales },
     { id: "demandes", label: "Demandes", autorise: permissions.canHandleSiteRequests, badge: demandesActives > 0 ? demandesActives : undefined },
     { id: "historique", label: "Historique", autorise: permissions.canAccessHistory },
     { id: "promotions", label: "Promotions", autorise: permissions.canManagePromotions },
-    { id: "utilisateurs", label: "Utilisateurs", autorise: permissions.canManageUsers },
-    // Système multiposte fiable (2026-10-28) — réservé à l'Administrateur,
-    // même garde que "Utilisateurs" (la protection réelle reste côté IPC,
-    // checkAdminGuard, voir ipc/postes.ts).
-    { id: "postes", label: "Postes", autorise: permissions.canManageUsers },
+    // "Utilisateurs et postes" (2026-11-24) — une seule entrée, deux onglets
+    // (onglets : voir GROUPES_ONGLETS ci-dessous). L'écran "postes" reste routable
+    // (ouvre directement l'onglet Postes) mais n'a plus d'entrée de menu.
+    // Réservé à l'Administrateur ; protection réelle côté IPC (checkAdminGuard).
+    { id: "utilisateurs", label: "Utilisateurs et postes", autorise: permissions.canManageUsers, ecransAssocies: ["postes"] },
     // Phase 5 (référentiel commun), sous-phase 5.7 — même garde que "Postes"/"Utilisateurs" (réservé à l'Administrateur), protection réelle côté IPC non requise ici (lecture seule, aucune donnée sensible).
-    { id: "doublons", label: "Doublons", autorise: permissions.canManageUsers },
-    { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
+    // "Doublons" (diagnostic rarement utilisé) devient un onglet de Paramètres.
+    {
+      id: permissions.canEditCompanySettings ? "parametres" : "doublons",
+      label: "Paramètres",
+      autorise: permissions.canEditCompanySettings || permissions.canManageUsers,
+      ecransAssocies: ["parametres", "doublons"],
+    },
     // Correction "bilan d'activité" (2026-10-21) — réservé à l'Administrateur
     // (décision confirmée), la protection réelle restant côté IPC
     // (checkAdminGuard, voir main/ipc/metier.ts), jamais uniquement ici.
     { id: "bilan", label: "Bilan", autorise: session!.role === "administrateur" },
   ];
+
+  /**
+   * Allègement du menu (2026-11-24) — écrans regroupés sous une même entrée
+   * et présentés en onglets. Un onglet n'apparaît que si l'utilisateur a
+   * le droit d'ouvrir l'écran correspondant (mêmes gardes qu'avant).
+   */
+  const GROUPES_ONGLETS: (OngletEcran & { autorise: boolean })[][] = [
+    [
+      { id: "stock", label: "Entrées de stock", autorise: permissions.canOperateStock },
+      { id: "transferts", label: "Transferts", autorise: permissions.canOperateStock },
+    ],
+    [
+      { id: "ventes", label: "Nouvelle vente", autorise: permissions.canOperateSales },
+      { id: "devis", label: "Devis", autorise: permissions.canOperateSales },
+    ],
+    [
+      { id: "utilisateurs", label: "Utilisateurs", autorise: permissions.canManageUsers },
+      { id: "postes", label: "Postes", autorise: permissions.canManageUsers },
+    ],
+    [
+      { id: "parametres", label: "Paramètres", autorise: permissions.canEditCompanySettings },
+      { id: "doublons", label: "Doublons", autorise: permissions.canManageUsers },
+    ],
+  ];
+  const ongletsActifs = (GROUPES_ONGLETS.find((g) => g.some((o) => o.id === activeScreen)) ?? []).filter((o) => o.autorise);
 
   function renderScreen() {
     switch (activeScreen) {
@@ -301,6 +332,7 @@ export function AppRoot({ onLoggedOut }: AppRootProps) {
         onOuvrirDemande={(demandeId) => irVersOperation({ type: "demande", id: demandeId })}
         onOuvrirEntite={ouvrirEntiteNotification}
       >
+        {ongletsActifs.length > 1 && <OngletsEcran onglets={ongletsActifs} actif={activeScreen} onChoisir={setActiveScreen} />}
         {renderScreen()}
       </Shell>
       {nomPosteRequis && <ModalNommerPoste onSuccess={() => setNomPosteRequis(false)} />}

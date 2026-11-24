@@ -90,7 +90,20 @@ function colonnesEnCommun(db: Database.Database, tableSource: string, colonnesCi
  * serveur central ni aux autres postes. L'appelant (main/index.ts, une
  * fois boiteEnvoiRepository disponible) met ces ids en file de synchro.
  */
-export function runMigrations(db: Database.Database): string[] {
+export interface RapportMigrations {
+  /** Modèles reclassés en SQL brut — à mettre en file de synchro par l'appelant (voir ci-dessus). */
+  idsModelesReclasses: string[];
+  /**
+   * Sous-catégories nouvellement marquées `modele_physique = 'carreau'`
+   * en SQL brut (voir `marquerCarreauxCommeModelePhysiqueSiAbsent`) — même
+   * raison exacte : à remonter au serveur par l'appelant, sinon le
+   * référentiel serveur (resté à NULL) écrase ce marquage au prochain
+   * cycle de synchronisation.
+   */
+  idsSousCategoriesMarqueesCarreau: string[];
+}
+
+export function runMigrations(db: Database.Database): RapportMigrations {
   executerSchemaDeFaconTolerante(db);
   addEstPrincipaleColumnIfMissing(db);
   fixReferenceUniqueConstraint(db);
@@ -131,6 +144,15 @@ export function runMigrations(db: Database.Database): string[] {
   ajouterUniteVenteEtCaracteristiquesLignesFactureSiAbsent(db);
   creerTablesCategoriesSiAbsentes(db);
   ajouterSousCategorieIdModelesSiAbsent(db);
+  // Lu AVANT la création éventuelle de "Carreaux" ci-dessous : seule une
+  // sous-catégorie qui existait déjà (donc reçue du serveur, ou déjà
+  // connue de lui) peut être remontée par `idsSousCategoriesMarqueesCarreau`
+  // — jamais celle qu'un poste neuf vient de créer localement avec un id
+  // aléatoire, qui créerait sinon un doublon "Carreaux" côté serveur
+  // (même classe d'incident que les doublons "(copie)" du 2026-11-17).
+  const idsSousCategoriesCarreauxPreexistantes = new Set(
+    (db.prepare("SELECT id FROM sous_categories WHERE nom = 'Carreaux'").all() as { id: string }[]).map((r) => r.id)
+  );
   const idsCarreauxReclasses = migrerCarrelageVersCategorieParDefautSiAbsent(db);
   creerTableSousCategorieChampsSiAbsente(db);
   const idsDiversReclasses = migrerModelesNonClassesVersDiversSiAbsent(db);
@@ -141,7 +163,7 @@ export function runMigrations(db: Database.Database): string[] {
   initialiserCategoriesQuincailleriePredefiniesSiAbsentes(db);
   // Fondations quincaillerie (Phase 3 bis)
   ajouterModelePhysiqueEtUnitesConfigureesSousCategoriesSiAbsent(db);
-  marquerCarreauxCommeModelePhysiqueSiAbsent(db);
+  const idsSousCategoriesMarqueesCarreau = marquerCarreauxCommeModelePhysiqueSiAbsent(db).filter((id) => idsSousCategoriesCarreauxPreexistantes.has(id));
   creerTableSousCategorieUnitesSiAbsente(db);
   ajouterProprietesChampsSousCategorieSiAbsentes(db);
   // Phase 5 (référentiel commun), sous-phase 5.4 — prérequis de schéma
@@ -158,8 +180,10 @@ export function runMigrations(db: Database.Database): string[] {
   // `reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes`
   // ci-dessous pour le raisonnement complet).
   reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes(db);
+  // Devis proforma (point 6, 2026-11-24)
+  ajouterColonnesDevisProformaSiAbsentes(db);
   setSchemaVersion(db);
-  return [...idsCarreauxReclasses, ...idsDiversReclasses];
+  return { idsModelesReclasses: [...idsCarreauxReclasses, ...idsDiversReclasses], idsSousCategoriesMarqueesCarreau };
 }
 
 /**
@@ -509,8 +533,25 @@ function ajouterModelePhysiqueEtUnitesConfigureesSousCategoriesSiAbsent(db: Data
  * de la première fois : elle ne touche plus jamais une ligne déjà posée
  * (y compris si un administrateur la modifiait manuellement plus tard).
  */
-function marquerCarreauxCommeModelePhysiqueSiAbsent(db: Database.Database): void {
+function marquerCarreauxCommeModelePhysiqueSiAbsent(db: Database.Database): string[] {
+  // Correction "surface/prix au m² bloqués sur les nouveaux modèles"
+  // (2026-11-23) : ce marquage n'était jamais remonté au serveur, qui le
+  // gardait à NULL — `SousCategorieRepository.creerDepuisServeur` écrasait
+  // alors le "carreau" local au cycle de synchro suivant, et tout modèle
+  // créé ensuite ne proposait plus "Carreaux / carton" (surface d'un
+  // carton inconnue en vente). On renvoie désormais les ids marqués, avec
+  // un `updated_at` rafraîchi pour que le serveur accepte la mise à jour
+  // (garde `excluded.updated_at >= updated_at` côté API).
+  const ids = (
+    db.prepare("SELECT id FROM sous_categories WHERE nom = 'Carreaux' AND modele_physique IS NULL AND deleted_at IS NULL").all() as { id: string }[]
+  ).map((r) => r.id);
   db.prepare("UPDATE sous_categories SET modele_physique = 'carreau' WHERE nom = 'Carreaux' AND modele_physique IS NULL").run();
+  if (ids.length > 0) {
+    const maintenant = new Date().toISOString();
+    const maj = db.prepare("UPDATE sous_categories SET updated_at = ? WHERE id = ?");
+    for (const id of ids) maj.run(maintenant, id);
+  }
+  return ids;
 }
 
 /**
@@ -1525,4 +1566,29 @@ function migrerImagesVersModeles(db: Database.Database): void {
   } finally {
     db.pragma("foreign_keys = ON");
   }
+}
+
+/**
+ * Devis proforma (point 6 de la liste du 2026-11-23, modèle
+ * "Proforma_MAXI_EQUIP_Remises_5_10_Ciment_Sans_Remise") — un devis reste
+ * strictement local au poste (jamais synchronisé, voir devisRepository.ts),
+ * donc aucune contrepartie serveur. Toutes les colonnes sont facultatives :
+ * un devis créé avant cette évolution reste lisible tel quel (remise par
+ * ligne 0, aucun espace/surface/notes).
+ */
+function ajouterColonnesDevisProformaSiAbsentes(db: Database.Database): void {
+  const colonnesDevis = db.prepare("PRAGMA table_info(devis)").all() as { name: string }[];
+  if (colonnesDevis.length === 0) return;
+  if (!colonnesDevis.some((c) => c.name === "objet")) db.exec("ALTER TABLE devis ADD COLUMN objet TEXT");
+  if (!colonnesDevis.some((c) => c.name === "notes")) db.exec("ALTER TABLE devis ADD COLUMN notes TEXT");
+  if (!colonnesDevis.some((c) => c.name === "remise_globale")) db.exec("ALTER TABLE devis ADD COLUMN remise_globale INTEGER NOT NULL DEFAULT 0");
+
+  const colonnesLignes = db.prepare("PRAGMA table_info(lignes_devis)").all() as { name: string }[];
+  if (colonnesLignes.length === 0) return;
+  if (!colonnesLignes.some((c) => c.name === "espace")) db.exec("ALTER TABLE lignes_devis ADD COLUMN espace TEXT");
+  if (!colonnesLignes.some((c) => c.name === "surface_m2")) db.exec("ALTER TABLE lignes_devis ADD COLUMN surface_m2 REAL");
+  if (!colonnesLignes.some((c) => c.name === "remise_pourcent")) db.exec("ALTER TABLE lignes_devis ADD COLUMN remise_pourcent REAL NOT NULL DEFAULT 0");
+  if (!colonnesLignes.some((c) => c.name === "unite_vente")) db.exec("ALTER TABLE lignes_devis ADD COLUMN unite_vente TEXT");
+  if (!colonnesLignes.some((c) => c.name === "surface_carton_m2")) db.exec("ALTER TABLE lignes_devis ADD COLUMN surface_carton_m2 REAL");
+  if (!colonnesLignes.some((c) => c.name === "ordre")) db.exec("ALTER TABLE lignes_devis ADD COLUMN ordre INTEGER NOT NULL DEFAULT 0");
 }

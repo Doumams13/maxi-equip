@@ -3,7 +3,7 @@ import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
 import type { IdentiteEntrepriseSnapshot, UniteVente } from "@maxi-equip/shared-types";
-import { formaterVentilationUnites } from "@maxi-equip/shared-types";
+import { formaterVentilationUnites, LIBELLE_UNITE_VENTE } from "@maxi-equip/shared-types";
 import {
   PAGE_WIDTH,
   PAGE_HEIGHT,
@@ -12,6 +12,7 @@ import {
   VERT,
   GRIS_LABEL,
   NOIR,
+  FOND_BOITE,
   formaterMontant,
   dessinerEnTeteEtIdentite,
   dessinerPiedDePage,
@@ -30,7 +31,12 @@ export interface BilanPdfInput {
   identite: IdentiteEntrepriseSnapshot;
   /** Ex. "01/10/2026 au 21/10/2026" — déjà formaté par l'appelant (BilanScreen connaît le libellé choisi : "Ce mois-ci", etc.). */
   periodeLibelle: string;
-  ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
+  /** Bilan par catégorie (2026-11-24) — libellé du filtre actif ("Carrelage et revêtements › Carreaux"), `null` = toutes catégories. */
+  filtre?: string | null;
+  /** `remiseTotale` à `null` quand un filtre est actif : une remise porte sur la facture entière, jamais attribuable à une catégorie. */
+  ventes: { caTotal: number; nombreFactures: number; remiseTotale: number | null };
+  /** Bilan par catégorie (2026-11-24) — CA (avant remise), quantités par unité et part du total, par catégorie. */
+  ventesParCategorie?: { categorieNom: string; chiffreAffaires: number; quantites: { unite: UniteVente; quantite: number }[]; part: number }[];
   /** Vide = aucune vente sur la période, affiché explicitement, jamais masqué. */
   topProduits: { label: string; quantite: number }[];
   /**
@@ -60,11 +66,25 @@ export interface BilanPdfInput {
     produitId: string;
     taille: string;
     reference: string;
+    /** Bilan par catégorie (2026-11-24) — référence pour un carreau, nom sinon. Absent sur un bilan antérieur : repli sur la référence. */
+    designation?: string;
+    categorieNom?: string;
+    sousCategorieNom?: string;
+    estCarreau?: boolean;
+    uniteVente?: UniteVente;
     carreauxParCarton: number | null;
     stockParEmplacement: { emplacementId: string; cartons: number }[];
     vendu: number;
     sortie: number;
   }[];
+}
+
+/** "Conditionnement" : pièces par carton pour un carreau, sinon l'unité de vente (sac, pièce…). */
+export function libelleConditionnement(p: BilanPdfInput["detailProduits"][number]): string {
+  const unite = p.uniteVente ?? "carton";
+  if ((p.estCarreau ?? true) && unite === "carton") return p.carreauxParCarton != null ? `${p.carreauxParCarton} pcs/ctn` : "Carton";
+  const libelle = LIBELLE_UNITE_VENTE[unite].singulier;
+  return libelle.charAt(0).toUpperCase() + libelle.slice(1);
 }
 
 export async function genererBilanPdf(input: BilanPdfInput): Promise<string> {
@@ -115,9 +135,9 @@ interface ColonneDetailProduit {
 /** Colonnes fixes (Taille/Référence/Pièces-carton/Vendu/Sortie) + une colonne par dépôt, largeur répartie sur l'espace restant — jamais un nombre de colonnes figé (dépend du nombre réel de dépôts). */
 function construireColonnesDetailProduits(depots: BilanPdfInput["depots"]): ColonneDetailProduit[] {
   const colonnesFixesAvant: ColonneDetailProduit[] = [
-    { label: "Taille", largeur: 90, align: "left", valeur: (p) => p.taille },
-    { label: "Référence", largeur: 110, align: "left", valeur: (p) => p.reference },
-    { label: "Pièces/carton", largeur: 70, align: "center", valeur: (p) => (p.carreauxParCarton != null ? String(p.carreauxParCarton) : "—") },
+    { label: "Désignation / Réf.", largeur: 120, align: "left", valeur: (p) => p.designation ?? p.reference },
+    { label: "Taille", largeur: 70, align: "left", valeur: (p) => p.taille },
+    { label: "Conditionnement", largeur: 74, align: "center", valeur: (p) => libelleConditionnement(p) },
   ];
   const colonnesFixesApres: ColonneDetailProduit[] = [
     { label: "Vendu", largeur: 50, align: "center", valeur: (p) => String(p.vendu) },
@@ -150,7 +170,7 @@ function dessinerLigneDetailProduit(doc: PDFKit.PDFDocument, colonnes: ColonneDe
   let x = MARGE_GAUCHE;
   doc.font("Helvetica").fontSize(8.5).fillColor(NOIR);
   for (const colonne of colonnes) {
-    doc.text(colonne.valeur(ligne), x, y, { width: colonne.largeur, align: colonne.align });
+    doc.text(colonne.valeur(ligne), x, y, { width: colonne.largeur - 2, align: colonne.align, height: 12, ellipsis: true, lineBreak: false });
     x += colonne.largeur;
   }
 }
@@ -192,16 +212,88 @@ function dessinerDetailProduits(doc: PDFKit.PDFDocument, input: BilanPdfInput, y
   if (input.detailProduits.length === 0) {
     doc.font("Helvetica-Oblique").fontSize(9).fillColor(GRIS_LABEL).text("Aucun produit au catalogue.", MARGE_GAUCHE, y);
   } else {
-    for (const ligne of input.detailProduits) {
-      if (y + 14 > LIMITE_BAS_CONTENU) {
+    // Bilan par catégorie (2026-11-24) — lignes regroupées par catégorie ›
+    // sous-catégorie (déjà triées ainsi par calculerBilan), bandeau en tête
+    // de groupe et sous-total (vendu/sorties ventilés par unité) en fin.
+    const cleGroupe = (p: BilanPdfInput["detailProduits"][number]) => `${p.categorieNom ?? ""} › ${p.sousCategorieNom ?? ""}`;
+    const groupe = (p: BilanPdfInput["detailProduits"][number]) => (p.categorieNom ? cleGroupe(p) : null);
+    let groupeCourant: string | null = null;
+    let vendusGroupe = new Map<UniteVente, number>();
+    let sortiesGroupe = new Map<UniteVente, number>();
+    const fermerGroupe = () => {
+      if (groupeCourant === null) return;
+      if (y + 14 > LIMITE_BAS_CONTENU) y = sautDePage();
+      const ventil = (m: Map<UniteVente, number>) => formaterVentilationUnites([...m.entries()].map(([unite, quantite]) => ({ unite, quantite }))) ?? "0";
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(GRIS_LABEL).text(`Sous-total — vendu : ${ventil(vendusGroupe)} · sorties : ${ventil(sortiesGroupe)}`, MARGE_GAUCHE, y + 1, { width: MARGE_DROITE - MARGE_GAUCHE, align: "right", lineBreak: false });
+      y += 18;
+    };
+    for (const [index, ligne] of input.detailProduits.entries()) {
+      const g = groupe(ligne);
+      // Dernière ligne d'un groupe : elle doit tenir AVEC son sous-total,
+      // jamais un sous-total isolé en haut de la page suivante.
+      const suivante = input.detailProduits[index + 1];
+      const dernierDuGroupe = g !== null && (!suivante || groupe(suivante) !== g);
+      if (g !== null && g !== groupeCourant) {
+        fermerGroupe();
+        if (y + 30 + (dernierDuGroupe ? 18 : 0) > LIMITE_BAS_CONTENU) y = sautDePage();
+        doc.rect(MARGE_GAUCHE, y - 2, MARGE_DROITE - MARGE_GAUCHE, 14).fill(FOND_BOITE);
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(VERT).text(g, MARGE_GAUCHE + 4, y + 1, { width: MARGE_DROITE - MARGE_GAUCHE - 8, lineBreak: false });
+        y += 16;
+        groupeCourant = g;
+        vendusGroupe = new Map();
+        sortiesGroupe = new Map();
+      }
+      if (y + 14 + (dernierDuGroupe ? 18 : 0) > LIMITE_BAS_CONTENU) {
         y = sautDePage();
       }
       dessinerLigneDetailProduit(doc, colonnes, ligne, y);
+      const unite = ligne.uniteVente ?? "carton";
+      if (ligne.vendu) vendusGroupe.set(unite, (vendusGroupe.get(unite) ?? 0) + ligne.vendu);
+      if (ligne.sortie) sortiesGroupe.set(unite, (sortiesGroupe.get(unite) ?? 0) + ligne.sortie);
       y += 14;
     }
+    fermerGroupe();
   }
 
   dessinerPiedDePage(doc, input.identite);
+}
+
+/** Bloc "Ventes par catégorie" — paginé comme le détail (pied de page redessiné avant chaque saut). */
+function dessinerVentesParCategorie(doc: PDFKit.PDFDocument, input: BilanPdfInput, yInitial: number): number {
+  const lignes = input.ventesParCategorie ?? [];
+  let y = yInitial;
+  if (y + 60 > LIMITE_BAS_CONTENU) {
+    dessinerPiedDePage(doc, input.identite);
+    doc.addPage();
+    y = 50;
+  }
+  dessinerSectionTitre(doc, "VENTES PAR CATÉGORIE", y);
+  y += 22;
+  if (lignes.length === 0) {
+    doc.font("Helvetica-Oblique").fontSize(9).fillColor(GRIS_LABEL).text("Aucune vente enregistrée sur cette période.", MARGE_GAUCHE, y);
+    return y + 26;
+  }
+  const colonnes = [
+    { label: "Catégorie", x: MARGE_GAUCHE, largeur: 170, align: "left" as const },
+    { label: "Quantités vendues", x: MARGE_GAUCHE + 170, largeur: 170, align: "left" as const },
+    { label: "CA (avant remise)", x: MARGE_GAUCHE + 340, largeur: 110, align: "right" as const },
+    { label: "Part", x: MARGE_GAUCHE + 450, largeur: MARGE_DROITE - MARGE_GAUCHE - 450, align: "right" as const },
+  ];
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GRIS_LABEL);
+  for (const c of colonnes) doc.text(c.label, c.x, y, { width: c.largeur, align: c.align });
+  y += 14;
+  for (const l of lignes) {
+    if (y + 14 > LIMITE_BAS_CONTENU) {
+      dessinerPiedDePage(doc, input.identite);
+      doc.addPage();
+      y = 50;
+    }
+    const valeurs = [l.categorieNom, formaterVentilationUnites(l.quantites) ?? "—", `${formaterMontant(l.chiffreAffaires)} FCFA`, `${(l.part * 100).toFixed(1).replace(".", ",")} %`];
+    doc.font("Helvetica").fontSize(8.5).fillColor(NOIR);
+    colonnes.forEach((c, i) => doc.text(valeurs[i]!, c.x, y, { width: c.largeur - 2, align: c.align, height: 12, ellipsis: true, lineBreak: false }));
+    y += 14;
+  }
+  return y + 16;
 }
 
 function dessinerBilan(doc: PDFKit.PDFDocument, input: BilanPdfInput): void {
@@ -210,6 +302,7 @@ function dessinerBilan(doc: PDFKit.PDFDocument, input: BilanPdfInput): void {
     titre: "BILAN D'ACTIVITÉ",
     ligneReference: `Période : ${input.periodeLibelle}`,
     dateAffichee: genereLe,
+    mentionStatut: input.filtre ? `Catégorie : ${input.filtre}` : "Toutes catégories",
   });
 
   // Correction (2026-10-21, vérifiée par calcul précis des coordonnées
@@ -226,7 +319,12 @@ function dessinerBilan(doc: PDFKit.PDFDocument, input: BilanPdfInput): void {
   y += 16;
   dessinerLigneChiffre(doc, "Nombre de factures", String(input.ventes.nombreFactures), y);
   y += 16;
-  dessinerLigneChiffre(doc, "Remises totales accordées", `${formaterMontant(input.ventes.remiseTotale)} FCFA`, y);
+  dessinerLigneChiffre(
+    doc,
+    "Remises totales accordées",
+    input.ventes.remiseTotale === null ? "Non ventilées par catégorie" : `${formaterMontant(input.ventes.remiseTotale)} FCFA`,
+    y
+  );
   y += 24;
 
   // --- Produits les plus vendus ---
@@ -268,6 +366,9 @@ function dessinerBilan(doc: PDFKit.PDFDocument, input: BilanPdfInput): void {
   y += 26;
   dessinerLigneChiffre(doc, "Promotions actives pendant la période", String(input.promotionsActivesPendantPeriode), y);
   y += 30;
+
+  // --- Ventes par catégorie (2026-11-24) ---
+  y = dessinerVentesParCategorie(doc, input, y);
 
   // --- Détail par produit (2026-10-22) — seule section pouvant déclencher
   // des pages supplémentaires, voir dessinerDetailProduits ci-dessus. Le

@@ -4,6 +4,14 @@ import type { BackupService } from "./backupService.js";
 import { S3CloudBackupProvider } from "./s3CloudBackupProvider.js";
 import { CloudBackupService } from "./cloudBackupService.js";
 import { getConfigurationCloudBackup, getPlafondCloudBackupOctets } from "./syncConfig.js";
+import {
+  noterEchecSauvegardeCloud,
+  noterReussiteSauvegardeCloud,
+  lireEtatSauvegardeCloud,
+  initialiserDerniereReussiteSiInconnue,
+  diagnostiquer,
+  type DiagnosticSauvegardeCloud,
+} from "./etatSauvegardeCloud.js";
 
 /**
  * Correction Phase Finale, Bloc 4 (remédiation pré-production — backup
@@ -90,6 +98,7 @@ export async function envoyerBackupVersCloudSiConfigure(cheminDossierBackup: str
         "[backup-cloud] espace cloud insuffisant pour cette sauvegarde, envoi annulé (aucune suppression automatique) :",
         { ...espace, nomBackup }
       );
+      noterEchecSauvegardeCloud("Espace de stockage cloud insuffisant : la sauvegarde n'a pas été envoyée.");
       return;
     }
 
@@ -97,15 +106,18 @@ export async function envoyerBackupVersCloudSiConfigure(cheminDossierBackup: str
     if (!resultat.success) {
       // eslint-disable-next-line no-console
       console.error("[backup-cloud] envoi impossible :", resultat.message);
+      noterEchecSauvegardeCloud(resultat.message ?? "Envoi impossible.");
       return; // jamais de purge après un échec d'upload ou de vérification.
     }
 
+    noterReussiteSauvegardeCloud();
     // Purge UNIQUEMENT après succès + vérification d'intégrité déjà
     // effectuée dans sauvegarderVersLeCloud (règle impérative).
     await service.purgerAnciennesSauvegardesCloud();
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[backup-cloud] envoi impossible :", err instanceof Error ? err.message : err);
+    noterEchecSauvegardeCloud(err instanceof Error ? err.message : "Erreur inattendue pendant l'envoi.");
   } finally {
     sauvegardeCloudEnCours = false;
   }
@@ -143,6 +155,38 @@ export async function envoyerBackupVersCloudSiConfigure(cheminDossierBackup: str
  * ne retire pas non plus le blocage réel du thread principal pendant
  * son exécution.
  */
+/**
+ * Indicateur de la barre du haut (2026-11-24) — diagnostic de la
+ * sauvegarde cloud. Si ce poste n'a encore aucun historique local (mise à
+ * jour depuis une version antérieure), la date de la sauvegarde la plus
+ * récente réellement présente dans le cloud est lue UNE fois pour
+ * initialiser l'état — jamais à chaque appel.
+ */
+let initialisationCloudFaite = false;
+export async function diagnosticSauvegardeCloud(): Promise<DiagnosticSauvegardeCloud> {
+  const config = getConfigurationCloudBackup();
+  if (config && !initialisationCloudFaite && !lireEtatSauvegardeCloud().derniereReussite) {
+    initialisationCloudFaite = true;
+    try {
+      const provider = new S3CloudBackupProvider({
+        bucket: config.bucket,
+        region: config.region,
+        endpoint: config.endpoint,
+        forcePathStyle: true,
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+      });
+      const entrees = await new CloudBackupService(provider).listerSauvegardesCloudDetaillees();
+      const plusRecente = entrees.map((e) => e.createdAt).sort().pop() ?? null;
+      initialiserDerniereReussiteSiInconnue(plusRecente);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[backup-cloud] lecture de la dernière sauvegarde cloud impossible :", err instanceof Error ? err.message : err);
+    }
+  }
+  return diagnostiquer(lireEtatSauvegardeCloud(), config !== null);
+}
+
 export function declencherSauvegardeAutoEtCloudSiNecessaire(backupService: Pick<BackupService, "creerSauvegardeAutomatiqueSiNecessaire">): void {
   try {
     const resultat = backupService.creerSauvegardeAutomatiqueSiNecessaire();

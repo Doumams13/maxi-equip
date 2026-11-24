@@ -5,6 +5,7 @@ import type { ModeleProduitAvecVariantes, VarianteProduit, StagedImage, Categori
 import type { Emplacement, ConfigurationUnitesSousCategorie } from "@maxi-equip/shared-types";
 import {
   UNITES_VENTE,
+  LIBELLE_UNITE_VENTE,
   uniteVenteEffective,
   type UniteVente,
   parseCaracteristiques,
@@ -15,6 +16,7 @@ import {
 import { ImagesModal } from "./ImagesModal.js";
 import { VitrineModal } from "./VitrineModal.js";
 import { PaginationIntelligente } from "../components/PaginationIntelligente.js";
+import { exemplesSaisie, type ExemplesSaisie } from "./exemplesSaisieCatalogue.js";
 import { CaracteristiquesEditor } from "../components/CaracteristiquesEditor.js";
 import { useSurbrillanceOperation } from "../highlight.js";
 import { pricing as domainPricing, catalogue as domainCatalogue } from "@maxi-equip/domain";
@@ -134,6 +136,16 @@ type VarianteForm = {
   tailleLibre: string;
   caracteristiques: CaracteristiqueEntry[];
 };
+/**
+ * Correction "incohérences de saisie" n°5/n°10 (2026-11-24) — quantité
+ * affichée avec la vraie unité de vente ("12 cartons", "3 sacs"), jamais
+ * "ct." pour tout. Singulier jusqu'à 1 inclus (règle française).
+ */
+function libelleQuantite(quantite: number, unite: UniteVente): string {
+  const libelle = LIBELLE_UNITE_VENTE[unite];
+  return `${quantite.toLocaleString("fr-FR")} ${Math.abs(quantite) > 1 ? libelle.pluriel : libelle.singulier}`;
+}
+
 function varianteFormVide(): VarianteForm {
   return { largeur: "", hauteur: "", reference: "", prix: "", carreauxParCarton: "", seuilAlerte: "10", uniteVente: "carton", tailleLibre: "", caracteristiques: [] };
 }
@@ -157,6 +169,21 @@ function construireTailleEtTri(v: Pick<VarianteForm, "largeur" | "hauteur" | "ta
  * renseignés (le prix de carton ne peut alors pas être calculé) —
  * correction "le prix de référence est au m²" (2026-10-08).
  */
+/**
+ * Correction "surface/prix au m² bloqués en vente" (2026-11-23) — le
+ * nombre de carreaux par carton était facultatif (et son exemple grisé
+ * "4" se confondait avec une valeur saisie) : un modèle carreau vendu au
+ * carton enregistré sans lui n'a pas de surface de carton connue, donc
+ * Surface souhaitée et Prix/m² restent désactivés à la vente. Désormais
+ * obligatoire (entier ≥ 1) dans ce seul cas — jamais pour une autre unité
+ * ni une sous-catégorie non carreau.
+ */
+function carreauxParCartonManquant(v: Pick<VarianteForm, "carreauxParCarton" | "uniteVente">, estModeleCarreau: boolean): boolean {
+  if (!estModeleCarreau || v.uniteVente !== "carton") return false;
+  const n = Number(v.carreauxParCarton);
+  return !Number.isInteger(n) || n < 1;
+}
+
 function surfaceCartonForm(f: Pick<VarianteForm, "largeur" | "hauteur" | "carreauxParCarton">): number | null {
   const largeur = Number(f.largeur);
   const hauteur = Number(f.hauteur);
@@ -186,8 +213,11 @@ function VarianteFormRow({
   savingVariante,
   onSave,
   onCancel,
+  exemples,
 }: {
   modele: ModeleProduitAvecVariantes;
+  /** Exemples de saisie adaptés à la sous-catégorie du modèle (voir exemplesSaisieCatalogue.ts). */
+  exemples: ExemplesSaisie;
   /** Fondations quincaillerie (Phase 3 bis) — calculé par l'appelant (seul point de lecture : estSousCategorieModeleCarreau). */
   estModeleCarreau: boolean;
   unitesAutorisees: UniteVente[];
@@ -269,7 +299,7 @@ function VarianteFormRow({
                 style={{ ...inputStyle, width: 140 }}
                 value={varianteForm.tailleLibre}
                 onChange={(e) => setVarianteForm((f) => ({ ...f, tailleLibre: e.target.value }))}
-                placeholder="Ex. Sac 50kg"
+                placeholder={exemples.taille}
               />
             </div>
           )}
@@ -279,19 +309,19 @@ function VarianteFormRow({
               style={{ ...inputStyle, width: 120 }}
               value={varianteForm.reference}
               onChange={(e) => setVarianteForm((f) => ({ ...f, reference: e.target.value }))}
-              placeholder="MB-6060"
+              placeholder={exemples.reference}
             />
           </div>
           {estModeleCarreau && estCarton && (
             <div>
-              <label style={{ ...labelStyle, fontSize: 11 }}>Carreaux/carton</label>
+              <label style={{ ...labelStyle, fontSize: 11 }}>Carreaux/carton *</label>
               <input
                 style={{ ...inputStyle, width: 90 }}
                 type="number"
                 min={1}
                 value={varianteForm.carreauxParCarton}
                 onChange={(e) => setVarianteForm((f) => ({ ...f, carreauxParCarton: e.target.value }))}
-                placeholder="4"
+                placeholder="Obligatoire"
               />
             </div>
           )}
@@ -333,7 +363,7 @@ function VarianteFormRow({
             </div>
           )}
           <div>
-            <label style={{ ...labelStyle, fontSize: 11 }}>Seuil alerte</label>
+            <label style={{ ...labelStyle, fontSize: 11 }}>Seuil alerte ({LIBELLE_UNITE_VENTE[varianteForm.uniteVente].pluriel})</label>
             <input
               style={{ ...inputStyle, width: 80 }}
               type="number"
@@ -503,8 +533,77 @@ export function ProduitsScreen({
   /** Unités réellement proposables pour une sous-catégorie — jamais un second calcul, voir domain/catalogue. */
   function unitesAutoriseesPourSousCategorie(sousCategorieId: string | null | undefined): UniteVente[] {
     const config = sousCategorieId ? (unitesParSousCategorie[sousCategorieId] ?? { configuree: false, unites: [] }) : { configuree: false, unites: [] };
-    return domainCatalogue.unitesEffectivesPourSousCategorie(config);
+    const autorisees = domainCatalogue.unitesEffectivesPourSousCategorie(config);
+    // Correction "incohérences de saisie" n°1/n°2 (2026-11-24) — l'unité
+    // "carton" pilote toute la logique carreau (surface, prix au m²,
+    // colonnes PRIX/M² et M²/CTN de la facture) : jamais proposée pour un
+    // produit non carreau ; un carreau, lui, ne se vend qu'au carton ou à
+    // la pièce. Sans sous-catégorie choisie, ou si le filtre ne laisse
+    // plus rien, la liste configurée reste proposée telle quelle.
+    if (!sousCategorieId) return autorisees;
+    const proposees = estSousCategorieModeleCarreau(sousCategorieId)
+      ? autorisees.filter((u) => u === "carton" || u === "piece")
+      : autorisees.filter((u) => u !== "carton");
+    return proposees.length > 0 ? proposees : autorisees;
   }
+
+  // Correction "formulaire d'ajout adapté à la catégorie" (2026-11-23) —
+  // libellés/exemples/suggestions du haut du formulaire selon la nature
+  // de la sous-catégorie choisie. Pour un produit non carreau, les
+  // suggestions de type se limitent aux types déjà utilisés DANS CETTE
+  // sous-catégorie (jamais "Grès cérame" proposé pour du ciment).
+  const formulaireCarreau = estSousCategorieModeleCarreau(modeleForm.sousCategorieId);
+  // Correction "incohérences de saisie" n°6/n°9 (2026-11-24) — écran
+  // non filtré = écran historique "Carreaux" (libellés inchangés) ; filtré
+  // sur une sous-catégorie, les filtres Type/Taille ne proposent que les
+  // valeurs réellement présentes dans CETTE sous-catégorie.
+  const ecranCarreau = !sousCategorieId || estSousCategorieModeleCarreau(sousCategorieId);
+  const { filtresTypes, filtresTailles } = useMemo(() => {
+    if (!sousCategorieId) return { filtresTypes: suggestions.types, filtresTailles: suggestions.tailles };
+    const types = new Set<string>();
+    const tailles = new Set<string>();
+    for (const m of modeles) {
+      if (m.sousCategorieId !== sousCategorieId) continue;
+      if (m.type.trim()) types.add(m.type.trim());
+      for (const v of m.variantes) if (v.taille.trim()) tailles.add(v.taille.trim());
+    }
+    const trier = (a: string, b: string) => a.localeCompare(b, "fr", { numeric: true });
+    return { filtresTypes: [...types].sort(trier), filtresTailles: [...tailles].sort(trier) };
+  }, [sousCategorieId, suggestions.types, suggestions.tailles, modeles]);
+  const sousCategorieFormulaire = sousCategories.find((sc) => sc.id === modeleForm.sousCategorieId) ?? null;
+  const exemplesFormulaire = exemplesSaisie(sousCategorieFormulaire?.nom, formulaireCarreau);
+  // Correction "tout doit concorder" (2026-11-23) : ouvert depuis une
+  // sous-catégorie (ex. Ciment), un NOUVEAU modèle y est créé — catégorie
+  // et sous-catégorie verrouillées, sinon le titre de l'écran ("Ciment")
+  // et le modèle créé (ailleurs, donc invisible dans cette liste) ne
+  // concordent plus. En modification, le reclassement reste possible
+  // (seul moyen de déplacer un modèle), avec un avertissement explicite.
+  const classementVerrouille = !editingModeleId && !!sousCategorieId;
+  const deplacementHorsSousCategorie = !!editingModeleId && !!sousCategorieId && !!modeleForm.sousCategorieId && modeleForm.sousCategorieId !== sousCategorieId;
+  const suggestionsTypeFormulaire = useMemo(() => {
+    if (formulaireCarreau) return suggestions.types;
+    if (!modeleForm.sousCategorieId) return [];
+    const types = new Set<string>();
+    for (const m of modeles) {
+      if (m.sousCategorieId === modeleForm.sousCategorieId && m.type.trim()) types.add(m.type.trim());
+    }
+    return [...types].sort((a, b) => a.localeCompare(b, "fr"));
+  }, [formulaireCarreau, suggestions.types, modeles, modeleForm.sousCategorieId]);
+
+  // Correction "incohérences de saisie" n°1 (2026-11-24) — un format NON
+  // ENCORE ENREGISTRÉ (sans id) prend automatiquement la première unité
+  // proposée pour la sous-catégorie choisie (ex. Sac pour du ciment, plus
+  // jamais Carton par défaut). Un format existant garde toujours son unité.
+  useEffect(() => {
+    const proposees = unitesAutoriseesPourSousCategorie(modeleForm.sousCategorieId);
+    const premiere = proposees[0];
+    if (!premiere) return;
+    setVariantesForm((prev) => {
+      if (!prev.some((v) => !v.id && !proposees.includes(v.uniteVente))) return prev;
+      return prev.map((v) => (!v.id && !proposees.includes(v.uniteVente) ? { ...v, uniteVente: premiere } : v));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeleForm.sousCategorieId, variantesForm.length, sousCategories, unitesParSousCategorie]);
 
   useEffect(() => {
     void refresh();
@@ -638,13 +737,23 @@ export function ProduitsScreen({
     }
   }
 
+  function typeModeleAEnregistrer(): string {
+    const saisi = modeleForm.type.trim();
+    if (saisi) return saisi;
+    return sousCategories.find((sc) => sc.id === modeleForm.sousCategorieId)?.nom ?? "Divers";
+  }
+
   function handleOuvrirConfirmSaveModele(e: React.FormEvent) {
     e.preventDefault();
     if (!modeleForm.motif.trim()) {
-      showWarning("Champs requis", "Le motif est obligatoire.");
+      showWarning("Champs requis", formulaireCarreau ? "Le motif est obligatoire." : "Le nom du produit est obligatoire.");
       return;
     }
-    if (!modeleForm.type.trim()) {
+    // Type obligatoire pour un carreau uniquement (comportement historique).
+    // Pour les autres produits, laissé vide = remplacé à l'enregistrement
+    // par le nom de la sous-catégorie (voir typeModeleAEnregistrer) : le
+    // serveur central exige un type non vide.
+    if (formulaireCarreau && !modeleForm.type.trim()) {
       showWarning("Champs requis", "Le type de carreau est obligatoire.");
       return;
     }
@@ -665,6 +774,10 @@ export function ProduitsScreen({
       showWarning("Champs requis", "Chaque format doit avoir une taille, une référence et un prix.");
       return;
     }
+    if (variantesForm.some((v) => carreauxParCartonManquant(v, estModeleCarreauChoisi))) {
+      showWarning("Champs requis", "Le nombre de carreaux par carton est obligatoire pour chaque format vendu au carton (sinon la surface et le prix au m² sont bloqués à la vente).");
+      return;
+    }
     setShowConfirmSaveModele(true);
   }
 
@@ -677,7 +790,7 @@ export function ProduitsScreen({
       if (editingModeleId) {
         const result = await window.maxiEquip.modifierModeleProduit(editingModeleId, {
           motif: modeleForm.motif,
-          type: modeleForm.type,
+          type: typeModeleAEnregistrer(),
           sousCategorieId: modeleForm.sousCategorieId || null,
           marque: modeleForm.marque || null,
         });
@@ -730,7 +843,7 @@ export function ProduitsScreen({
         });
         const result = await window.maxiEquip.creerModeleProduit({
           motif: modeleForm.motif,
-          type: modeleForm.type,
+          type: typeModeleAEnregistrer(),
           variantes,
           stagedImages: stagedImages.map((s) => s.stagingId),
           principaleStagingId,
@@ -787,7 +900,11 @@ export function ProduitsScreen({
     // ici le formulaire démarre vide, donc équivalent à tout préremplir.
     const modele = modeles.find((m) => m.id === modeleId);
     const nomsSuggeres = modele?.sousCategorieId ? (champsParSousCategorie[modele.sousCategorieId] ?? []).map((c) => c.nom) : [];
-    setVarianteForm({ ...varianteFormVide(), caracteristiques: fusionnerCaracteristiquesSuggerees([], nomsSuggeres) });
+    setVarianteForm({
+      ...varianteFormVide(),
+      uniteVente: unitesAutoriseesPourSousCategorie(modele?.sousCategorieId)[0] ?? "carton",
+      caracteristiques: fusionnerCaracteristiquesSuggerees([], nomsSuggeres),
+    });
     setExpanded((prev) => new Set([...prev, modeleId]));
   }
 
@@ -822,6 +939,10 @@ export function ProduitsScreen({
     const varianteInvalide = estModeleCarreau ? !v.largeur || !v.hauteur : !v.tailleLibre.trim();
     if (varianteInvalide || !v.reference.trim() || !v.prix) {
       showWarning("Champs requis", "Taille, référence et prix sont obligatoires.");
+      return;
+    }
+    if (carreauxParCartonManquant(v, estModeleCarreau)) {
+      showWarning("Champs requis", "Le nombre de carreaux par carton est obligatoire pour un format vendu au carton (sinon la surface et le prix au m² sont bloqués à la vente).");
       return;
     }
     setSavingVariante(true);
@@ -923,23 +1044,14 @@ export function ProduitsScreen({
             {editingModeleId ? "Modifier le modèle" : "Nouveau modèle"}
           </h2>
           <form onSubmit={handleOuvrirConfirmSaveModele}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-              <div>
-                <label style={labelStyle}>Motif / Nom du modèle</label>
-                <input style={inputStyle} value={modeleForm.motif} onChange={(e) => setModeleForm((f) => ({ ...f, motif: e.target.value }))} placeholder="Ex. Marbre Blanc" />
-              </div>
-              <div>
-                <label style={labelStyle}>Type de carreau</label>
-                <Combobox value={modeleForm.type} onChange={(v) => setModeleForm((f) => ({ ...f, type: v }))} suggestions={suggestions.types} placeholder="Ex. Grès cérame" />
-              </div>
-            </div>
-
             {/* Fondations quincaillerie (Phase 2) — catégorie/sous-catégorie et marque. Catégorie obligatoire à la création uniquement (voir handleOuvrirConfirmSaveModele). */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
               <div>
                 <label style={labelStyle}>Catégorie{!editingModeleId && " *"}</label>
                 <select
-                  style={inputStyle}
+                  style={{ ...inputStyle, opacity: classementVerrouille ? 0.7 : 1 }}
+                  disabled={classementVerrouille}
+                  title={classementVerrouille ? `Nouveau produit ajouté dans « ${sousCategorieNom ?? ""} ». Pour une autre catégorie, revenez au Catalogue.` : undefined}
                   value={(() => {
                     const sc = sousCategories.find((s) => s.id === modeleForm.sousCategorieId);
                     return sc?.categorieId ?? "";
@@ -958,7 +1070,9 @@ export function ProduitsScreen({
               <div>
                 <label style={labelStyle}>Sous-catégorie{!editingModeleId && " *"}</label>
                 <select
-                  style={inputStyle}
+                  style={{ ...inputStyle, opacity: classementVerrouille ? 0.7 : 1 }}
+                  disabled={classementVerrouille}
+                  title={classementVerrouille ? `Nouveau produit ajouté dans « ${sousCategorieNom ?? ""} ». Pour une autre catégorie, revenez au Catalogue.` : undefined}
                   value={modeleForm.sousCategorieId}
                   onChange={(e) => setModeleForm((f) => ({ ...f, sousCategorieId: e.target.value }))}
                 >
@@ -975,7 +1089,24 @@ export function ProduitsScreen({
               </div>
               <div>
                 <label style={labelStyle}>Marque (optionnel)</label>
-                <input style={inputStyle} value={modeleForm.marque} onChange={(e) => setModeleForm((f) => ({ ...f, marque: e.target.value }))} placeholder="Ex. Nicoll" />
+                <input style={inputStyle} value={modeleForm.marque} onChange={(e) => setModeleForm((f) => ({ ...f, marque: e.target.value }))} placeholder={exemplesFormulaire.marque} />
+              </div>
+            </div>
+            {deplacementHorsSousCategorie && (
+              <p style={{ margin: "-8px 0 16px", fontSize: 12, fontWeight: 600, color: defaultTokens.colors.danger }}>
+                Ce modèle sera déplacé vers « {sousCategorieFormulaire?.nom ?? ""} » et n'apparaîtra plus dans « {sousCategorieNom ?? ""} ».
+              </p>
+            )}
+
+            {/* Correction "formulaire d'ajout adapté à la catégorie" (2026-11-23) — catégorie/sous-catégorie désormais AU-DESSUS du nom/type : tout le formulaire s'adapte dès qu'elles sont choisies. Libellés carreau strictement inchangés pour une sous-catégorie "carreau". */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={labelStyle}>{formulaireCarreau ? "Motif / Nom du modèle" : "Nom du produit"}</label>
+                <input style={inputStyle} value={modeleForm.motif} onChange={(e) => setModeleForm((f) => ({ ...f, motif: e.target.value }))} placeholder={exemplesFormulaire.nom} />
+              </div>
+              <div>
+                <label style={labelStyle}>{formulaireCarreau ? "Type de carreau" : "Type / gamme (optionnel)"}</label>
+                <Combobox value={modeleForm.type} onChange={(v) => setModeleForm((f) => ({ ...f, type: v }))} suggestions={suggestionsTypeFormulaire} placeholder={exemplesFormulaire.type} />
               </div>
             </div>
 
@@ -1038,7 +1169,7 @@ export function ProduitsScreen({
                           style={{ ...inputStyle, width: 160 }}
                           value={v.tailleLibre}
                           onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, tailleLibre: e.target.value } : x))}
-                          placeholder="Ex. Sac 50kg"
+                          placeholder={exemplesFormulaire.taille}
                         />
                       </div>
                     )}
@@ -1048,7 +1179,7 @@ export function ProduitsScreen({
                         style={{ ...inputStyle, width: 120 }}
                         value={v.reference}
                         onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, reference: e.target.value } : x))}
-                        placeholder="MB-6060"
+                        placeholder={exemplesFormulaire.reference}
                       />
                     </div>
                     <div>
@@ -1062,18 +1193,18 @@ export function ProduitsScreen({
                     </div>
                     {estModeleCarreau && estCarton && (
                       <div>
-                        <label style={labelStyle}>Carreaux/carton</label>
+                        <label style={labelStyle}>Carreaux/carton *</label>
                         <input
                           style={{ ...inputStyle, width: 90 }}
                           type="number" min={1}
                           value={v.carreauxParCarton}
                           onChange={(e) => setVariantesForm((prev) => prev.map((x, j) => j === i ? { ...x, carreauxParCarton: e.target.value } : x))}
-                          placeholder="4"
+                          placeholder="Obligatoire"
                         />
                       </div>
                     )}
                     <div>
-                      <label style={labelStyle}>Seuil alerte</label>
+                      <label style={labelStyle}>Seuil alerte ({LIBELLE_UNITE_VENTE[v.uniteVente].pluriel})</label>
                       <input
                         style={{ ...inputStyle, width: 80 }}
                         type="number" min={0}
@@ -1184,7 +1315,7 @@ export function ProduitsScreen({
               setRecherche(e.target.value);
               setPageCarreaux(1);
             }}
-            placeholder="Motif, type, référence, taille…"
+            placeholder={ecranCarreau ? "Motif, type, référence, taille…" : "Nom, type, référence, taille…"}
           />
         </div>
         {/* Correction "Menu déroulant pour les tris des tailles et des types" (2026-10-21). */}
@@ -1197,7 +1328,7 @@ export function ProduitsScreen({
           }}
         >
           <option value="">Tous les types</option>
-          {suggestions.types.map((t) => (
+          {filtresTypes.map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
         </select>
@@ -1210,7 +1341,7 @@ export function ProduitsScreen({
           }}
         >
           <option value="">Toutes les tailles</option>
-          {suggestions.tailles.map((t) => (
+          {filtresTailles.map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
         </select>
@@ -1229,7 +1360,7 @@ export function ProduitsScreen({
                 <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
                   <th style={{ width: 32, padding: "10px 8px 10px 16px" }} />
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Photo</th>
-                  <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Motif</th>
+                  <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>{ecranCarreau ? "Motif" : "Nom du produit"}</th>
                   {/* Correction "Remplacer/ajouter colonne Taille" (2026-10-21) — un modèle peut
                       avoir plusieurs formats, voir la cellule ci-dessous (résumé, pas une valeur unique). */}
                   <th style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12 }}>Taille</th>
@@ -1347,7 +1478,7 @@ export function ProduitsScreen({
                                   <tr>
                                     <th style={{ width: 110, padding: "8px 0", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>Taille</th>
                                     <th style={{ width: 100, padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>Référence</th>
-                                    <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "right" }}>Prix / m²</th>
+                                    <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "right" }}>Prix</th>
                                     <th style={{ padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "right" }}>Stock</th>
                                     <th style={{ width: 120, padding: "8px 8px", fontWeight: 600, color: defaultTokens.colors.textSoft, fontSize: 11, textAlign: "left" }}>État</th>
                                     {/* Correction "poubelles décalées / barre de défilement" (2026-10-21) :
@@ -1366,6 +1497,11 @@ export function ProduitsScreen({
                                       <td style={{ padding: "7px 8px", color: defaultTokens.colors.textSoft, fontFamily: defaultTokens.typography.mono, fontSize: 12 }}>{v.reference}</td>
                                       <td style={{ padding: "7px 8px", textAlign: "right" }}>
                                         {v.prix.toLocaleString("fr-FR")} FCFA
+                                        {(() => {
+                                          const unite = uniteVenteEffective({ uniteVente: v.uniteVente ?? null });
+                                          const prixAuM2 = unite === "carton" && (estSousCategorieModeleCarreau(m.sousCategorieId) || !!v.carreauxParCarton);
+                                          return <span style={{ fontSize: 11, color: defaultTokens.colors.textFaint }}>{prixAuM2 ? " / m²" : ` / ${LIBELLE_UNITE_VENTE[unite].singulier}`}</span>;
+                                        })()}
                                         {v.carreauxParCarton && v.largeur && v.hauteur && (
                                           <div style={{ fontSize: 10.5, color: defaultTokens.colors.textFaint, fontWeight: 400 }}>
                                             ≈ {domainPricing
@@ -1376,7 +1512,7 @@ export function ProduitsScreen({
                                         )}
                                       </td>
                                       <td style={{ padding: "7px 8px", textAlign: "right" }}>
-                                        <div style={{ fontWeight: 700 }}>{v.stockTotal} ct.</div>
+                                        <div style={{ fontWeight: 700 }}>{libelleQuantite(v.stockTotal, uniteVenteEffective({ uniteVente: v.uniteVente ?? null }))}</div>
                                         {/* Correction "voir le stock par dépôt dans le détail" (2026-10-21). */}
                                         {depots.length > 0 && (
                                           <div style={{ fontSize: 10.5, color: defaultTokens.colors.textFaint, fontWeight: 400 }}>
@@ -1408,6 +1544,7 @@ export function ProduitsScreen({
                                   <VarianteFormRow
                                     modele={m}
                                     estModeleCarreau={estSousCategorieModeleCarreau(m.sousCategorieId)}
+                                    exemples={exemplesSaisie(sousCategories.find((sc) => sc.id === m.sousCategorieId)?.nom, estSousCategorieModeleCarreau(m.sousCategorieId))}
                                     unitesAutorisees={unitesAutoriseesPourSousCategorie(m.sousCategorieId)}
                                     champs={m.sousCategorieId ? (champsParSousCategorie[m.sousCategorieId] ?? []) : []}
                                     editingVariante={editingVariante}

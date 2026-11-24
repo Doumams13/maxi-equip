@@ -55,6 +55,11 @@ interface LigneDevisIpc {
   taille: string;
   quantite: number;
   prixUnitaire: number;
+  espace?: string | null;
+  surfaceM2?: number | null;
+  remisePourcent?: number;
+  uniteVente?: string | null;
+  surfaceCartonM2?: number | null;
 }
 interface DevisIpc {
   id: string;
@@ -64,8 +69,11 @@ interface DevisIpc {
   clientTelephone: string | null;
   clientAdresse: string | null;
   modeReglement: string | null;
+  objet: string | null;
+  notes: string | null;
   total: number;
   remise: number;
+  remiseGlobale: number;
   statut: "brouillon" | "convertie" | "annulee";
   factureId: string | null;
   utilisateurId: string | null;
@@ -73,13 +81,47 @@ interface DevisIpc {
   createdAt: string;
   updatedAt: string;
 }
+/**
+ * Bilan d'activité — données renvoyées par `bilan:generer` et renvoyées
+ * telles quelles à `bilan:genererPdf` (voir la correction du 2026-10-28).
+ * Étendu le 2026-11-24 (bilan par catégorie) : filtre, ventes par
+ * catégorie, classement et unité de chaque produit du détail.
+ */
+type UniteVenteIpc = import("@maxi-equip/shared-types").UniteVente;
+interface BilanDonneesIpc {
+  filtre: string | null;
+  ventes: { caTotal: number; nombreFactures: number; remiseTotale: number | null };
+  ventesParCategorie: { categorieId: string | null; categorieNom: string; chiffreAffaires: number; quantites: { unite: UniteVenteIpc; quantite: number }[]; part: number }[];
+  topProduits: { label: string; quantite: number }[];
+  mouvements: { entrees: { unite: UniteVenteIpc; quantite: number }[]; sorties: { unite: UniteVenteIpc; quantite: number }[] };
+  stockParEmplacement: { emplacementId: string; nom: string; parUnite: { unite: UniteVenteIpc; quantite: number }[] }[];
+  produitsSousSeuilCount: number;
+  promotionsActivesPendantPeriode: number;
+  depots: { id: string; nom: string }[];
+  detailProduits: {
+    produitId: string;
+    taille: string;
+    reference: string;
+    designation: string;
+    categorieNom: string;
+    sousCategorieNom: string;
+    estCarreau: boolean;
+    uniteVente: UniteVenteIpc;
+    carreauxParCarton: number | null;
+    stockParEmplacement: { emplacementId: string; cartons: number }[];
+    vendu: number;
+    sortie: number;
+  }[];
+}
+
 interface NouveauDevisIpc {
   clientNom: string;
   clientTelephone?: string | null;
   clientAdresse?: string | null;
   modeReglement?: string | null;
-  total: number;
-  remise?: number;
+  objet?: string | null;
+  notes?: string | null;
+  remiseGlobale?: number;
   lignes: LigneDevisIpc[];
 }
 
@@ -499,6 +541,8 @@ const maxiEquipApi = {
   devisLister: (): Promise<DevisIpc[]> => ipcRenderer.invoke("devis:lister"),
   devisObtenir: (id: string): Promise<DevisIpc | null> => ipcRenderer.invoke("devis:obtenir", id),
   devisCreer: (input: NouveauDevisIpc): Promise<DevisIpc> => ipcRenderer.invoke("devis:creer", input),
+  devisModifier: (id: string, input: NouveauDevisIpc): Promise<DevisIpc> => ipcRenderer.invoke("devis:modifier", id, input),
+  devisGenererPdf: (id: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> => ipcRenderer.invoke("devis:genererPdf", id),
   devisMarquerConvertie: (id: string, factureId: string): Promise<DevisIpc> => ipcRenderer.invoke("devis:marquer-convertie", id, factureId),
   devisAnnuler: (id: string): Promise<DevisIpc> => ipcRenderer.invoke("devis:annuler", id),
 
@@ -542,35 +586,18 @@ const maxiEquipApi = {
   genererDocumentInternePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererDocumentInternePdf", factureId),
   // --- Bilan d'activité (2026-10-21) — réservé à l'Administrateur, voir checkAdminGuard côté Main. ---
+  // Indicateur "sauvegarde cloud" (2026-11-24) — `null` si non connecté.
+  backupEtatCloud: (): Promise<{
+    configuree: boolean;
+    probleme: boolean;
+    derniereReussite: string | null;
+    dernierEchec: { date: string; message: string } | null;
+  } | null> => ipcRenderer.invoke("backup:etat-cloud"),
   genererBilan: (
     debut: string,
-    fin: string
-  ): Promise<
-    | {
-        success: true;
-        ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
-        topProduits: { label: string; quantite: number }[];
-        // Fondations quincaillerie (Phase 4) — ventilé par unité, jamais un total unique mélangeant des unités différentes.
-        mouvements: {
-          entrees: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[];
-          sorties: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[];
-        };
-        stockParEmplacement: { emplacementId: string; nom: string; parUnite: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[] }[];
-        produitsSousSeuilCount: number;
-        promotionsActivesPendantPeriode: number;
-        depots: { id: string; nom: string }[];
-        detailProduits: {
-          produitId: string;
-          taille: string;
-          reference: string;
-          carreauxParCarton: number | null;
-          stockParEmplacement: { emplacementId: string; cartons: number }[];
-          vendu: number;
-          sortie: number;
-        }[];
-      }
-    | { success: false; message: string }
-  > => ipcRenderer.invoke("bilan:generer", { debut, fin }),
+    fin: string,
+    filtre?: { categorieId?: string | null; sousCategorieId?: string | null } | null
+  ): Promise<({ success: true } & BilanDonneesIpc) | { success: false; message: string }> => ipcRenderer.invoke("bilan:generer", { debut, fin, filtre: filtre ?? null }),
   /**
    * CORRECTION (2026-10-28) : `donnees` est désormais le bilan déjà
    * affiché à l'écran (renvoyé par `genererBilan` ci-dessus) — jamais
@@ -581,27 +608,7 @@ const maxiEquipApi = {
     debut: string,
     fin: string,
     periodeLibelle: string,
-    donnees: {
-      ventes: { caTotal: number; nombreFactures: number; remiseTotale: number };
-      topProduits: { label: string; quantite: number }[];
-      mouvements: {
-        entrees: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[];
-        sorties: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[];
-      };
-      stockParEmplacement: { emplacementId: string; nom: string; parUnite: { unite: import("@maxi-equip/shared-types").UniteVente; quantite: number }[] }[];
-      produitsSousSeuilCount: number;
-      promotionsActivesPendantPeriode: number;
-      depots: { id: string; nom: string }[];
-      detailProduits: {
-        produitId: string;
-        taille: string;
-        reference: string;
-        carreauxParCarton: number | null;
-        stockParEmplacement: { emplacementId: string; cartons: number }[];
-        vendu: number;
-        sortie: number;
-      }[];
-    }
+    donnees: BilanDonneesIpc
   ): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("bilan:genererPdf", { debut, fin, periodeLibelle, donnees }),
   // --- Alertes de stock cliquables (correction TB, 2026-11-13) ---

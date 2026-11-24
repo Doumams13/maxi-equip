@@ -743,6 +743,8 @@ export class SyncService {
           continue;
         }
         this.boiteEnvoiRepository.mettreAJourStatut(entree.id, "confirmed");
+        // Allègement (2026-11-24) : la copie de l'image ne sert plus une fois confirmée.
+        this.boiteEnvoiRepository.retirerContenuImagesConfirmees(entree.id);
         confirmees++;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Erreur réseau inconnue.";

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Logo, Button, defaultTokens } from "@maxi-equip/design-system";
 import { IndicateurSynchronisation } from "./components/IndicateurSynchronisation.js";
 import { IndicateurNotifications } from "./components/IndicateurNotifications.js";
+import { IndicateurSauvegardeCloud } from "./components/IndicateurSauvegardeCloud.js";
 import { IndicateurMiseAJour } from "./components/IndicateurMiseAJour.js";
 import {
   LayoutDashboard,
@@ -55,6 +56,8 @@ export interface NavItem {
   autorise: boolean;
   /** Correction "Workflow réel des demandes", Partie 18/19 : compteur réel affiché à côté du libellé, jamais purement visuel. `undefined`/0 = aucun badge affiché. */
   badge?: number;
+  /** Allègement du menu (2026-11-24) — écrans présentés en onglets sous cette entrée : l'entrée reste surlignée sur chacun d'eux. */
+  ecransAssocies?: ScreenId[];
 }
 
 export interface ShellProps {
@@ -105,11 +108,19 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, o
   }
 
   return (
-    <div style={{ display: "flex", height: "100%", width: "100%", fontFamily: defaultTokens.typography.body }}>
+    // Correction "bande blanche en bas de page" (2026-11-24) : avec un menu
+    // Administrateur plus haut que la fenêtre, la barre latérale débordait
+    // de sa hauteur et faisait défiler TOUTE la page (body), laissant
+    // apparaître le fond blanc sous le menu foncé. Désormais rien ne
+    // déborde de la fenêtre : la liste du menu défile elle-même si besoin,
+    // et seul le contenu de l'écran défile à droite (barre du haut fixe).
+    <div style={{ display: "flex", height: "100%", width: "100%", overflow: "hidden", fontFamily: defaultTokens.typography.body }}>
       <aside
         style={{
           width: 220,
           flexShrink: 0,
+          height: "100%",
+          minHeight: 0,
           background: defaultTokens.colors.sidebar,
           display: "flex",
           flexDirection: "column",
@@ -123,12 +134,12 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, o
           </span>
         </div>
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+        <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minHeight: 0, overflowY: "auto" }}>
           {navItems
             .filter((item) => item.autorise)
             .map((item) => {
               const Icon = ICONS[item.id];
-              const active = item.id === activeScreen;
+              const active = item.id === activeScreen || !!item.ecransAssocies?.includes(activeScreen);
               return (
                 <button
                   key={item.id}
@@ -138,7 +149,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, o
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: 10,
-                    padding: "10px 12px",
+                    padding: "8px 12px",
                     borderRadius: defaultTokens.radius.sm,
                     border: "none",
                     background: active ? defaultTokens.colors.sidebarActive : "transparent",
@@ -189,7 +200,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, o
         </div>
       </aside>
 
-      <main style={{ flex: 1, minWidth: 0, height: "100%", overflowY: "auto", background: defaultTokens.colors.bg, display: "flex", flexDirection: "column" }}>
+      <main style={{ flex: 1, minWidth: 0, height: "100%", overflow: "hidden", background: defaultTokens.colors.bg, display: "flex", flexDirection: "column" }}>
         {/*
           Barre supérieure globale — partagée par TOUS les écrans,
           identique pour Administrateur et Gérant. Contient désormais
@@ -210,6 +221,7 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, o
             background: "#fff",
           }}
         >
+          <IndicateurSauvegardeCloud />
           <IndicateurMiseAJour />
           <IndicateurNotifications onOuvrirDemande={onOuvrirDemande} onOuvrirEntite={onOuvrirEntite} />
           <IndicateurSynchronisation />
@@ -225,7 +237,9 @@ export function Shell({ session, navItems, activeScreen, onNavigate, onLogout, o
           résolution de référence), aucun effet, la mise en page reste
           identique à avant cette correction.
         */}
-        <div style={{ maxWidth: defaultTokens.layout.contentMaxWidth, margin: "0 auto", width: "100%", flex: 1, overflowY: "auto" }}>{children}</div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", width: "100%" }}>
+          <div style={{ maxWidth: defaultTokens.layout.contentMaxWidth, margin: "0 auto", width: "100%" }}>{children}</div>
+        </div>
       </main>
     </div>
   );

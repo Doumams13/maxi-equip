@@ -151,6 +151,30 @@ export class BoiteEnvoiRepository {
     return rows.map(rowToEntree);
   }
 
+  /**
+   * Allègement de la base (2026-11-24, diagnostic "sauvegardes de 750 Mo")
+   * — une image en attente d'envoi porte une copie COMPLÈTE de ses octets
+   * (base64) dans `payload_json` (voir ImageService.enqueueImageSync).
+   * Une fois l'envoi CONFIRMÉ par le serveur, cette copie ne sert plus
+   * jamais : aucune lecture des entrées confirmées (seules pending/error
+   * sont relues pour l'envoi), le fichier image reste sur le disque du
+   * poste et sur le serveur. On ne retire QUE `contentBase64` — la ligne
+   * (traçabilité, existeEntreePourType…) et ses autres champs restent.
+   * Renvoie le nombre de lignes allégées.
+   */
+  retirerContenuImagesConfirmees(id?: string): number {
+    const filtreId = id ? " AND id = ?" : "";
+    const params = id ? [id] : [];
+    const res = this.db
+      .prepare(
+        `UPDATE boite_envoi SET payload_json = json_remove(payload_json, '$.contentBase64')
+         WHERE status = 'confirmed' AND entity_type = 'image_produit'
+           AND json_valid(payload_json) AND json_extract(payload_json, '$.contentBase64') IS NOT NULL${filtreId}`
+      )
+      .run(...params);
+    return res.changes;
+  }
+
   mettreAJourStatut(id: string, status: StatutBoiteEnvoi): void {
     this.db.prepare("UPDATE boite_envoi SET status = ?, updated_at = ? WHERE id = ?").run(status, new Date().toISOString(), id);
   }

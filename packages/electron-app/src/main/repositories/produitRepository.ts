@@ -59,6 +59,50 @@ export class ProduitRepository {
     return rows.map(rowToProduit);
   }
 
+  /**
+   * Bilan par catégorie (point 5, 2026-11-24) — classement catalogue de
+   * TOUS les produits (supprimés compris : une vente passée peut porter
+   * sur un produit retiré depuis), via modèle → sous-catégorie →
+   * catégorie. `null` partout pour un produit non classé (repli "Non classé").
+   */
+  classementCatalogue(): {
+    produitId: string;
+    supprime: boolean;
+    categorieId: string | null;
+    categorieNom: string | null;
+    sousCategorieId: string | null;
+    sousCategorieNom: string | null;
+    estCarreau: boolean;
+  }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT p.id as produitId, p.deleted_at as deletedAt, c.id as categorieId, c.nom as categorieNom,
+                sc.id as sousCategorieId, sc.nom as sousCategorieNom, sc.modele_physique as modelePhysique
+         FROM produits p
+         LEFT JOIN modeles_produit m ON m.id = p.modele_id
+         LEFT JOIN sous_categories sc ON sc.id = m.sous_categorie_id
+         LEFT JOIN categories c ON c.id = sc.categorie_id`
+      )
+      .all() as {
+      produitId: string;
+      deletedAt: string | null;
+      categorieId: string | null;
+      categorieNom: string | null;
+      sousCategorieId: string | null;
+      sousCategorieNom: string | null;
+      modelePhysique: string | null;
+    }[];
+    return rows.map((r) => ({
+      produitId: r.produitId,
+      supprime: r.deletedAt !== null,
+      categorieId: r.categorieId,
+      categorieNom: r.categorieNom,
+      sousCategorieId: r.sousCategorieId,
+      sousCategorieNom: r.sousCategorieNom,
+      estCarreau: r.modelePhysique === "carreau",
+    }));
+  }
+
   findById(id: string): Produit | null {
     const row = this.db.prepare("SELECT * FROM produits WHERE id = ?").get(id) as ProduitRow | undefined;
     return row ? rowToProduit(row) : null;
@@ -89,7 +133,7 @@ export class ProduitRepository {
    * par variante) — `null` pour une variante antérieure à la migration
    * multi-format, jamais reconstruit rétroactivement.
    */
-  listSousSeuilDepots(depotIds: string[]): { id: string; modeleId: string | null; motif: string; type: string; taille: string; reference: string; stock: number; seuilAlerte: number }[] {
+  listSousSeuilDepots(depotIds: string[]): { id: string; modeleId: string | null; motif: string; type: string; taille: string; reference: string; stock: number; seuilAlerte: number; uniteVente: string | null }[] {
     if (depotIds.length === 0) return [];
     const placeholders = depotIds.map(() => "?").join(",");
     // IMPORTANT : HAVING sans GROUP BY n'est pas valide en SQLite sur une
@@ -100,7 +144,7 @@ export class ProduitRepository {
     const rows = this.db
       .prepare(
         `SELECT * FROM (
-           SELECT p.id, p.modele_id as modeleId, p.motif, p.type, p.taille, p.reference, p.seuil_alerte as seuilAlerte,
+           SELECT p.id, p.modele_id as modeleId, p.motif, p.type, p.taille, p.reference, p.seuil_alerte as seuilAlerte, p.unite_vente as uniteVente,
                   COALESCE((SELECT SUM(s.quantite) FROM stocks s WHERE s.produit_id = p.id AND s.emplacement_id IN (${placeholders})), 0) as stock
            FROM produits p
            WHERE p.deleted_at IS NULL AND p.seuil_alerte > 0
@@ -108,7 +152,7 @@ export class ProduitRepository {
          WHERE stock <= seuilAlerte
          ORDER BY stock ASC`
       )
-      .all(...depotIds) as { id: string; modeleId: string | null; motif: string; type: string; taille: string; reference: string; stock: number; seuilAlerte: number }[];
+      .all(...depotIds) as { id: string; modeleId: string | null; motif: string; type: string; taille: string; reference: string; stock: number; seuilAlerte: number; uniteVente: string | null }[];
     return rows;
   }
 

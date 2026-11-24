@@ -129,6 +129,19 @@ export interface FactureDocumentInput {
    * modèle officiel existant à l'identique, jamais modifié.
    */
   format?: "a4" | "a4-paysage";
+  /**
+   * Point 3 de la liste du 2026-11-23 (précisé le 2026-11-24) — en A4
+   * paysage (2 × A5) : le panneau DROIT est la MÊME facture complète
+   * (mêmes articles, prix, totaux), titrée "FICHIER INTERNE", avec un bloc
+   * "Répartition par dépôt" à la place des conditions générales de vente.
+   * Absent = deux exemplaires client identiques (comportement historique).
+   */
+  copieInterne?: CopieInterneFacture;
+}
+
+export interface CopieInterneFacture {
+  repartitionDepots: { motif: string; taille: string; reference: string | null; emplacementNom: string; quantite: number }[];
+  achatsExterieurs: { motif: string; taille: string; quantiteExterne: number; fournisseur: string | null }[];
 }
 
 /**
@@ -260,7 +273,7 @@ export async function genererFacturePdf(input: FactureDocumentInput): Promise<st
 }
 
 /** Exporté pour permettre une vérification réelle (génération d'un vrai PDF, lu visuellement) sans dépendre d'un `app.getPath` Electron — voir factureDocumentService.visuel.test.ts. */
-export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche }: FactureDocumentInput): void {
+export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche, copieInterne }: FactureDocumentInput): void {
   const dateAffichee = new Date(facture.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
   // Statut affiché au client — correction "Réservation / Acompte" :
   // seul statutPaiement apparaît ici (2 valeurs : "Réservation" ou
@@ -270,7 +283,13 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   // (jamais figé à la création) : un changement de statut via le menu de
   // l'écran Factures se reflète automatiquement sur le prochain PDF généré.
   const mentionStatut = facture.statutPaiement === "reservation" ? "Statut : Réservation" : "Statut : Payée";
-  dessinerEnTeteEtIdentite(doc, identite, { titre: "FACTURE", ligneReference: facture.numero, dateAffichee, mentionStatut });
+  dessinerEnTeteEtIdentite(
+    doc,
+    identite,
+    copieInterne
+      ? { titre: "FICHIER INTERNE", ligneReference: facture.numero, dateAffichee, mentionStatut: mentionStatut + " — usage interne, ne pas remettre au client" }
+      : { titre: "FACTURE", ligneReference: facture.numero, dateAffichee, mentionStatut }
+  );
 
   // --- Deux boîtes : FACTURÉ À / DÉTAILS DE VENTE — décalées vers le
   // haut de DECALAGE_EN_TETE pour compenser l'en-tête raccourci (voir
@@ -346,8 +365,10 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
         { x: 105.5, largeur: 72, titre: "DÉSIGNATION" },
         { x: 177.5, largeur: 70, titre: "RÉFÉRENCE" },
         { x: 247.5, largeur: 58, titre: "TAILLE" },
-        { x: 305.5, largeur: 72, titre: "CARACT." },
-        { x: 377.5, largeur: 40, titre: "UNITÉ" },
+        // Point 2 (2026-11-24) : colonne UNITÉ supprimée — l'unité est
+        // désormais écrite dans DÉSIGNATION ("Sacs", "Pièces"…), comme
+        // "Cartons" en mode historique ; sa largeur revient à CARACT.
+        { x: 305.5, largeur: 112, titre: "CARACT." },
         { x: 417.5, largeur: 68, titre: "PRIX UNIT." },
         { x: 485.5, largeur: 90.5, titre: "TOTAL" },
       ];
@@ -407,34 +428,31 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
         });
       } else {
         // Mode générique (facture exclusivement non-carreaux, ou mixte) —
-        // DÉSIGNATION redevient le nom réel du produit (une colonne UNITÉ
-        // dédiée indique déjà le mode de vente, "Cartons" serait redondant).
+        // Point 2 de la liste du 2026-11-23 : DÉSIGNATION = l'unité de
+        // vente au pluriel ("Sacs", "Pièces", "Cartons"…), exactement comme
+        // "Cartons" en mode historique, et plus de colonne UNITÉ séparée.
+        // L'identification précise se fait via RÉFÉRENCE + TAILLE, même
+        // décision que pour les carreaux (2026-10-10).
         const unite = uniteVenteEffective({ uniteVente: ligne.uniteVente ?? null });
-        // `ellipsis: true` — un nom de produit réel peut être plus long que
-        // le mot fixe "Cartons" (mode historique, jamais ce problème) ;
-        // jamais un retour à la ligne qui chevaucherait la ligne suivante
-        // du tableau, toujours une seule ligne tronquée proprement.
-        doc.text(ligne.motif, colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10, height: rowHeight - 8, ellipsis: true });
+        doc.text(capitaliser(LIBELLE_UNITE_VENTE[unite].pluriel), colonnes[1]!.x + 6, ligneY + 6, { width: colonnes[1]!.largeur - 10 });
         doc.text(ligne.reference ?? "—", colonnes[2]!.x + 6, ligneY + 6, { width: colonnes[2]!.largeur - 10, height: rowHeight - 8, ellipsis: true });
         doc.text(ligne.taille, colonnes[3]!.x + 6, ligneY + 6, { width: colonnes[3]!.largeur - 10, height: rowHeight - 8, ellipsis: true });
         // Caractéristiques — pour une ligne carreau AU SEIN d'une facture
         // mixte, l'information commerciale essentielle (prix/m², surface
-        // par carton) est préservée ici plutôt que supprimée, conformément
-        // à la décision validée ; pour toute autre ligne, ce sont ses
-        // propres caractéristiques (shared-types/caracteristiques.ts).
+        // par carton) est préservée ici ; pour toute autre ligne, ce sont
+        // ses propres caractéristiques (shared-types/caracteristiques.ts).
         const texteCaracteristiques = estLigneCarton
           ? prixM2 !== null
             ? `${formaterMontant(prixM2)} F/m² · ${ligne.surfaceCartonM2!.toFixed(2)} m²/ctn`
             : "—"
           : caracteristiquesAffichage(ligne.caracteristiques ?? null) || "—";
-        doc.fontSize(6.3).text(texteCaracteristiques, colonnes[4]!.x + 5, ligneY + 7, { width: colonnes[4]!.largeur - 8, height: rowHeight - 8, ellipsis: true });
+        doc.fontSize(7).text(texteCaracteristiques, colonnes[4]!.x + 5, ligneY + 7, { width: colonnes[4]!.largeur - 8, height: rowHeight - 8, ellipsis: true });
         doc.fontSize(9);
-        doc.text(capitaliser(LIBELLE_UNITE_VENTE[unite].singulier), colonnes[5]!.x + 6, ligneY + 6, { width: colonnes[5]!.largeur - 10 });
       }
 
-      doc.text(`${formaterMontant(ligne.prixUnitaire)} FCFA`, colonnes[6]!.x + 6, ligneY + 6, { width: colonnes[6]!.largeur - 10 });
-      doc.text(`${formaterMontant(ligne.quantite * ligne.prixUnitaire)} FCFA`, colonnes[7]!.x + 6, ligneY + 6, {
-        width: colonnes[7]!.largeur - 10,
+      doc.text(`${formaterMontant(ligne.prixUnitaire)} FCFA`, colonnes[colonnes.length - 2]!.x + 6, ligneY + 6, { width: colonnes[colonnes.length - 2]!.largeur - 10 });
+      doc.text(`${formaterMontant(ligne.quantite * ligne.prixUnitaire)} FCFA`, colonnes[colonnes.length - 1]!.x + 6, ligneY + 6, {
+        width: colonnes[colonnes.length - 1]!.largeur - 10,
       });
     }
     ligneY += rowHeight;
@@ -495,6 +513,11 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
   // ligne du pied de page (748.4), jamais un chevauchement. Sur une
   // facture longue, le flux naturel (ligneY + 76) dépasse déjà ce
   // plancher — Math.max garde alors le comportement existant.
+  if (copieInterne) {
+    dessinerBlocRepartitionInterne(doc, copieInterne, ligneY + 76 + decalageCgv);
+    dessinerPiedDePage(doc, identite);
+    return;
+  }
   const CGV_Y_MINIMUM = 655;
   doc.y = Math.max(ligneY + 76 + decalageCgv, CGV_Y_MINIMUM);
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(VERT);
@@ -570,6 +593,53 @@ export function dessinerFacture(doc: PDFKit.PDFDocument, { facture, identite, ve
  * voir la constante `MediaBox` fixée à la création de la page), puis la
  * restaurer immédiatement après — aucune modification de `dessinerFacture`.
  */
+/**
+ * Bloc "Répartition par dépôt" de la copie interne — à la place des CGV,
+ * entre les totaux et le pied de page (ligne grise à 748.4). Lignes
+ * compactes ; s'il y en a plus que la place disponible, la dernière
+ * indique combien ne sont pas affichées (jamais un chevauchement du pied
+ * de page). Un carreau est identifié par sa référence, comme sur la facture.
+ */
+function dessinerBlocRepartitionInterne(doc: PDFKit.PDFDocument, copie: CopieInterneFacture, yDepart: number): void {
+  const LIMITE = 740;
+  const lignes = [
+    ...copie.repartitionDepots.map((r) => ({ designation: r.reference?.trim() || r.motif, taille: r.taille, provenance: r.emplacementNom, quantite: r.quantite })),
+    ...copie.achatsExterieurs
+      .filter((a) => a.quantiteExterne > 0)
+      .map((a) => ({ designation: a.motif, taille: a.taille, provenance: "Achat extérieur" + (a.fournisseur ? " (" + a.fournisseur + ")" : ""), quantite: a.quantiteExterne })),
+  ];
+  let y = Math.min(yDepart, LIMITE - 40);
+  const colonnes = [
+    { titre: "DÉSIGNATION / RÉFÉRENCE", x: MARGE_GAUCHE, largeur: 170 },
+    { titre: "TAILLE", x: MARGE_GAUCHE + 170, largeur: 90 },
+    { titre: "DÉPÔT / PROVENANCE", x: MARGE_GAUCHE + 260, largeur: 190 },
+    { titre: "QUANTITÉ", x: MARGE_GAUCHE + 450, largeur: MARGE_DROITE - MARGE_GAUCHE - 450 },
+  ];
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(VERT).text("RÉPARTITION PAR DÉPÔT (USAGE INTERNE)", MARGE_GAUCHE, y, { width: MARGE_DROITE - MARGE_GAUCHE, lineBreak: false });
+  y += 14;
+  doc.rect(MARGE_GAUCHE, y, MARGE_DROITE - MARGE_GAUCHE, 14).fill(FOND_BOITE);
+  doc.font("Helvetica-Bold").fontSize(7).fillColor(NOIR);
+  for (const c of colonnes) doc.text(c.titre, c.x + 4, y + 4, { width: c.largeur - 8, lineBreak: false });
+  y += 14;
+  const hauteurLigne = 12;
+  if (lignes.length === 0) {
+    doc.font("Helvetica-Oblique").fontSize(7.5).fillColor(GRIS_LABEL).text("Aucune sortie de dépôt enregistrée pour cette vente.", MARGE_GAUCHE + 4, y + 3, { lineBreak: false });
+    return;
+  }
+  const capacite = Math.max(1, Math.floor((LIMITE - y) / hauteurLigne));
+  const affichees = lignes.length > capacite ? lignes.slice(0, capacite - 1) : lignes;
+  doc.font("Helvetica").fontSize(7.5).fillColor(NOIR);
+  for (const l of affichees) {
+    const valeurs = [l.designation, l.taille, l.provenance, String(l.quantite)];
+    colonnes.forEach((c, i) => doc.text(valeurs[i]!, c.x + 4, y + 3, { width: c.largeur - 8, height: hauteurLigne, ellipsis: true, lineBreak: false }));
+    doc.moveTo(MARGE_GAUCHE, y + hauteurLigne).lineTo(MARGE_DROITE, y + hauteurLigne).lineWidth(0.4).strokeColor("#dddddd").stroke();
+    y += hauteurLigne;
+  }
+  if (affichees.length < lignes.length) {
+    doc.font("Helvetica-Oblique").fontSize(7.5).fillColor(GRIS_LABEL).text("… et " + (lignes.length - affichees.length) + " autre(s) ligne(s) : voir le fichier interne détaillé (A4).", MARGE_GAUCHE + 4, y + 3, { lineBreak: false });
+  }
+}
+
 export function dessinerFactureA4Paysage(doc: PDFKit.PDFDocument, input: FactureDocumentInput): void {
   // Échelle UNIQUE (jamais deux valeurs séparées pour X et Y, ce qui
   // déformerait le document) qui fait tenir la facture A4 PORTRAIT
@@ -598,7 +668,10 @@ export function dessinerFactureA4Paysage(doc: PDFKit.PDFDocument, input: Facture
     doc.save();
     doc.translate(x, decalageY);
     doc.scale(echelle, echelle);
-    dessinerFacture(doc, input);
+    // Panneau gauche : TOUJOURS la facture client. Panneau droit : la copie
+    // interne si fournie, sinon un second exemplaire client.
+    if (x === xPanneau2 && input.copieInterne) dessinerFacture(doc, input);
+    else dessinerFacture(doc, { ...input, copieInterne: undefined });
     doc.restore();
     doc.page.height = hauteurPageReelle;
   }

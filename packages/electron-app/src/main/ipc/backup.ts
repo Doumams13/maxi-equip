@@ -1,6 +1,7 @@
 import { ipcMain, dialog, shell, BrowserWindow } from "electron";
 import { dirname } from "node:path";
 import type { BackupService } from "../services/backupService.js";
+import { diagnosticSauvegardeCloud } from "../services/cloudBackupTrigger.js";
 import { validerMotDePasse } from "../services/backupCrypto.js";
 import type { SessionManager } from "../auth/sessionManager.js";
 import { checkAdminGuard } from "../auth/checkAdminGuard.js";
@@ -55,6 +56,17 @@ export function registerBackupIpcHandlers(backupService: BackupService, sessionM
     if (!validation.valide) return { success: false, message: validation.message };
 
     return backupService.creerSauvegardeManuelle(dossier, motDePasse);
+  });
+
+  /**
+   * Indicateur "sauvegarde cloud" de la barre du haut (2026-11-24) —
+   * lecture seule (dates + dernier message d'erreur), aucune donnée
+   * sensible : visible de tout utilisateur connecté, pour que le magasin
+   * voie le problème même si l'administrateur n'est pas là.
+   */
+  ipcMain.handle("backup:etat-cloud", async () => {
+    if (!sessionManager.isAuthenticated()) return null;
+    return diagnosticSauvegardeCloud();
   });
 
   ipcMain.handle("backup:get-status", () => {

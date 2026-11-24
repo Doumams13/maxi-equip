@@ -148,12 +148,22 @@ function calculerLignes(facture: Facture, lignes: LigneDocumentInterne[]): Ligne
   });
 }
 
-function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche, lignes, repartitionDepots }: DocumentInterneInput): void {
+/**
+ * Point 3 de la liste du 2026-11-23 — titre "FICHIER INTERNE" (pour le
+ * distinguer d'un coup d'œil de la facture remise au client) et dépôt(s)
+ * de sortie indiqués dès l'en-tête. Exporté pour être aussi dessiné comme
+ * second panneau du format A4 paysage (facture client à gauche, fichier
+ * interne à droite — voir dessinerFactureA4Paysage).
+ */
+export function dessinerDocumentInterne(doc: PDFKit.PDFDocument, { facture, identite, vendeurNomAffiche, lignes, repartitionDepots }: DocumentInterneInput): void {
   const dateAffichee = new Date(facture.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+  const depots = [...new Set(repartitionDepots.filter((r) => r.quantite > 0).map((r) => r.emplacementNom))];
+  const provenance = [depots.length > 0 ? `Dépôt : ${depots.join(", ")}` : null, lignes.length > 0 ? "Achat extérieur" : null].filter(Boolean).join(" + ");
   dessinerEnTeteEtIdentite(doc, identite, {
-    titre: "DOCUMENT INTERNE",
-    ligneReference: `Achat extérieur — Facture liée : ${facture.numero}`,
+    titre: "FICHIER INTERNE",
+    ligneReference: `Facture liée : ${facture.numero}${provenance ? ` — ${provenance}` : ""}`,
     dateAffichee,
+    mentionStatut: "Usage interne — ne pas remettre au client",
   });
 
   // --- Deux boîtes : FACTURÉ À / DÉTAILS DE VENTE — mêmes libellés,

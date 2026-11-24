@@ -43,7 +43,7 @@ describe("DevisRepository — base réelle", () => {
     expect(d1.statut).toBe("brouillon");
     expect(d1.factureId).toBeNull();
     expect(d1.lignes).toHaveLength(1);
-    expect(d1.lignes[0]).toEqual({ produitId: "p1", motif: "Marbre Blanc", reference: "MB-6060", taille: "60x60", quantite: 5, prixUnitaire: 10000 });
+    expect(d1.lignes[0]).toMatchObject({ produitId: "p1", motif: "Marbre Blanc", reference: "MB-6060", taille: "60x60", quantite: 5, prixUnitaire: 10000, remisePourcent: 0, espace: null });
 
     const anneeCourante = new Date().getFullYear();
     expect(d1.numero).toBe(`DEV-${anneeCourante}-0001`);
@@ -89,5 +89,33 @@ describe("DevisRepository — base réelle", () => {
     const relu = repository.findById(d.id)!;
     expect(relu.statut).toBe("annulee");
     expect(relu.factureId).toBeNull();
+  });
+
+  it("proforma (2026-11-24) : remises par ligne et remise globale recalculées ici, jamais reprises de l'appelant ; modification d'un brouillon", () => {
+    const d = repository.creer({
+      clientNom: "",
+      objet: "Fourniture de carrelage",
+      notes: "Hypothèses…",
+      total: 1, // ignoré
+      remise: 1, // ignoré
+      remiseGlobale: 942,
+      lignes: [
+        { produitId: "p1", motif: "Marbre Blanc", reference: "MB-6060", taille: "30 × 30", quantite: 10, prixUnitaire: 8415, espace: "Terrasse avant", surfaceM2: 13.78, remisePourcent: 5, uniteVente: "carton", surfaceCartonM2: 1.53 },
+        { produitId: "p1", motif: "Ciment-colle", reference: "CC-20", taille: "Sac 20 kg", quantite: 105, prixUnitaire: 4500, espace: "Ensemble du chantier", remisePourcent: 0, uniteVente: "sac" },
+      ],
+    });
+    expect(d.total).toBe(84150 + 472500);
+    expect(d.remise).toBe(4208 + 942);
+    expect(d.remiseGlobale).toBe(942);
+    expect(d.objet).toBe("Fourniture de carrelage");
+    expect(d.lignes.map((l) => l.espace)).toEqual(["Terrasse avant", "Ensemble du chantier"]);
+    expect(d.lignes[0]).toMatchObject({ surfaceM2: 13.78, remisePourcent: 5, uniteVente: "carton", surfaceCartonM2: 1.53 });
+
+    const modifie = repository.modifier(d.id, { clientNom: "M. Test", remiseGlobale: 0, lignes: [d.lignes[1]!] });
+    expect(modifie.numero).toBe(d.numero);
+    expect(modifie.clientNom).toBe("M. Test");
+    expect(modifie.lignes).toHaveLength(1);
+    expect(modifie.total).toBe(472500);
+    expect(modifie.remise).toBe(0);
   });
 });

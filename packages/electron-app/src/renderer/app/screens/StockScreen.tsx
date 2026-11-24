@@ -420,7 +420,7 @@ export function StockScreen({
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
                 <thead>
                   <tr style={{ background: defaultTokens.colors.surfaceAlt, textAlign: "left" }}>
-                    {["Motif", "Taille", "Référence", ...depots.map((d) => d.nom), "Total", "Seuil"].map((h) => (
+                    {["Produit", "Taille", "Référence", ...depots.map((d) => d.nom), "Total", "Seuil"].map((h) => (
                       <th key={h} style={{ padding: "10px 16px", fontWeight: 700, color: defaultTokens.colors.textSoft, fontSize: 12, whiteSpace: "nowrap" }}>
                         {h}
                       </th>

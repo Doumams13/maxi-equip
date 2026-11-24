@@ -433,8 +433,21 @@ export function VentesScreen({
         if (devis.modeReglement) setModeReglement(devis.modeReglement);
         setRemise(String(devis.remise));
         setDevisOrigineId(devisAPreRemplir);
-        const lignesChargees = devis.lignes.map((l) => ({
-          produitId: l.produitId ?? "",
+        // Devis proforma (2026-11-24) — un devis détaille souvent le MÊME
+        // produit par espace (Salon, Salle à manger…) : ces lignes sont
+        // regroupées ici (même produit, même prix) en une seule ligne de
+        // vente, quantités additionnées. Les remises par ligne du devis sont
+        // déjà incluses dans `devis.remise` (remise totale), reprise
+        // ci-dessus comme remise de la vente : le net reste identique.
+        const regroupees = new Map<string, { produitId: string; quantite: number; prixUnitaire: number }>();
+        for (const l of devis.lignes) {
+          const cle = `${l.produitId ?? ""}|${l.prixUnitaire}`;
+          const existante = regroupees.get(cle);
+          if (existante) existante.quantite += l.quantite;
+          else regroupees.set(cle, { produitId: l.produitId ?? "", quantite: l.quantite, prixUnitaire: l.prixUnitaire });
+        }
+        const lignesChargees = [...regroupees.values()].map((l) => ({
+          produitId: l.produitId,
           quantite: String(l.quantite),
           prixUnitaire: String(l.prixUnitaire),
           allocations: {},

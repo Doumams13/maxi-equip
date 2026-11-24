@@ -344,6 +344,21 @@ export class MouvementRepository {
    * période n'apparaît simplement pas dans la Map (0 implicite côté
    * appelant), jamais une ligne à zéro superflue ici.
    */
+  /** Bilan par catégorie (2026-11-24) — entrées par produit sur la période, mêmes exclusions que sommeQuantiteParTypeEtUniteEntre. */
+  entreesParProduitEntre(debut: string, fin: string): Map<string, number> {
+    const rows = this.db
+      .prepare(
+        `SELECT m.produit_id as produitId, COALESCE(SUM(m.quantite), 0) as quantite
+         FROM mouvements m
+         LEFT JOIN factures f ON f.id = m.facture_id
+         WHERE m.type = 'entree' AND m.date >= ? AND m.date <= ?
+           AND (m.facture_id IS NULL OR f.annulee_le IS NULL) AND m.annule_le IS NULL
+         GROUP BY m.produit_id`
+      )
+      .all(debut, fin) as { produitId: string; quantite: number }[];
+    return new Map(rows.map((r) => [r.produitId, r.quantite]));
+  }
+
   detailVenteSortieParProduitEntre(debut: string, fin: string): Map<string, { vendu: number; sortie: number }> {
     const rows = this.db
       .prepare(

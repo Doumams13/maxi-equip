@@ -5,3 +5,4 @@ export * as requests from "./requests/index.js";
 export * as auth from "./auth/index.js";
 export * as vendeur from "./vendeur/index.js";
 export * as catalogue from "./catalogue/index.js";
+export * as devis from "./devis/index.js";

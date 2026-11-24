@@ -207,9 +207,50 @@ describe("genererFacturePdf — format A4 paysage (positions réelles extraites 
     // portrait complète : le nom du produit (DÉSIGNATION) doit donc bien
     // apparaître, exactement comme sur le format A4 — ce n'est plus un
     // panneau simplifié qui ne montrerait que référence + taille.
-    for (const texte of ["Ciment CPJ 45", "CIM-50", "PRIX UNIT.", "Marbre Blanc", "REF-B-6060"]) {
+    for (const texte of ["Sacs", "CIM-50", "PRIX UNIT.", "Cartons", "REF-B-6060"]) {
       const occurrences = items.filter((i) => i.str.includes(texte));
       expect(occurrences.length, `"${texte}" devrait apparaître exactement 2 fois`).toBe(2);
     }
+  });
+
+  it("point 3 (2026-11-24) : facture client à gauche, MÊME facture titrée FICHIER INTERNE à droite, avec la répartition par dépôt à la place des CGV", async () => {
+    const facture = construireFacture({ numero: "FAC-2026-0305" });
+    const chemin = await genererFacturePdf({
+      facture,
+      identite: IDENTITE_TEST,
+      vendeurNomAffiche: "Jean Dupont",
+      format: "a4-paysage",
+      copieInterne: {
+        repartitionDepots: [{ motif: "Marbre Blanc", taille: "60 × 60 cm", reference: "REF-B-6060", emplacementNom: "Akanda", quantite: 5 }],
+        achatsExterieurs: [],
+      },
+    });
+
+    const data = new Uint8Array(readFileSync(chemin));
+    const doc = await pdfjsLib.getDocument({ data }).promise;
+    expect(doc.numPages).toBe(1);
+    const page = await doc.getPage(1);
+    const items = (await page.getTextContent()).items as { str: string; transform: number[] }[];
+    const milieu = PAGE_WIDTH_A4_PAYSAGE / 2;
+    const gauche = (i: { transform: number[] }) => i.transform[4]! < milieu;
+
+    const titreInterne = items.filter((i) => i.str.includes("FICHIER INTERNE"));
+    expect(titreInterne.length).toBe(1);
+    expect(gauche(titreInterne[0]!)).toBe(false);
+    const titreFacture = items.filter((i) => i.str.trim() === "FACTURE");
+    expect(titreFacture.length).toBe(1);
+    expect(gauche(titreFacture[0]!)).toBe(true);
+    // Même facture des deux côtés : la ligne d'article et le total figurent deux fois.
+    expect(items.filter((i) => i.str.includes("REF-B-6060")).length).toBeGreaterThanOrEqual(3); // 2 lignes de facture + 1 ligne de répartition
+    expect(items.filter((i) => i.str.includes("Total Net")).length).toBe(2);
+    // CGV seulement côté client, répartition seulement côté interne.
+    const cgv = items.filter((i) => i.str.includes("CONDITIONS GENERALES"));
+    expect(cgv.length).toBe(1);
+    expect(gauche(cgv[0]!)).toBe(true);
+    const repartition = items.filter((i) => i.str.includes("RÉPARTITION PAR DÉPÔT"));
+    expect(repartition.length).toBe(1);
+    expect(gauche(repartition[0]!)).toBe(false);
+    expect(items.some((i) => i.str.includes("Akanda") && !gauche(i))).toBe(true);
+    expect(items.some((i) => i.str.includes("ne pas remettre au client"))).toBe(true);
   });
 });

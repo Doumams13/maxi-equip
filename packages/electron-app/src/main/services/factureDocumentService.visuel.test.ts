@@ -137,7 +137,7 @@ describe("genererFacturePdf — tableau, positions réelles du texte extraites d
   });
 
   // Fondations quincaillerie (Phase 4) — adaptation de la facture A4 par unité de vente.
-  it("facture exclusivement à la pièce : en-tête générique, désignation = nom réel du produit, caractéristiques affichées", async () => {
+  it("facture exclusivement à la pièce : en-tête générique, désignation = unité au pluriel (point 2, 2026-11-24), plus de colonne UNITÉ, caractéristiques affichées", async () => {
     const chemin = await genererFacturePdf({
       facture: construireFacture({
         lignes: [
@@ -165,12 +165,13 @@ describe("genererFacturePdf — tableau, positions réelles du texte extraites d
     const contenu = await page.getTextContent();
     const texteComplet = (contenu.items as { str: string }[]).map((i) => i.str).join(" ");
 
-    expect(texteComplet).toContain("Robinet"); // désignation = nom réel (éventuellement tronqué si trop long), jamais le mot générique "Cartons"
-    expect(texteComplet).not.toContain("Cartons");
+    expect(texteComplet).toContain("Pièces"); // désignation = unité au pluriel, comme "Cartons" pour les carreaux
+    expect(texteComplet).not.toContain("Robinet"); // le nom du produit ne figure plus (identification par référence + taille)
+    expect(texteComplet).not.toContain("UNITÉ"); // colonne supprimée
+    expect(texteComplet).toContain("ROB-01");
     expect(texteComplet).toContain("PRIX UNIT.");
     expect(texteComplet).not.toContain("PRIX/CTN");
     expect(texteComplet).not.toContain("PRIX/M²");
-    expect(texteComplet).toContain("Pièce"); // libellé d'unité, capitalisé
     expect(texteComplet).toContain("Couleur"); // caractéristique affichée
   });
 
@@ -207,9 +208,10 @@ describe("genererFacturePdf — tableau, positions réelles du texte extraites d
     expect(texteComplet).toContain("PRIX UNIT."); // facture mixte → en-tête générique, jamais "PRIX/CTN"
     expect(texteComplet).not.toContain("PRIX/CTN");
     expect(texteComplet).toContain("15 000"); // prix/m² du carreau préservé dans la case "Caractéristiques"
-    expect(texteComplet).toContain("Ciment CPJ 45"); // désignation réelle du sac
+    expect(texteComplet).toContain("Sacs"); // désignation = unité au pluriel (point 2, 2026-11-24)
+    expect(texteComplet).toContain("Cartons"); // la ligne carreau garde "Cartons"
+    expect(texteComplet).not.toContain("Ciment CPJ 45");
     expect(texteComplet).toContain("Poids"); // caractéristique du sac affichée
-    expect(texteComplet).toContain("Sac");
   });
 
   it("ancienne facture sans uniteVente ni surfaceCartonM2 enregistrés : traitée comme carton (comportement historique), jamais une exception", async () => {
@@ -259,11 +261,9 @@ describe("genererFacturePdf — tableau, positions réelles du texte extraites d
     const contenu = await page.getTextContent();
     const texteComplet = (contenu.items as { str: string }[]).map((i) => i.str).join(" ");
 
-    expect(texteComplet).toContain("Sac");
-    expect(texteComplet).toContain("Mètre");
-    expect(texteComplet).toContain("Litre");
-    expect(texteComplet).toContain("Ciment");
-    expect(texteComplet).toContain("Tuyau PVC");
-    expect(texteComplet).toContain("Peinture"); // nom réel (éventuellement tronqué si trop long)
+    expect(texteComplet).toContain("Sacs");
+    expect(texteComplet).toContain("Mètres");
+    expect(texteComplet).toContain("Litres");
+    for (const ref of ["CIM-50", "TUY-32", "PEI-10L"]) expect(texteComplet).toContain(ref);
   });
 });

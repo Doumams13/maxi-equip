@@ -539,7 +539,7 @@ export function FacturesScreen({
             onChange={(e) => setFormatImpression(e.target.value as "a4-paysage" | "a4")}
             title="Format utilisé pour Voir / Imprimer / Télécharger"
           >
-            <option value="a4-paysage">A4 paysage — 2 exemplaires</option>
+            <option value="a4-paysage">A5 (2 par page) — facture client + fichier interne</option>
             <option value="a4">A4 portrait — complet</option>
           </select>
           {(recherche || statutFiltre !== "tous" || vendeurFiltreId !== null) && (
@@ -644,7 +644,7 @@ export function FacturesScreen({
                             par dépôt) — plus jamais affiché sans
                             condition. */}
                         {f.aRepartitionDepot && (
-                          <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Document interne — Achat extérieur / détail dépôt">
+                          <Button variant="ghost" onClick={() => void handleVoirDocumentInterne(f)} title="Fichier interne — dépôt de sortie / achat extérieur">
                             <FileText size={15} />
                           </Button>
                         )}

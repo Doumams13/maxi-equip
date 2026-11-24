@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { MOUVEMENT_LABELS } from "../mouvementLabels.js";
+import { LIBELLE_UNITE_VENTE, uniteVenteEffective, type UniteVente } from "@maxi-equip/shared-types";
 import type { EvenementHistorique } from "../../../preload/index.js";
 import type { CibleOperation } from "../AppRoot.js";
 import type { ScreenId } from "../Shell.js";
@@ -35,7 +36,7 @@ interface Summary {
   serieEntreesSorties: { jour: string; entrees: number; sorties: number }[];
   stockParEmplacement: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
   topProduitsVendus: { label: string; quantite: number }[];
-  produitsSousSeuilListe: { id: string; modeleId: string | null; motif: string; type: string; taille: string; stock: number; seuilAlerte: number }[];
+  produitsSousSeuilListe: { id: string; modeleId: string | null; motif: string; type: string; taille: string; stock: number; seuilAlerte: number; uniteVente?: UniteVente | null }[];
   activiteRecente: EvenementHistorique[];
   stockDepots: number;
   stockParEmplacementPourGerant: { emplacementId: string; nom: string; cartons: number; referencesEnRupture: number }[];
@@ -131,7 +132,7 @@ function StockParEmplacement({ lignes }: { lignes: Summary["stockParEmplacement"
                     <span style={{ fontWeight: 700, fontSize: 13.3 }}>{l.nom}</span>
                   </div>
                 </td>
-                <td style={{ padding: "12px 20px", textAlign: "right", fontFamily: defaultTokens.typography.mono, fontWeight: 600 }}>{l.cartons} ct.</td>
+                <td style={{ padding: "12px 20px", textAlign: "right", fontFamily: defaultTokens.typography.mono, fontWeight: 600 }}>{l.cartons.toLocaleString("fr-FR")} unités</td>
                 <td
                   style={{
                     padding: "12px 20px",
@@ -280,7 +281,11 @@ function ListeAlertesStock({
             <div style={{ fontSize: 11.5, color: defaultTokens.colors.textSoft }}>{p.type}</div>
           </div>
           <div style={{ fontFamily: defaultTokens.typography.mono, fontSize: 13, fontWeight: 600, color: p.stock <= 0 ? defaultTokens.colors.danger : defaultTokens.colors.warning }}>
-            {p.stock} ct.
+            {(() => {
+              // Correction "incohérences de saisie" n°7 (2026-11-24) — vraie unité du produit, plus "ct." pour tout.
+              const libelle = LIBELLE_UNITE_VENTE[uniteVenteEffective({ uniteVente: p.uniteVente ?? null })];
+              return `${p.stock} ${Math.abs(p.stock) > 1 ? libelle.pluriel : libelle.singulier}`;
+            })()}
           </div>
         </button>
       ))}
@@ -401,7 +406,7 @@ function DashboardAdmin({
                 <CartesianGrid horizontal={false} stroke={defaultTokens.colors.borderSoft} />
                 <XAxis type="number" tick={{ fontSize: 11.5, fill: defaultTokens.colors.textSoft }} axisLine={false} tickLine={false} allowDecimals={false} />
                 <YAxis type="category" dataKey="label" width={140} tick={{ fontSize: 11, fill: defaultTokens.colors.textSoft }} axisLine={false} tickLine={false} />
-                <Tooltip formatter={(v: number) => `${v} cartons`} contentStyle={{ fontSize: 12.5, borderRadius: 8, border: `1px solid ${defaultTokens.colors.border}` }} />
+                <Tooltip formatter={(v: number) => `${v} vendus`} contentStyle={{ fontSize: 12.5, borderRadius: 8, border: `1px solid ${defaultTokens.colors.border}` }} />
                 <Bar dataKey="quantite" fill={defaultTokens.colors.accent} radius={[0, 4, 4, 0]} barSize={16} />
               </BarChart>
             </ResponsiveContainer>
@@ -463,9 +468,9 @@ function DashboardVendeur({
       <TitreBloc>Stock global {nomMagasin}</TitreBloc>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 20 }}>
         {summary.stockParEmplacementPourGerant.map((d) => (
-          <KpiCard key={d.emplacementId} icon={Building2} label={`Stock ${d.nom}`} value={`${d.cartons.toLocaleString("fr-FR")} ct.`} tone="accent" />
+          <KpiCard key={d.emplacementId} icon={Building2} label={`Stock ${d.nom}`} value={`${d.cartons.toLocaleString("fr-FR")} unités`} tone="accent" />
         ))}
-        <KpiCard icon={Boxes} label="Total (Akébé + Akanda)" value={`${summary.stockDepots.toLocaleString("fr-FR")} ct.`} tone="info" />
+        <KpiCard icon={Boxes} label="Total (Akébé + Akanda)" value={`${summary.stockDepots.toLocaleString("fr-FR")} unités`} tone="info" />
       </div>
 
       <TitreBloc>Mon activité personnelle</TitreBloc>

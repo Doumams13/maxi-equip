@@ -211,6 +211,27 @@ export class FactureRepository {
    * que topProduitsVendus() ci-dessous (référence, jamais le motif — voir
    * sa propre correction "motif → référence"), borné à la période.
    */
+  /**
+   * Bilan par catégorie (point 5, 2026-11-24) — lignes vendues sur la
+   * période, factures annulées exclues (même filtre que bilanVentesEntre).
+   * Montant de ligne = quantité × prix unitaire, AVANT la remise de la
+   * facture (une remise porte sur la facture entière, jamais sur une ligne).
+   */
+  lignesVenduesEntre(
+    debut: string,
+    fin: string
+  ): { factureId: string; produitId: string | null; quantite: number; prixUnitaire: number; uniteVente: string | null; reference: string | null; motif: string; taille: string }[] {
+    return this.db
+      .prepare(
+        `SELECT lf.facture_id as factureId, lf.produit_id as produitId, lf.quantite, lf.prix_unitaire as prixUnitaire,
+                lf.unite_vente as uniteVente, lf.reference, lf.motif, lf.taille
+         FROM lignes_facture lf
+         JOIN factures f ON f.id = lf.facture_id
+         WHERE f.annulee_le IS NULL AND f.date >= ? AND f.date <= ?`
+      )
+      .all(debut, fin) as { factureId: string; produitId: string | null; quantite: number; prixUnitaire: number; uniteVente: string | null; reference: string | null; motif: string; taille: string }[];
+  }
+
   topProduitsVendusEntre(debut: string, fin: string, limite = 5): { label: string; quantite: number }[] {
     const rows = this.db
       .prepare(

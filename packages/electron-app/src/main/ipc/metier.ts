@@ -1,4 +1,5 @@
 import { app, ipcMain, BrowserWindow, dialog } from "electron";
+import type Database from "better-sqlite3-multiple-ciphers";
 import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,12 +22,21 @@ import { ConnexionRequiseError } from "../services/validationStockDistanteServic
 import { ImageService } from "../services/imageService.js";
 import { SessionManager } from "../auth/sessionManager.js";
 import { anonymiserActivite, anonymiserFactures } from "../services/visibiliteService.js";
-import { genererFacturePdf } from "../services/factureDocumentService.js";
+import { genererFacturePdf, type CopieInterneFacture } from "../services/factureDocumentService.js";
 import { genererDocumentInternePdf } from "../services/documentInterneDocumentService.js";
+import {
+  filtreEstActif,
+  produitCorrespondAuFiltre,
+  ventesParCategorie,
+  ventilerParUnite,
+  topProduitsDepuisLignes,
+  LIBELLE_NON_CLASSE,
+  type FiltreBilan,
+} from "../services/bilanParCategorie.js";
 import { genererBilanPdf } from "../services/bilanDocumentService.js";
 import { checkAdminGuard } from "../auth/checkAdminGuard.js";
 import { stock as domainStock, catalogue as domainCatalogue } from "@maxi-equip/domain";
-import { parseCaracteristiques } from "@maxi-equip/shared-types";
+import { parseCaracteristiques, uniteVenteEffective } from "@maxi-equip/shared-types";
 import type { ModeleProduit, Produit, Emplacement, UniteVente, ConfigurationUnitesSousCategorie, Categorie, SousCategorie, SousCategorieChamp } from "@maxi-equip/shared-types";
 
 /**
@@ -996,11 +1006,24 @@ export function registerMetierIpcHandlers(
     const identite = facture.identiteSnapshot ?? parametresRepository.getIdentite();
     const vendeurNomAffiche = resoudreVendeurAffiche(facture, identite);
     try {
+      // Point 3 (2026-11-24) — en A4 paysage (2 × A5) : facture client à
+      // gauche, fichier interne à droite dès que cette vente a quelque
+      // chose à y montrer (sortie de dépôt et/ou achat extérieur, même
+      // condition que le bouton "Fichier interne" de l'écran Factures).
+      let copieInterne: CopieInterneFacture | undefined;
+      if ((format ?? "a4-paysage") === "a4-paysage") {
+        const lignesInternes = factureRepository.getDocumentInterne(factureId);
+        const repartitionDepots = factureRepository.getRepartitionDepots(factureId);
+        if (lignesInternes.length > 0 || repartitionDepots.length > 0) {
+          copieInterne = { repartitionDepots, achatsExterieurs: lignesInternes };
+        }
+      }
       const chemin = await genererFacturePdf({
         facture,
         identite,
         vendeurNomAffiche,
         format,
+        copieInterne,
       });
       return { success: true, chemin, nomSuggere: `${facture.numero}.pdf` };
     } catch (err) {
@@ -1036,11 +1059,25 @@ export function registerMetierIpcHandlers(
    * recalculées ici, pour que l'écran et le PDF portent STRICTEMENT sur
    * la même période.
    */
-  function calculerBilan(debut: string, fin: string) {
+  function calculerBilan(debut: string, fin: string, filtre: FiltreBilan | null = null) {
     const emplacements = emplacementRepository.list();
     // Même décision que le dashboard : SHOP n'a pas de stock (Phase 2 §3/§7).
     const depots = emplacements.filter((e) => !e.estPointDeVente);
     const depotIds = depots.map((e) => e.id);
+
+    // Bilan par catégorie (point 5, 2026-11-24) — classement de chaque
+    // produit (modèle → sous-catégorie → catégorie) et filtre optionnel.
+    // Sans filtre, toutes les sections gardent EXACTEMENT leurs requêtes
+    // historiques ; avec filtre, elles sont recalculées sur les seuls
+    // produits retenus, à partir des mêmes sources (lignes de facture,
+    // mouvements, stocks), jamais d'une seconde règle.
+    const classements = produitRepository.classementCatalogue();
+    const classementParProduit = new Map(classements.map((c) => [c.produitId, c]));
+    const filtreActif = filtreEstActif(filtre);
+    const correspond = (produitId: string | null) => produitCorrespondAuFiltre(produitId ? classementParProduit.get(produitId) : undefined, filtre);
+
+    const toutesLignesVendues = factureRepository.lignesVenduesEntre(debut, fin);
+    const lignesVendues = filtreActif ? toutesLignesVendues.filter((l) => correspond(l.produitId)) : toutesLignesVendues;
 
     // Tableau détaillé par produit (2026-10-22) — une seule requête par
     // dépôt (jamais une par produit) pour construire la matrice
@@ -1049,46 +1086,98 @@ export function registerMetierIpcHandlers(
     // MouvementRepository, jamais recalculées produit par produit.
     const stockParDepot = new Map(depots.map((e) => [e.id, new Map(stockRepository.listByEmplacement(e.id).map((r) => [r.produitId, r.quantite]))]));
     const ventesSortiesParProduit = mouvementRepository.detailVenteSortieParProduitEntre(debut, fin);
-    const detailProduits = produitRepository.list().map((p) => {
-      const activite = ventesSortiesParProduit.get(p.id);
-      return {
-        produitId: p.id,
-        taille: p.taille,
-        reference: p.reference,
-        carreauxParCarton: p.carreauxParCarton,
-        stockParEmplacement: depots.map((e) => ({ emplacementId: e.id, cartons: stockParDepot.get(e.id)?.get(p.id) ?? 0 })),
-        vendu: activite?.vendu ?? 0,
-        sortie: activite?.sortie ?? 0,
-      };
-    });
+    const produits = produitRepository.list().filter((p) => correspond(p.id));
+    const uniteParProduit = new Map(produits.map((p) => [p.id, uniteVenteEffective(p)]));
+    const detailProduits = produits
+      .map((p) => {
+        const activite = ventesSortiesParProduit.get(p.id);
+        const c = classementParProduit.get(p.id);
+        const estCarreau = c?.estCarreau ?? false;
+        return {
+          produitId: p.id,
+          taille: p.taille,
+          reference: p.reference,
+          /** Bilan par catégorie — référence pour un carreau, nom du produit sinon (même règle que le devis). */
+          designation: estCarreau ? p.reference : p.motif,
+          categorieNom: c?.categorieNom ?? LIBELLE_NON_CLASSE,
+          sousCategorieNom: c?.sousCategorieNom ?? LIBELLE_NON_CLASSE,
+          estCarreau,
+          uniteVente: uniteVenteEffective(p),
+          carreauxParCarton: p.carreauxParCarton,
+          stockParEmplacement: depots.map((e) => ({ emplacementId: e.id, cartons: stockParDepot.get(e.id)?.get(p.id) ?? 0 })),
+          vendu: activite?.vendu ?? 0,
+          sortie: activite?.sortie ?? 0,
+        };
+      })
+      .sort(
+        (a, b) =>
+          a.categorieNom.localeCompare(b.categorieNom, "fr") ||
+          a.sousCategorieNom.localeCompare(b.sousCategorieNom, "fr") ||
+          a.designation.localeCompare(b.designation, "fr", { numeric: true }) ||
+          a.taille.localeCompare(b.taille, "fr", { numeric: true })
+      );
+
+    const ventesFiltrees = filtreActif
+      ? {
+          caTotal: lignesVendues.reduce((s, l) => s + Math.round(l.quantite * l.prixUnitaire), 0),
+          nombreFactures: new Set(lignesVendues.map((l) => l.factureId)).size,
+          // Une remise porte sur la facture entière, jamais sur une ligne :
+          // impossible de l'attribuer honnêtement à une catégorie.
+          remiseTotale: null as number | null,
+        }
+      : null;
+
+    const libelleFiltre = (() => {
+      if (!filtreActif) return null;
+      const c = classements.find((x) => (filtre!.sousCategorieId ? x.sousCategorieId === filtre!.sousCategorieId : x.categorieId === filtre!.categorieId));
+      if (!c) return "Filtre catégorie";
+      return filtre!.sousCategorieId ? `${c.categorieNom ?? ""} › ${c.sousCategorieNom ?? ""}` : (c.categorieNom ?? "");
+    })();
 
     return {
-      ventes: factureRepository.bilanVentesEntre(debut, fin),
-      topProduits: factureRepository.topProduitsVendusEntre(debut, fin, 10),
+      filtre: libelleFiltre,
+      ventes: ventesFiltrees ?? (factureRepository.bilanVentesEntre(debut, fin) as { caTotal: number; nombreFactures: number; remiseTotale: number | null }),
+      ventesParCategorie: ventesParCategorie(lignesVendues, classementParProduit),
+      topProduits: filtreActif ? topProduitsDepuisLignes(lignesVendues, 10) : factureRepository.topProduitsVendusEntre(debut, fin, 10),
       // Fondations quincaillerie (Phase 4) — correction "le bilan
       // additionne des quantités d'unités différentes" : jamais une
       // somme brute, toujours ventilée par unité de vente réelle du
       // produit (voir StockRepository/MouvementRepository ci-dessus).
-      mouvements: {
-        entrees: mouvementRepository.sommeQuantiteParTypeEtUniteEntre("entree", debut, fin),
-        sorties: mouvementRepository.sommeQuantiteParTypeEtUniteEntre("sortie", debut, fin),
-      },
+      mouvements: filtreActif
+        ? {
+            entrees: ventilerParUnite(
+              [...mouvementRepository.entreesParProduitEntre(debut, fin).entries()].filter(([id]) => uniteParProduit.has(id)),
+              uniteParProduit
+            ),
+            sorties: ventilerParUnite(
+              [...ventesSortiesParProduit.entries()].filter(([id]) => uniteParProduit.has(id)).map(([id, v]) => [id, v.vendu + v.sortie] as [string, number]),
+              uniteParProduit
+            ),
+          }
+        : {
+            entrees: mouvementRepository.sommeQuantiteParTypeEtUniteEntre("entree", debut, fin),
+            sorties: mouvementRepository.sommeQuantiteParTypeEtUniteEntre("sortie", debut, fin),
+          },
       stockParEmplacement: depots.map((e) => ({
         emplacementId: e.id,
         nom: e.nom,
-        parUnite: stockRepository.getQuantitesParUniteParEmplacement(e.id),
+        parUnite: filtreActif
+          ? ventilerParUnite([...(stockParDepot.get(e.id)?.entries() ?? [])].filter(([id]) => uniteParProduit.has(id)), uniteParProduit)
+          : stockRepository.getQuantitesParUniteParEmplacement(e.id),
       })),
-      produitsSousSeuilCount: produitRepository.countSousSeuilDepots(depotIds),
+      produitsSousSeuilCount: filtreActif
+        ? produitRepository.listSousSeuilDepots(depotIds).filter((p) => correspond(p.id)).length
+        : produitRepository.countSousSeuilDepots(depotIds),
       promotionsActivesPendantPeriode: promotionRepository ? promotionRepository.compterChevauchantPeriode(debut, fin) : 0,
       depots: depots.map((e) => ({ id: e.id, nom: e.nom })),
       detailProduits,
     };
   }
 
-  ipcMain.handle("bilan:generer", (_e, input: { debut: string; fin: string }) => {
+  ipcMain.handle("bilan:generer", (_e, input: { debut: string; fin: string; filtre?: FiltreBilan | null }) => {
     const guard = checkAdminGuard(sessionManager);
     if (!guard.ok) return { success: false as const, message: guard.message };
-    return { success: true as const, ...calculerBilan(input.debut, input.fin) };
+    return { success: true as const, ...calculerBilan(input.debut, input.fin, input.filtre ?? null) };
   });
 
   /**
@@ -1113,7 +1202,9 @@ export function registerMetierIpcHandlers(
       const chemin = await genererBilanPdf({
         identite,
         periodeLibelle: input.periodeLibelle,
+        filtre: input.donnees.filtre ?? null,
         ventes: input.donnees.ventes,
+        ventesParCategorie: input.donnees.ventesParCategorie ?? [],
         topProduits: input.donnees.topProduits,
         mouvements: input.donnees.mouvements,
         stockParEmplacement: input.donnees.stockParEmplacement,
@@ -1859,6 +1950,20 @@ export function enqueueSousCategorieChampSync(boiteEnvoiRepository: BoiteEnvoiRe
     ordre: champ.ordre,
     updatedAt: champ.updatedAt,
   });
+}
+
+/**
+ * Correction "surface/prix au m² bloqués sur les nouveaux modèles"
+ * (2026-11-23) — met en file une sous-catégorie modifiée hors IPC (par
+ * une migration au démarrage, voir `RapportMigrations` dans
+ * db/migrate.ts), avec la même charge utile exacte que les sites d'appel
+ * IPC ci-dessus (unités autorisées incluses).
+ */
+export function enqueueSousCategorieSyncParId(boiteEnvoiRepository: BoiteEnvoiRepository, db: Database.Database, sousCategorieId: string): void {
+  const sousCategorie = new SousCategorieRepository(db).findById(sousCategorieId);
+  if (!sousCategorie) return;
+  const unitesAutorisees = unitesAutoriseesPourPayload(new SousCategorieUniteRepository(db).obtenirConfiguration(sousCategorieId));
+  enqueueSousCategorieSync(boiteEnvoiRepository, sousCategorie, unitesAutorisees, "update");
 }
 
 /** Convertit `{configuree, unites}` (ConfigurationUnitesSousCategorie, voir SousCategorieUniteRepository) vers la forme transmise au serveur — jamais une logique dupliquée aux 5 sites d'appel. */

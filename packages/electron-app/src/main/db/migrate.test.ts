@@ -417,7 +417,7 @@ describe("Fondations quincaillerie (Phase 1) — categories/sous_categories, uni
       ancien
     );
 
-    const idsReclasses = runMigrations(db);
+    const { idsModelesReclasses: idsReclasses } = runMigrations(db);
 
     // Premier passage sur une base neuve : "Carreaux" vient d'être créée
     // ici, donc le balayage ponctuel s'applique — doit inclure ce modèle.
@@ -651,6 +651,40 @@ describe("Fondations quincaillerie (Phase 3 bis) — modele_physique, unites_con
     expect(apres.unites_configurees).toBe(1);
     const unites = db.prepare("SELECT unite_vente FROM sous_categorie_unites WHERE sous_categorie_id = ? ORDER BY unite_vente").all(sousCategorie.id) as { unite_vente: string }[];
     expect(unites.map((u) => u.unite_vente)).toEqual(["metre", "piece"]);
+    db.close();
+  });
+});
+
+describe("Correction 2026-11-23 — marquage 'carreau' de Carreaux remonté au serveur (surface/prix au m² bloqués sur les nouveaux modèles)", () => {
+  it("poste neuf : la 'Carreaux' créée localement pendant ce démarrage n'est JAMAIS renvoyée (évite un doublon côté serveur)", () => {
+    const db = new Database(":memory:");
+    const rapport = runMigrations(db);
+    expect(rapport.idsSousCategoriesMarqueesCarreau).toEqual([]);
+    db.close();
+  });
+
+  it("démarrage normal, marquage intact : rien à remonter", () => {
+    const db = new Database(":memory:");
+    runMigrations(db);
+    const rapport = runMigrations(db);
+    expect(rapport.idsSousCategoriesMarqueesCarreau).toEqual([]);
+    db.close();
+  });
+
+  it("marquage écrasé à NULL par la synchro serveur : re-marqué, renvoyé pour synchro, avec un updated_at plus récent que celui du serveur", () => {
+    const db = new Database(":memory:");
+    runMigrations(db);
+    const { id } = db.prepare("SELECT id FROM sous_categories WHERE nom = 'Carreaux'").get() as { id: string };
+    const dateServeur = "2026-11-20T10:00:00.000Z";
+    // Simule SousCategorieRepository.creerDepuisServeur avec modelePhysique = null.
+    db.prepare("UPDATE sous_categories SET modele_physique = NULL, updated_at = ? WHERE id = ?").run(dateServeur, id);
+
+    const rapport = runMigrations(db);
+
+    expect(rapport.idsSousCategoriesMarqueesCarreau).toEqual([id]);
+    const ligne = db.prepare("SELECT modele_physique, updated_at FROM sous_categories WHERE id = ?").get(id) as { modele_physique: string | null; updated_at: string };
+    expect(ligne.modele_physique).toBe("carreau");
+    expect(ligne.updated_at > dateServeur).toBe(true);
     db.close();
   });
 });

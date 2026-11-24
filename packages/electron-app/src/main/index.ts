@@ -46,7 +46,7 @@ import { StockService } from "./services/stockService.js";
 import { VenteService } from "./services/venteService.js";
 import { ValidationStockDistanteService } from "./services/validationStockDistanteService.js";
 import { registerInitialisationStockCentralIpcHandlers } from "./ipc/initialisationStockCentral.js";
-import { registerMetierIpcHandlers, enqueueModeleSync } from "./ipc/metier.js";
+import { registerMetierIpcHandlers, enqueueModeleSync, enqueueSousCategorieSyncParId } from "./ipc/metier.js";
 import { ImageProduitRepository } from "./repositories/imageProduitRepository.js";
 import { ImageService } from "./services/imageService.js";
 import { registerImageIpcHandlers } from "./ipc/images.js";
@@ -273,7 +273,7 @@ app.whenReady().then(async () => {
   let mainWindow: BrowserWindow;
   try {
     const db = openDatabase();
-    const idsModelesReclassesParMigration = runMigrations(db);
+    const { idsModelesReclasses: idsModelesReclassesParMigration, idsSousCategoriesMarqueesCarreau } = runMigrations(db);
     registerIpcHandlers(db);
 
     // Authentification (Phase 1) : dépôt SQLite + hasher Argon2id réel +
@@ -282,6 +282,27 @@ app.whenReady().then(async () => {
     const hasher = new Argon2idPasswordHasher();
     const sessionManager = new SessionManager();
     const boiteEnvoiRepository = new BoiteEnvoiRepository(db);
+
+    // Allègement de la base (2026-11-24, diagnostic "sauvegardes cloud de
+    // 750 Mo" : ~575 Mo d'images côté serveur ≈ 765 Mo une fois en base64)
+    // — retire les copies d'images DÉJÀ confirmées par le serveur (voir
+    // BoiteEnvoiRepository.retirerContenuImagesConfirmees), puis compacte
+    // la base UNE fois pour rendre réellement l'espace (un UPDATE seul ne
+    // réduit pas la taille du fichier). Ne se déclenche que s'il y avait
+    // quelque chose à retirer : les démarrages suivants n'ont rien à
+    // faire (et ne compactent plus). Jamais bloquant.
+    try {
+      const allegees = boiteEnvoiRepository.retirerContenuImagesConfirmees();
+      if (allegees > 0) {
+        const debut = Date.now();
+        db.exec("VACUUM");
+        // eslint-disable-next-line no-console
+        console.log(`[allègement] ${allegees} copie(s) d'image déjà envoyée(s) retirée(s), base compactée en ${Date.now() - debut} ms.`);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[allègement] impossible d'alléger la base :", err instanceof Error ? err.message : err);
+    }
 
     // Correction (audit "130 carreaux, 1 affiché", 2026-11-19) : les
     // migrations de classification ci-dessus (migrate.ts) modifient
@@ -302,6 +323,10 @@ app.whenReady().then(async () => {
         if (modele) enqueueModeleSync(boiteEnvoiRepository, modele, "update");
       }
     }
+    // Correction "surface/prix au m² bloqués sur les nouveaux modèles"
+    // (2026-11-23) — même raisonnement exact pour le marquage "carreau"
+    // de la sous-catégorie Carreaux (voir `RapportMigrations`).
+    for (const id of idsSousCategoriesMarqueesCarreau) enqueueSousCategorieSyncParId(boiteEnvoiRepository, db, id);
     const validationStockDistanteService = new ValidationStockDistanteService();
     const loginCentralService = new LoginCentralService();
     const authService = new AuthService(utilisateurRepository, hasher, sessionManager, loginCentralService);
@@ -563,7 +588,10 @@ app.whenReady().then(async () => {
     // Demandes (Phase 4.1) — Administrateur et Gérant, aucune restriction artificielle (Partie 15).
     registerDemandeIpcHandlers(demandeService, notificationRepository, sessionManager);
     // Devis pro-forma (2026-11-13) — même politique d'accès.
-    registerDevisIpcHandlers(devisRepository, sessionManager);
+    registerDevisIpcHandlers(devisRepository, sessionManager, {
+      getIdentite: () => parametresRepository.getIdentite(),
+      nomUtilisateur: (id) => utilisateurRepository.findById(id)?.nom ?? null,
+    });
     // Purge (Partie 13/14) : au démarrage, jamais une tâche planifiée fragile — protégée par try/catch comme la sauvegarde automatique, un échec ne doit jamais empêcher le démarrage.
     try {
       demandeService.purgerDemandesAnciennes();

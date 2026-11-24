@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import { randomUUID } from "node:crypto";
+import { devis as domainDevis } from "@maxi-equip/domain";
 
 /**
  * Devis pro-forma (correction "ajouter les devis pro-forma", 2026-11-13)
@@ -9,6 +10,12 @@ import { randomUUID } from "node:crypto";
  * brouillon de travail propre à CE poste, contrairement à Facture/
  * Demande qui traversent une frontière process/réseau et ont donc
  * besoin d'un type partagé.
+ *
+ * Étendu le 2026-11-24 (point 6, modèle de proforma fourni) : espace /
+ * application, surface, remise en % et unité par ligne, objet, notes et
+ * remise globale sur le devis, modification d'un brouillon. Les totaux
+ * sont TOUJOURS recalculés ici (`@maxi-equip/domain` devis), jamais repris
+ * de l'appelant.
  */
 export type DevisStatut = "brouillon" | "convertie" | "annulee";
 
@@ -19,6 +26,16 @@ export interface LigneDevis {
   taille: string;
   quantite: number;
   prixUnitaire: number;
+  /** Libellé libre "Espace / application" (Salon, Cuisine - murs…). */
+  espace?: string | null;
+  /** Surface/besoin saisi (m²) — informatif, la quantité fait foi. */
+  surfaceM2?: number | null;
+  /** Remise de la ligne, en % (0 à 100). */
+  remisePourcent?: number;
+  /** Unité de vente du produit au moment du devis ("carton", "sac"…), `null` = carton (historique). */
+  uniteVente?: string | null;
+  /** Surface d'un carton (m²) au moment du devis — permet d'afficher le prix au m². */
+  surfaceCartonM2?: number | null;
 }
 
 export interface Devis {
@@ -29,8 +46,16 @@ export interface Devis {
   clientTelephone: string | null;
   clientAdresse: string | null;
   modeReglement: string | null;
+  /** Objet du devis, ex. "Fourniture de carrelage sols, murs et décors". */
+  objet: string | null;
+  /** Hypothèses de calcul, conditionnements, points à confirmer… (imprimé sur le PDF). */
+  notes: string | null;
+  /** Somme des montants bruts des lignes. */
   total: number;
+  /** Remise TOTALE (remises des lignes + remiseGlobale) — reprise telle quelle à la conversion en vente. */
   remise: number;
+  /** Remise supplémentaire sur l'ensemble (FCFA), incluse dans `remise`. */
+  remiseGlobale: number;
   statut: DevisStatut;
   /** Renseigné uniquement une fois converti en vente réelle. */
   factureId: string | null;
@@ -45,8 +70,13 @@ export interface NouveauDevis {
   clientTelephone?: string | null;
   clientAdresse?: string | null;
   modeReglement?: string | null;
-  total: number;
+  objet?: string | null;
+  notes?: string | null;
+  /** Ignoré : recalculé à partir des lignes. Conservé pour compatibilité d'appel. */
+  total?: number;
+  /** Ignoré : recalculé (remises des lignes + remiseGlobale). */
   remise?: number;
+  remiseGlobale?: number;
   utilisateurId?: string | null;
   lignes: LigneDevis[];
 }
@@ -59,6 +89,9 @@ interface DevisRow {
   client_telephone: string | null;
   client_adresse: string | null;
   mode_reglement: string | null;
+  objet: string | null;
+  notes: string | null;
+  remise_globale: number | null;
   total: number;
   remise: number;
   statut: DevisStatut;
@@ -77,10 +110,27 @@ interface LigneDevisRow {
   taille: string;
   quantite: number;
   prix_unitaire: number;
+  espace: string | null;
+  surface_m2: number | null;
+  remise_pourcent: number | null;
+  unite_vente: string | null;
+  surface_carton_m2: number | null;
 }
 
 function rowToLigne(row: LigneDevisRow): LigneDevis {
-  return { produitId: row.produit_id, motif: row.motif, reference: row.reference, taille: row.taille, quantite: row.quantite, prixUnitaire: row.prix_unitaire };
+  return {
+    produitId: row.produit_id,
+    motif: row.motif,
+    reference: row.reference,
+    taille: row.taille,
+    quantite: row.quantite,
+    prixUnitaire: row.prix_unitaire,
+    espace: row.espace ?? null,
+    surfaceM2: row.surface_m2 ?? null,
+    remisePourcent: row.remise_pourcent ?? 0,
+    uniteVente: row.unite_vente ?? null,
+    surfaceCartonM2: row.surface_carton_m2 ?? null,
+  };
 }
 
 function rowToDevis(row: DevisRow, lignes: LigneDevis[]): Devis {
@@ -92,8 +142,11 @@ function rowToDevis(row: DevisRow, lignes: LigneDevis[]): Devis {
     clientTelephone: row.client_telephone,
     clientAdresse: row.client_adresse,
     modeReglement: row.mode_reglement,
+    objet: row.objet ?? null,
+    notes: row.notes ?? null,
     total: row.total,
     remise: row.remise,
+    remiseGlobale: row.remise_globale ?? 0,
     statut: row.statut,
     factureId: row.facture_id,
     utilisateurId: row.utilisateur_id,
@@ -102,6 +155,15 @@ function rowToDevis(row: DevisRow, lignes: LigneDevis[]): Devis {
     updatedAt: row.updated_at,
   };
 }
+
+function calculerTotaux(input: NouveauDevis): domainDevis.TotauxDevis {
+  return domainDevis.calculerTotauxDevis(
+    input.lignes.map((l) => ({ quantite: l.quantite, prixUnitaire: l.prixUnitaire, remisePourcent: l.remisePourcent ?? 0 })),
+    input.remiseGlobale ?? 0
+  );
+}
+
+const SELECT_LIGNES = "SELECT * FROM lignes_devis WHERE devis_id = ? ORDER BY ordre, rowid";
 
 export class DevisRepository {
   constructor(private readonly db: Database.Database) {}
@@ -121,12 +183,13 @@ export class DevisRepository {
     const id = randomUUID();
     const numero = this.nextNumero();
     const maintenant = new Date().toISOString();
+    const totaux = calculerTotaux(input);
 
     const executer = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO devis (id, numero, date, client_nom, client_telephone, client_adresse, mode_reglement, total, remise, statut, facture_id, utilisateur_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'brouillon', NULL, ?, ?, ?)`
+          `INSERT INTO devis (id, numero, date, client_nom, client_telephone, client_adresse, mode_reglement, objet, notes, remise_globale, total, remise, statut, facture_id, utilisateur_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'brouillon', NULL, ?, ?, ?)`
         )
         .run(
           id,
@@ -136,29 +199,85 @@ export class DevisRepository {
           input.clientTelephone ?? null,
           input.clientAdresse ?? null,
           input.modeReglement ?? null,
-          input.total,
-          input.remise ?? 0,
+          input.objet ?? null,
+          input.notes ?? null,
+          totaux.remiseGlobale,
+          totaux.brut,
+          totaux.remiseTotale,
           input.utilisateurId ?? null,
           maintenant,
           maintenant
         );
-
-      const insererLigne = this.db.prepare(
-        "INSERT INTO lignes_devis (id, devis_id, produit_id, motif, reference, taille, quantite, prix_unitaire) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-      );
-      for (const ligne of input.lignes) {
-        insererLigne.run(randomUUID(), id, ligne.produitId, ligne.motif, ligne.reference, ligne.taille, ligne.quantite, ligne.prixUnitaire);
-      }
+      this.insererLignes(id, input.lignes);
     });
     executer();
 
     return this.findById(id)!;
   }
 
+  /**
+   * Modification d'un devis ENCORE en brouillon (vérifié par l'appelant,
+   * voir ipc/devis.ts) : en-tête mis à jour, lignes entièrement
+   * remplacées (un devis n'a aucun lien de stock ni de synchronisation,
+   * rien d'autre ne référence ses lignes). Numéro et date inchangés.
+   */
+  modifier(id: string, input: NouveauDevis): Devis {
+    const totaux = calculerTotaux(input);
+    const executer = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE devis SET client_nom = ?, client_telephone = ?, client_adresse = ?, mode_reglement = ?, objet = ?, notes = ?,
+             remise_globale = ?, total = ?, remise = ?, updated_at = ? WHERE id = ?`
+        )
+        .run(
+          input.clientNom,
+          input.clientTelephone ?? null,
+          input.clientAdresse ?? null,
+          input.modeReglement ?? null,
+          input.objet ?? null,
+          input.notes ?? null,
+          totaux.remiseGlobale,
+          totaux.brut,
+          totaux.remiseTotale,
+          new Date().toISOString(),
+          id
+        );
+      this.db.prepare("DELETE FROM lignes_devis WHERE devis_id = ?").run(id);
+      this.insererLignes(id, input.lignes);
+    });
+    executer();
+    return this.findById(id)!;
+  }
+
+  private insererLignes(devisId: string, lignes: LigneDevis[]): void {
+    const insererLigne = this.db.prepare(
+      `INSERT INTO lignes_devis (id, devis_id, produit_id, motif, reference, taille, quantite, prix_unitaire, espace, surface_m2, remise_pourcent, unite_vente, surface_carton_m2, ordre)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    lignes.forEach((ligne, index) => {
+      insererLigne.run(
+        randomUUID(),
+        devisId,
+        ligne.produitId,
+        ligne.motif,
+        ligne.reference,
+        ligne.taille,
+        ligne.quantite,
+        ligne.prixUnitaire,
+        ligne.espace?.trim() || null,
+        ligne.surfaceM2 ?? null,
+        Math.min(100, Math.max(0, ligne.remisePourcent ?? 0)),
+        ligne.uniteVente ?? null,
+        ligne.surfaceCartonM2 ?? null,
+        index
+      );
+    });
+  }
+
   findById(id: string): Devis | null {
     const row = this.db.prepare("SELECT * FROM devis WHERE id = ?").get(id) as DevisRow | undefined;
     if (!row) return null;
-    const lignesRows = this.db.prepare("SELECT * FROM lignes_devis WHERE devis_id = ?").all(id) as LigneDevisRow[];
+    const lignesRows = this.db.prepare(SELECT_LIGNES).all(id) as LigneDevisRow[];
     return rowToDevis(row, lignesRows.map(rowToLigne));
   }
 
@@ -173,7 +292,7 @@ export class DevisRepository {
   listerToutes(): Devis[] {
     const rows = this.db.prepare("SELECT * FROM devis ORDER BY created_at DESC, rowid DESC").all() as DevisRow[];
     return rows.map((row) => {
-      const lignesRows = this.db.prepare("SELECT * FROM lignes_devis WHERE devis_id = ?").all(row.id) as LigneDevisRow[];
+      const lignesRows = this.db.prepare(SELECT_LIGNES).all(row.id) as LigneDevisRow[];
       return rowToDevis(row, lignesRows.map(rowToLigne));
     });
   }

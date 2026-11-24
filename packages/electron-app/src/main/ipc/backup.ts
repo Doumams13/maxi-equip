@@ -1,7 +1,7 @@
 import { ipcMain, dialog, shell, BrowserWindow } from "electron";
 import { dirname } from "node:path";
 import type { BackupService } from "../services/backupService.js";
-import { diagnosticSauvegardeCloud } from "../services/cloudBackupTrigger.js";
+import { diagnosticSauvegardeCloud, lancerSauvegardeCloudMaintenant } from "../services/cloudBackupTrigger.js";
 import { validerMotDePasse } from "../services/backupCrypto.js";
 import type { SessionManager } from "../auth/sessionManager.js";
 import { checkAdminGuard } from "../auth/checkAdminGuard.js";
@@ -67,6 +67,12 @@ export function registerBackupIpcHandlers(backupService: BackupService, sessionM
   ipcMain.handle("backup:etat-cloud", async () => {
     if (!sessionManager.isAuthenticated()) return null;
     return diagnosticSauvegardeCloud();
+  });
+
+  /** Bouton "Lancer une sauvegarde maintenant" de l'alerte (0.12.6) — tout utilisateur connecté, comme l'alerte elle-même. */
+  ipcMain.handle("backup:lancer-cloud", async () => {
+    if (!sessionManager.isAuthenticated()) return { statut: "echec", message: "Non connecté." };
+    return lancerSauvegardeCloudMaintenant(backupService);
   });
 
   ipcMain.handle("backup:get-status", () => {

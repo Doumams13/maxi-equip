@@ -259,7 +259,8 @@ export function FacturesScreen({
   // Phase 4 : "a5" (format indépendant) retiré — "a4-paysage" (deux
   // exemplaires A5 construits dans le PDF) est désormais le défaut,
   // appliqué à Voir/Imprimer/Télécharger.
-  const [formatImpression, setFormatImpression] = useState<"a4-paysage" | "a4">("a4-paysage");
+  // "auto" par défaut (retour client du 2026-11-24) : A5 jusqu'à 12 articles, A4 au-delà.
+  const [formatImpression, setFormatImpression] = useState<"auto" | "a4-paysage" | "a4">("auto");
 
   const [page, setPage] = useState(1);
 
@@ -536,11 +537,12 @@ export function FacturesScreen({
           <select
             style={inputStyle}
             value={formatImpression}
-            onChange={(e) => setFormatImpression(e.target.value as "a4-paysage" | "a4")}
+            onChange={(e) => setFormatImpression(e.target.value as "auto" | "a4-paysage" | "a4")}
             title="Format utilisé pour Voir / Imprimer / Télécharger"
           >
-            <option value="a4-paysage">A5 (2 par page) — facture client + fichier interne</option>
-            <option value="a4">A4 portrait — complet</option>
+            <option value="auto">Automatique — A5 jusqu'à 12 articles, sinon A4</option>
+            <option value="a4-paysage">A5 (2 par page) — facture client + document interne</option>
+            <option value="a4">A4 — facture seule</option>
           </select>
           {(recherche || statutFiltre !== "tous" || vendeurFiltreId !== null) && (
             <Button

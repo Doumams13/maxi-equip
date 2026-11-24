@@ -259,6 +259,19 @@ export class BackupService {
     return resultat;
   }
 
+  /**
+   * Bouton "Lancer une sauvegarde maintenant" de l'alerte cloud (0.12.6,
+   * 2026-11-24) — même sauvegarde automatique que d'habitude (même dossier,
+   * même rotation), mais sans attendre le délai de 24 h. Les vérifications
+   * "envoi déjà en cours / sauvegarde récente" sont faites par l'appelant
+   * (voir cloudBackupTrigger.lancerSauvegardeCloudMaintenant).
+   */
+  creerSauvegardeAutomatiqueImmediate(): ResultatSauvegarde {
+    const resultat = this.creerSauvegardeInterne(this.dossierPourType("automatic"), "automatic");
+    if (resultat.success) this.purgerAnciennesSauvegardesAutomatiques();
+    return resultat;
+  }
+
   listerSauvegardesAutomatiques(): EntreeSauvegardeAutomatique[] {
     const dossierAuto = this.dossierPourType("automatic");
     if (!existsSync(dossierAuto)) return [];

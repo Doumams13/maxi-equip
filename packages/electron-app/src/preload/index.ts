@@ -581,7 +581,7 @@ const maxiEquipApi = {
   },
   trouverPageFacture: (factureId: string, tailleParPage: number): Promise<number | null> => ipcRenderer.invoke("factures:trouverPage", factureId, tailleParPage),
   getResumeFacturesMois: (): Promise<{ nombre: number; total: number }> => ipcRenderer.invoke("factures:resumeMois"),
-  genererFacturePdf: (factureId: string, format?: "a4" | "a4-paysage"): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
+  genererFacturePdf: (factureId: string, format?: "auto" | "a4" | "a4-paysage"): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererPdf", factureId, format),
   genererDocumentInternePdf: (factureId: string): Promise<{ success: boolean; chemin?: string; nomSuggere?: string; message?: string }> =>
     ipcRenderer.invoke("factures:genererDocumentInternePdf", factureId),
@@ -590,9 +590,17 @@ const maxiEquipApi = {
   backupEtatCloud: (): Promise<{
     configuree: boolean;
     probleme: boolean;
+    envoiEnCours: boolean;
     derniereReussite: string | null;
     dernierEchec: { date: string; message: string } | null;
   } | null> => ipcRenderer.invoke("backup:etat-cloud"),
+  backupLancerCloud: (): Promise<
+    | { statut: "non_configuree" }
+    | { statut: "en_cours" }
+    | { statut: "recente"; date: string }
+    | { statut: "echec"; message: string }
+    | { statut: "lancee" }
+  > => ipcRenderer.invoke("backup:lancer-cloud"),
   genererBilan: (
     debut: string,
     fin: string,

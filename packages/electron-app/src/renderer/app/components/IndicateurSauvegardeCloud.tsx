@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { defaultTokens } from "@maxi-equip/design-system";
-import { CloudOff } from "lucide-react";
+import { Button, defaultTokens } from "@maxi-equip/design-system";
+import { CloudOff, CloudUpload } from "lucide-react";
 
 type Diagnostic = {
   configuree: boolean;
   probleme: boolean;
+  envoiEnCours: boolean;
   derniereReussite: string | null;
   dernierEchec: { date: string; message: string } | null;
 };
@@ -31,25 +32,43 @@ function dateFr(iso: string): string {
 export function IndicateurSauvegardeCloud() {
   const [diagnostic, setDiagnostic] = useState<Diagnostic | null>(null);
   const [ouvert, setOuvert] = useState(false);
+  const [lancement, setLancement] = useState(false);
+  const [retour, setRetour] = useState<string | null>(null);
   const conteneur = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let annule = false;
-    async function recharger() {
-      try {
-        const resultat = await window.maxiEquip.backupEtatCloud();
-        if (!annule) setDiagnostic(resultat);
-      } catch {
-        // Jamais bloquant : l'indicateur reste simplement masqué.
-      }
+  async function recharger() {
+    try {
+      setDiagnostic(await window.maxiEquip.backupEtatCloud());
+    } catch {
+      // Jamais bloquant : l'indicateur reste simplement masqué.
     }
+  }
+
+  // Toutes les 5 minutes d'habitude, toutes les 10 secondes pendant un envoi (pour voir la fin rapidement).
+  const envoiEnCours = !!diagnostic?.envoiEnCours;
+  useEffect(() => {
     void recharger();
-    const intervalle = setInterval(() => void recharger(), 5 * 60 * 1000);
-    return () => {
-      annule = true;
-      clearInterval(intervalle);
-    };
-  }, []);
+    const intervalle = setInterval(() => void recharger(), envoiEnCours ? 10_000 : 5 * 60 * 1000);
+    return () => clearInterval(intervalle);
+  }, [envoiEnCours]);
+
+  // Bouton "Lancer une sauvegarde maintenant" (0.12.6) — vérifie d'abord côté Main
+  // qu'aucun envoi n'est en cours et qu'aucune sauvegarde de moins d'une heure n'existe.
+  async function lancerMaintenant() {
+    setLancement(true);
+    setRetour(null);
+    try {
+      const r = await window.maxiEquip.backupLancerCloud();
+      if (r.statut === "lancee") setRetour("Sauvegarde lancée. L'envoi se fait en arrière-plan, vous pouvez continuer à travailler.");
+      else if (r.statut === "en_cours") setRetour("Un envoi est déjà en cours depuis ce poste. Patientez, l'alerte disparaîtra à la fin.");
+      else if (r.statut === "recente") setRetour(`Une sauvegarde a déjà été faite récemment (${new Date(r.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}). Inutile d'en refaire une.`);
+      else if (r.statut === "non_configuree") setRetour("La sauvegarde cloud n'est pas configurée sur ce poste.");
+      else setRetour(`Impossible de lancer la sauvegarde : ${r.message}`);
+      await recharger();
+    } finally {
+      setLancement(false);
+    }
+  }
 
   useEffect(() => {
     if (!ouvert) return;
@@ -113,9 +132,18 @@ export function IndicateurSauvegardeCloud() {
               Dernière erreur ({dateFr(diagnostic.dernierEchec.date)}) : {diagnostic.dernierEchec.message}
             </p>
           )}
-          <p style={{ margin: 0, color: defaultTokens.colors.textSoft }}>
+          <p style={{ margin: "0 0 12px", color: defaultTokens.colors.textSoft }}>
             Les ventes récentes ne sont pas protégées en cas de panne ou de vol du PC. Prévenez l'administrateur.
           </p>
+          {diagnostic.envoiEnCours ? (
+            <p style={{ margin: 0, fontWeight: 700, color: defaultTokens.colors.accent }}>Envoi de la sauvegarde en cours…</p>
+          ) : (
+            <Button loading={lancement} onClick={() => void lancerMaintenant()} style={{ width: "100%" }}>
+              <CloudUpload size={15} />
+              Lancer une sauvegarde maintenant
+            </Button>
+          )}
+          {retour && <p style={{ margin: "10px 0 0", fontSize: 12.5 }}>{retour}</p>}
         </div>
       )}
     </div>

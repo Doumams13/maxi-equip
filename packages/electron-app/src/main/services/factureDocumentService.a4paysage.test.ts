@@ -213,18 +213,21 @@ describe("genererFacturePdf — format A4 paysage (positions réelles extraites 
     }
   });
 
-  it("point 3 (2026-11-24) : facture client à gauche, MÊME facture titrée FICHIER INTERNE à droite, avec la répartition par dépôt à la place des CGV", async () => {
+  it("retour client (2026-11-24) : facture client à gauche, DOCUMENT INTERNE à droite (quantité interne par dépôt, référence pour les carreaux)", async () => {
+    const { construireDocumentInterne } = await import("./factureDocumentService.js");
     const facture = construireFacture({ numero: "FAC-2026-0305" });
-    const chemin = await genererFacturePdf({
+    const copieInterne = construireDocumentInterne(
       facture,
-      identite: IDENTITE_TEST,
-      vendeurNomAffiche: "Jean Dupont",
-      format: "a4-paysage",
-      copieInterne: {
-        repartitionDepots: [{ motif: "Marbre Blanc", taille: "60 × 60 cm", reference: "REF-B-6060", emplacementNom: "Akanda", quantite: 5 }],
-        achatsExterieurs: [],
-      },
-    });
+      [
+        { motif: "Marbre Blanc", taille: "60 × 60 cm", reference: "REF-B-6060", emplacementNom: "Akanda", quantite: 3 },
+        { motif: "Marbre Blanc", taille: "60 × 60 cm", reference: "REF-B-6060", emplacementNom: "Akébé", quantite: 2 },
+      ],
+      [],
+      ["Akanda", "Akébé"],
+      () => true
+    );
+    expect(copieInterne.lignes[0]).toMatchObject({ designation: "REF-B-6060", parDepot: [3, 2], externe: 0 });
+    const chemin = await genererFacturePdf({ facture, identite: IDENTITE_TEST, vendeurNomAffiche: "Jean Dupont", format: "a4-paysage", copieInterne });
 
     const data = new Uint8Array(readFileSync(chemin));
     const doc = await pdfjsLib.getDocument({ data }).promise;
@@ -234,23 +237,23 @@ describe("genererFacturePdf — format A4 paysage (positions réelles extraites 
     const milieu = PAGE_WIDTH_A4_PAYSAGE / 2;
     const gauche = (i: { transform: number[] }) => i.transform[4]! < milieu;
 
-    const titreInterne = items.filter((i) => i.str.includes("FICHIER INTERNE"));
+    const titreInterne = items.filter((i) => i.str.includes("DOCUMENT INTERNE"));
     expect(titreInterne.length).toBe(1);
     expect(gauche(titreInterne[0]!)).toBe(false);
     const titreFacture = items.filter((i) => i.str.trim() === "FACTURE");
     expect(titreFacture.length).toBe(1);
     expect(gauche(titreFacture[0]!)).toBe(true);
-    // Même facture des deux côtés : la ligne d'article et le total figurent deux fois.
-    expect(items.filter((i) => i.str.includes("REF-B-6060")).length).toBeGreaterThanOrEqual(3); // 2 lignes de facture + 1 ligne de répartition
-    expect(items.filter((i) => i.str.includes("Total Net")).length).toBe(2);
-    // CGV seulement côté client, répartition seulement côté interne.
+    // Sous-colonnes de dépôt et bloc de marge uniquement côté interne ; CGV uniquement côté client.
+    for (const texte of ["QTÉ INTERNE", "AKANDA", "AKÉBÉ", "MARGE SUR ACHAT"]) {
+      const trouves = items.filter((i) => i.str.includes(texte));
+      expect(trouves.length, texte).toBe(1);
+      expect(gauche(trouves[0]!), texte).toBe(false);
+    }
     const cgv = items.filter((i) => i.str.includes("CONDITIONS GENERALES"));
     expect(cgv.length).toBe(1);
     expect(gauche(cgv[0]!)).toBe(true);
-    const repartition = items.filter((i) => i.str.includes("RÉPARTITION PAR DÉPÔT"));
-    expect(repartition.length).toBe(1);
-    expect(gauche(repartition[0]!)).toBe(false);
-    expect(items.some((i) => i.str.includes("Akanda") && !gauche(i))).toBe(true);
+    expect(items.filter((i) => i.str.includes("REF-B-6060") && !gauche(i)).length).toBe(1);
     expect(items.some((i) => i.str.includes("ne pas remettre au client"))).toBe(true);
+    expect(items.some((i) => i.str.includes("RÉPARTITION PAR DÉPÔT"))).toBe(false);
   });
 });

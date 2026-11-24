@@ -163,7 +163,7 @@ export async function envoyerBackupVersCloudSiConfigure(cheminDossierBackup: str
  * initialiser l'état — jamais à chaque appel.
  */
 let initialisationCloudFaite = false;
-export async function diagnosticSauvegardeCloud(): Promise<DiagnosticSauvegardeCloud> {
+export async function diagnosticSauvegardeCloud(): Promise<DiagnosticSauvegardeCloud & { envoiEnCours: boolean }> {
   const config = getConfigurationCloudBackup();
   if (config && !initialisationCloudFaite && !lireEtatSauvegardeCloud().derniereReussite) {
     initialisationCloudFaite = true;
@@ -184,7 +184,7 @@ export async function diagnosticSauvegardeCloud(): Promise<DiagnosticSauvegardeC
       console.error("[backup-cloud] lecture de la dernière sauvegarde cloud impossible :", err instanceof Error ? err.message : err);
     }
   }
-  return diagnostiquer(lireEtatSauvegardeCloud(), config !== null);
+  return { ...diagnostiquer(lireEtatSauvegardeCloud(), config !== null), envoiEnCours: sauvegardeCloudEnCours };
 }
 
 /**
@@ -198,6 +198,73 @@ export async function diagnosticSauvegardeCloud(): Promise<DiagnosticSauvegardeC
  * une fois toutes les DELAI_ENTRE_TENTATIVES_MS.
  */
 export const DELAI_ENTRE_TENTATIVES_MS = 15 * 60 * 1000;
+
+/** Bouton "Lancer une sauvegarde maintenant" : refusé si une sauvegarde cloud (tous postes confondus) date de moins de ce délai. */
+export const DELAI_SAUVEGARDE_RECENTE_MS = 60 * 60 * 1000;
+
+export type ResultatLancementManuel =
+  | { statut: "non_configuree" }
+  | { statut: "en_cours" }
+  | { statut: "recente"; date: string }
+  | { statut: "echec"; message: string }
+  | { statut: "lancee" };
+
+function creerServiceCloud(config: NonNullable<ReturnType<typeof getConfigurationCloudBackup>>): CloudBackupService {
+  return new CloudBackupService(
+    new S3CloudBackupProvider({
+      bucket: config.bucket,
+      region: config.region,
+      endpoint: config.endpoint,
+      forcePathStyle: true,
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    })
+  );
+}
+
+/**
+ * Bouton "Lancer une sauvegarde maintenant" (0.12.6, demande utilisateur) :
+ *  1. un envoi est déjà en cours sur CE poste → on n'en lance pas un second ;
+ *  2. une sauvegarde cloud de moins d'une heure existe déjà (n'importe quel
+ *     poste — lue dans le cloud lui-même) → inutile d'en refaire une ;
+ *  3. sinon : nouvelle sauvegarde locale immédiate puis envoi en arrière-plan
+ *     (résultat visible ensuite dans l'alerte, comme pour un envoi automatique).
+ */
+export async function lancerSauvegardeCloudMaintenant(
+  backupService: Pick<BackupService, "creerSauvegardeAutomatiqueImmediate">,
+  maintenant = Date.now()
+): Promise<ResultatLancementManuel> {
+  const config = getConfigurationCloudBackup();
+  if (!config) return { statut: "non_configuree" };
+  if (sauvegardeCloudEnCours) return { statut: "en_cours" };
+  try {
+    const entrees = await creerServiceCloud(config).listerSauvegardesCloudDetaillees();
+    const plusRecente = entrees.map((e) => e.createdAt).sort().pop();
+    if (plusRecente && maintenant - new Date(plusRecente).getTime() < DELAI_SAUVEGARDE_RECENTE_MS) {
+      initialiserDerniereReussiteSiInconnue(plusRecente);
+      return { statut: "recente", date: plusRecente };
+    }
+  } catch (err) {
+    // Lecture du cloud impossible : on tente quand même la sauvegarde (c'est justement ce qu'on veut vérifier).
+    // eslint-disable-next-line no-console
+    console.error("[backup-cloud] lecture avant sauvegarde manuelle impossible :", err instanceof Error ? err.message : err);
+  }
+  if (sauvegardeCloudEnCours) return { statut: "en_cours" };
+  const resultat = backupService.creerSauvegardeAutomatiqueImmediate();
+  if (!resultat.success || !resultat.chemin) {
+    const message = resultat.message ?? "La sauvegarde locale n'a pas pu être créée.";
+    noterEchecSauvegardeCloud(message);
+    return { statut: "echec", message };
+  }
+  derniereTentativeRenvoi = maintenant;
+  void envoyerBackupVersCloudSiConfigure(resultat.chemin);
+  return { statut: "lancee" };
+}
+
+/** Vrai pendant un envoi vers le cloud depuis ce poste (affiché par l'alerte). */
+export function envoiCloudEnCours(): boolean {
+  return sauvegardeCloudEnCours;
+}
 let derniereTentativeRenvoi = 0;
 
 export function doitRenvoyerDerniereSauvegarde(

@@ -22,8 +22,7 @@ import { ConnexionRequiseError } from "../services/validationStockDistanteServic
 import { ImageService } from "../services/imageService.js";
 import { SessionManager } from "../auth/sessionManager.js";
 import { anonymiserActivite, anonymiserFactures } from "../services/visibiliteService.js";
-import { genererFacturePdf, type CopieInterneFacture } from "../services/factureDocumentService.js";
-import { genererDocumentInternePdf } from "../services/documentInterneDocumentService.js";
+import { genererFacturePdf, genererDocumentInterneA4Pdf, construireDocumentInterne, type DocumentInterneDonnees, type FormatFacture } from "../services/factureDocumentService.js";
 import {
   filtreEstActif,
   produitCorrespondAuFiltre,
@@ -994,7 +993,7 @@ export function registerMetierIpcHandlers(
   // (Phase 4) : "a5" (format indépendant) retiré, remplacé par
   // "a4-paysage" (deux exemplaires A5 construits dans le PDF) — voir
   // FacturesScreen.tsx (sélecteur A4 paysage/A4 portrait).
-  ipcMain.handle("factures:genererPdf", async (_e, factureId: string, format?: "a4" | "a4-paysage") => {
+  ipcMain.handle("factures:genererPdf", async (_e, factureId: string, format?: FormatFacture) => {
     const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
     // Correction Phase Finale, Bloc 6 — l'identité HISTORIQUE (capturée à
@@ -1010,13 +1009,10 @@ export function registerMetierIpcHandlers(
       // gauche, fichier interne à droite dès que cette vente a quelque
       // chose à y montrer (sortie de dépôt et/ou achat extérieur, même
       // condition que le bouton "Fichier interne" de l'écran Factures).
-      let copieInterne: CopieInterneFacture | undefined;
-      if ((format ?? "a4-paysage") === "a4-paysage") {
-        const lignesInternes = factureRepository.getDocumentInterne(factureId);
-        const repartitionDepots = factureRepository.getRepartitionDepots(factureId);
-        if (lignesInternes.length > 0 || repartitionDepots.length > 0) {
-          copieInterne = { repartitionDepots, achatsExterieurs: lignesInternes };
-        }
+      let copieInterne: DocumentInterneDonnees | undefined;
+      // Document interne joint en A5 (à droite) et en A4 automatique (pages suivantes) — jamais en A4 forcé.
+      if ((format ?? "auto") !== "a4") {
+        copieInterne = donneesDocumentInterne(factureId, facture) ?? undefined;
       }
       const chemin = await genererFacturePdf({
         facture,
@@ -1034,15 +1030,33 @@ export function registerMetierIpcHandlers(
   });
 
   /** Même principe que factures:genererPdf, pour le document interne d'approvisionnement (§4 de la correction). Reprend désormais la même identité visuelle que la facture (facture complète + vendeur nécessaires, comme pour la facture elle-même). */
+  /**
+   * Document interne (retour client du 2026-11-24) — données d'une vente :
+   * `null` si elle n'a ni sortie de dépôt ni achat extérieur (rien
+   * d'interne à montrer, même condition que le bouton de l'écran Factures).
+   * Colonnes de dépôt : tous les dépôts actifs, triés par nom.
+   */
+  function donneesDocumentInterne(factureId: string, facture: Parameters<typeof construireDocumentInterne>[0]): DocumentInterneDonnees | null {
+    const lignesInternes = factureRepository.getDocumentInterne(factureId);
+    const repartitionDepots = factureRepository.getRepartitionDepots(factureId);
+    if (lignesInternes.length === 0 && repartitionDepots.length === 0) return null;
+    const depots = emplacementRepository
+      .list()
+      .filter((e) => !e.estPointDeVente && e.actif !== false)
+      .map((e) => e.nom)
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    const carreaux = new Set(produitRepository.classementCatalogue().filter((c) => c.estCarreau).map((c) => c.produitId));
+    return construireDocumentInterne(facture, repartitionDepots, lignesInternes, depots, (produitId) => !!produitId && carreaux.has(produitId));
+  }
+
   ipcMain.handle("factures:genererDocumentInternePdf", async (_e, factureId: string) => {
     const facture = factureRepository.findByIdAvecVendeur(factureId);
     if (!facture) return { success: false, message: "Facture introuvable." };
     try {
-      const lignes = factureRepository.getDocumentInterne(factureId);
-      const repartitionDepots = factureRepository.getRepartitionDepots(factureId);
       const identite = facture.identiteSnapshot ?? parametresRepository.getIdentite();
       const vendeurNomAffiche = resoudreVendeurAffiche(facture, identite);
-      const chemin = await genererDocumentInternePdf({ facture, identite, vendeurNomAffiche, lignes, repartitionDepots });
+      const donnees = donneesDocumentInterne(factureId, facture) ?? construireDocumentInterne(facture, [], [], [], () => false);
+      const chemin = await genererDocumentInterneA4Pdf({ facture, identite, vendeurNomAffiche }, donnees);
       return { success: true, chemin, nomSuggere: `${facture.numero}-document-interne.pdf` };
     } catch (err) {
       // eslint-disable-next-line no-console

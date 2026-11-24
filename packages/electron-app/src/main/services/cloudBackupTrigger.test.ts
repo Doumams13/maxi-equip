@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { declencherSauvegardeAutoEtCloudSiNecessaire, doitRenvoyerDerniereSauvegarde, DELAI_ENTRE_TENTATIVES_MS } from "./cloudBackupTrigger.js";
+import { declencherSauvegardeAutoEtCloudSiNecessaire, doitRenvoyerDerniereSauvegarde, DELAI_ENTRE_TENTATIVES_MS, lancerSauvegardeCloudMaintenant } from "./cloudBackupTrigger.js";
 
 /**
  * Tests réels — système multiposte fiable (2026-10-28). Couvre la
@@ -77,4 +77,29 @@ describe("doitRenvoyerDerniereSauvegarde (0.12.5 — nouvelle tentative après �
     expect(doitRenvoyerDerniereSauvegarde(locale, null, true, maintenant - DELAI_ENTRE_TENTATIVES_MS + 1000, maintenant)).toBe(false);
     expect(doitRenvoyerDerniereSauvegarde(locale, null, true, maintenant - DELAI_ENTRE_TENTATIVES_MS - 1000, maintenant)).toBe(true);
   });
+});
+
+describe("lancerSauvegardeCloudMaintenant (0.12.6 — bouton de l'alerte)", () => {
+  afterEach(() => supprimerConfigCloudBackup());
+  function configurerCloudInjoignable() {
+    process.env["CLOUD_BACKUP_BUCKET"] = "b";
+    process.env["CLOUD_BACKUP_REGION"] = "eu-central-003";
+    process.env["CLOUD_BACKUP_ENDPOINT"] = "http://127.0.0.1:9";
+    process.env["CLOUD_BACKUP_ACCESS_KEY_ID"] = "k";
+    process.env["CLOUD_BACKUP_SECRET_ACCESS_KEY"] = "s";
+  }
+
+  it("sans cloud configuré : non_configuree, aucune sauvegarde créée", async () => {
+    supprimerConfigCloudBackup();
+    const backupService = { creerSauvegardeAutomatiqueImmediate: vi.fn() };
+    expect(await lancerSauvegardeCloudMaintenant(backupService)).toEqual({ statut: "non_configuree" });
+    expect(backupService.creerSauvegardeAutomatiqueImmediate).not.toHaveBeenCalled();
+  });
+
+  it("cloud injoignable pour la vérification : la sauvegarde est quand même tentée ; échec local remonté tel quel", async () => {
+    configurerCloudInjoignable();
+    const backupService = { creerSauvegardeAutomatiqueImmediate: vi.fn(() => ({ success: false, message: "disque plein" })) };
+    expect(await lancerSauvegardeCloudMaintenant(backupService)).toEqual({ statut: "echec", message: "disque plein" });
+    expect(backupService.creerSauvegardeAutomatiqueImmediate).toHaveBeenCalledTimes(1);
+  }, 30_000);
 });

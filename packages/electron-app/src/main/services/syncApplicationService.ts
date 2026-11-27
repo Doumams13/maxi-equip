@@ -45,10 +45,14 @@ export class SyncApplicationService {
   ) {}
 
   /** `true` = traitée avec succès (appliquée maintenant, ou déjà dans l'état visé) — `false` = pas encore possible, à retenter au prochain cycle. */
-  appliquer(entityType: "vente" | "annulation" | "entree" | "sortie" | "transfert", payload: unknown): boolean {
+  appliquer(entityType: "vente" | "annulation" | "entree" | "sortie" | "transfert" | "statut_facture", payload: unknown): boolean {
     switch (entityType) {
       case "vente":
         return this.appliquerVente(payload);
+      case "statut_facture":
+        return this.factureRepository.appliquerStatutDepuisServeur(
+          payload as Parameters<FactureRepository["appliquerStatutDepuisServeur"]>[0]
+        ).traitee;
       case "annulation":
         return this.appliquerAnnulation(payload);
       case "entree":

@@ -37,7 +37,12 @@ export type TypeOperationSync =
   // Voir CategorieCataloguePayload et suivants plus bas dans ce fichier.
   | "categorie"
   | "sous_categorie"
-  | "sous_categorie_champ";
+  | "sous_categorie_champ"
+  // 0.12.8 (2026-11-27) — changement de statut d'une facture (payée
+  // livrée / réservation soldée). Événement immuable du journal comme
+  // "vente"/"annulation" : un entityId (UUID) NEUF par changement, la
+  // facture visée est dans le payload (factureId).
+  | "statut_facture";
 
 export interface OperationRecue {
   entityType: TypeOperationSync;

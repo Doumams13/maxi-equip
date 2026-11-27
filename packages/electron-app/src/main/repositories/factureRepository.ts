@@ -504,12 +504,74 @@ export class FactureRepository {
    * vers "Réservation" qui n'a pas de sens une fois le solde encaissé
    * (refusé en amont, dans VenteService, jamais ici).
    */
-  changerStatut(id: string, statut: { statutPaiement: "reservation" | "payee"; montantPaye: number; statutLivraison: "en_attente" | "livree" }): void {
+  /** Retourne la date enregistrée comme `statut_modifie_le` (réutilisée telle quelle dans l'événement de synchronisation). */
+  changerStatut(id: string, statut: { statutPaiement: "reservation" | "payee"; montantPaye: number; statutLivraison: "en_attente" | "livree" }): { modifieLe: string; livreeLe: string | null } {
     const now = new Date().toISOString();
     const livreeLe = statut.statutLivraison === "livree" ? now : null;
     this.db
-      .prepare("UPDATE factures SET statut_paiement = ?, montant_paye = ?, statut_livraison = ?, livree_le = ?, updated_at = ? WHERE id = ?")
-      .run(statut.statutPaiement, statut.montantPaye, statut.statutLivraison, livreeLe, now, id);
+      .prepare("UPDATE factures SET statut_paiement = ?, montant_paye = ?, statut_livraison = ?, livree_le = ?, statut_modifie_le = ?, updated_at = ? WHERE id = ?")
+      .run(statut.statutPaiement, statut.montantPaye, statut.statutLivraison, livreeLe, now, now, id);
+    return { modifieLe: now, livreeLe };
+  }
+
+  /**
+   * Statut reçu d'un autre poste (0.12.8). `traitee: false` = facture pas
+   * encore connue ici (sa "vente" n'est pas encore appliquée) → retenté au
+   * prochain cycle. Règles :
+   * - facture annulée : ignoré (l'annulation prime) ;
+   * - changement normal : appliqué seulement s'il est plus récent que le
+   *   dernier changement connu ici (le plus récent gagne, dans les deux sens) ;
+   * - rattrapage (`rattrapage: true`, envoi unique à la mise à jour) : ne
+   *   fait qu'avancer (réservation → payée, en attente → livrée), jamais
+   *   reculer ; une facture inconnue est ignorée (jamais retentée sans fin).
+   */
+  appliquerStatutDepuisServeur(s: {
+    factureId: string;
+    statutPaiement: "reservation" | "payee";
+    montantPaye: number;
+    statutLivraison: "en_attente" | "livree";
+    livreeLe?: string | null;
+    modifieLe: string;
+    rattrapage?: boolean;
+  }): { traitee: boolean; applique: boolean } {
+    const ligne = this.db
+      .prepare("SELECT statut_paiement, montant_paye, statut_livraison, livree_le, statut_modifie_le, annulee_le FROM factures WHERE id = ?")
+      .get(s.factureId) as
+      | { statut_paiement: string; montant_paye: number; statut_livraison: string; livree_le: string | null; statut_modifie_le: string | null; annulee_le: string | null }
+      | undefined;
+    if (!ligne) return { traitee: s.rattrapage === true, applique: false };
+    if (ligne.annulee_le) return { traitee: true, applique: false };
+
+    let statutPaiement = ligne.statut_paiement;
+    let montantPaye = ligne.montant_paye;
+    let statutLivraison = ligne.statut_livraison;
+    let livreeLe = ligne.livree_le;
+    let modifieLe = ligne.statut_modifie_le;
+    if (s.rattrapage) {
+      if (statutPaiement === "reservation" && s.statutPaiement === "payee") {
+        statutPaiement = "payee";
+        montantPaye = s.montantPaye;
+      }
+      if (statutLivraison !== "livree" && s.statutLivraison === "livree") {
+        statutLivraison = "livree";
+        livreeLe = s.livreeLe ?? s.modifieLe;
+      }
+      if (!modifieLe || s.modifieLe > modifieLe) modifieLe = s.modifieLe;
+    } else {
+      if (ligne.statut_modifie_le && ligne.statut_modifie_le >= s.modifieLe) return { traitee: true, applique: false };
+      statutPaiement = s.statutPaiement;
+      montantPaye = s.montantPaye;
+      statutLivraison = s.statutLivraison;
+      livreeLe = s.statutLivraison === "livree" ? (s.livreeLe ?? s.modifieLe) : null;
+      modifieLe = s.modifieLe;
+    }
+    const change =
+      statutPaiement !== ligne.statut_paiement || montantPaye !== ligne.montant_paye || statutLivraison !== ligne.statut_livraison || modifieLe !== ligne.statut_modifie_le;
+    if (!change) return { traitee: true, applique: false };
+    this.db
+      .prepare("UPDATE factures SET statut_paiement = ?, montant_paye = ?, statut_livraison = ?, livree_le = ?, statut_modifie_le = ?, updated_at = ? WHERE id = ?")
+      .run(statutPaiement, montantPaye, statutLivraison, livreeLe, modifieLe, new Date().toISOString(), s.factureId);
+    return { traitee: true, applique: true };
   }
 
   /**

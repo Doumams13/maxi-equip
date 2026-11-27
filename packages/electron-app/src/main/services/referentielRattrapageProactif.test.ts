@@ -247,7 +247,8 @@ describe("Phase 5 (référentiel commun), sous-phase 5.7 — scénario réaliste
       vi.fn(async (url: string, options?: RequestInit) => {
         if (url.includes("/sync/push")) {
           const corps = JSON.parse(options!.body as string) as { operations: { entityType: string; payload: { categorieId: string; nom: string } }[] };
-          requeteRecueA = { categories: corps.operations.filter((o) => o.entityType === "categorie").map((o) => o.payload) };
+          // Envoi par lots depuis la 0.12.8 : on cumule les catégories de toutes les requêtes du cycle.
+          requeteRecueA = { categories: [...(requeteRecueA?.categories ?? []), ...corps.operations.filter((o) => o.entityType === "categorie").map((o) => o.payload)] };
           return new Response(JSON.stringify({ results: corps.operations.map((o) => ({ entityId: o.payload.categorieId, statut: "cree" })) }), { status: 200 });
         }
         return new Response(JSON.stringify({ operations: [], cursor: 0 }), { status: 200 });

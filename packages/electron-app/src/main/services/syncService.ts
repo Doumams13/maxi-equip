@@ -33,8 +33,9 @@ const DELAI_MAX_REQUETE_IMAGE_MS = 45_000;
  * métier (voir SyncApplicationService), partagés entre le traitement
  * "à chaud" (PULL) et le balayage de rattrapage ci-dessous.
  */
-type TypeOperationMetier = "vente" | "annulation" | "entree" | "sortie" | "transfert";
-const ENTITY_TYPES_METIER: ReadonlySet<string> = new Set<TypeOperationMetier>(["vente", "annulation", "entree", "sortie", "transfert"]);
+const TAILLE_LOT_PUSH = 100;
+type TypeOperationMetier = "vente" | "annulation" | "entree" | "sortie" | "transfert" | "statut_facture";
+const ENTITY_TYPES_METIER: ReadonlySet<string> = new Set<TypeOperationMetier>(["vente", "annulation", "entree", "sortie", "transfert", "statut_facture"]);
 
 export interface ResultatSynchronisation {
   success: boolean;
@@ -585,7 +586,7 @@ export class SyncService {
       // réussir maintenant.
       if (this.applicationOperationsMetier) {
         try {
-          const operations = this.syncRepository.listerNonAppliquees(["vente", "annulation", "entree", "sortie", "transfert"]);
+          const operations = this.syncRepository.listerNonAppliquees(["vente", "annulation", "entree", "sortie", "transfert", "statut_facture"]);
           for (const operation of operations) {
             try {
               const traitee = this.applicationOperationsMetier.appliquer(operation.entityType as TypeOperationMetier, operation.payload);
@@ -632,11 +633,15 @@ export class SyncService {
     let confirmees = 0;
     let envoyees = 0;
 
-    if (aEnvoyer.length > 0) {
-      const resultatLot = await this.pousserLotGenerique(apiUrl, jwt, aEnvoyer);
+    // 0.12.8 : envoi par lots de TAILLE_LOT_PUSH — le serveur refuse un lot
+    // de plus de 500 opérations (validationSync.ts), ce qui bloquait TOUT
+    // l'envoi (rattrapage des statuts de facture, longue coupure réseau...).
+    for (let debut = 0; debut < aEnvoyer.length; debut += TAILLE_LOT_PUSH) {
+      const lot = aEnvoyer.slice(debut, debut + TAILLE_LOT_PUSH);
+      const resultatLot = await this.pousserLotGenerique(apiUrl, jwt, lot);
       if (!resultatLot.success) return resultatLot;
       confirmees += resultatLot.confirmees;
-      envoyees += aEnvoyer.length;
+      envoyees += lot.length;
     }
 
     if (imagesAEnvoyer.length > 0) {

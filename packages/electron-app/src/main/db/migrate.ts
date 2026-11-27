@@ -182,6 +182,8 @@ export function runMigrations(db: Database.Database): RapportMigrations {
   reaffecterModelesDepuisSousCategoriesCopieVersOriginalesSiPresentes(db);
   // Devis proforma (point 6, 2026-11-24)
   ajouterColonnesDevisProformaSiAbsentes(db);
+  // Synchronisation des statuts de facture (0.12.8, 2026-11-27)
+  ajouterStatutModifieLeEtRattraperStatutsSiAbsent(db);
   setSchemaVersion(db);
   return { idsModelesReclasses: [...idsCarreauxReclasses, ...idsDiversReclasses], idsSousCategoriesMarqueesCarreau };
 }
@@ -1591,4 +1593,50 @@ function ajouterColonnesDevisProformaSiAbsentes(db: Database.Database): void {
   if (!colonnesLignes.some((c) => c.name === "unite_vente")) db.exec("ALTER TABLE lignes_devis ADD COLUMN unite_vente TEXT");
   if (!colonnesLignes.some((c) => c.name === "surface_carton_m2")) db.exec("ALTER TABLE lignes_devis ADD COLUMN surface_carton_m2 REAL");
   if (!colonnesLignes.some((c) => c.name === "ordre")) db.exec("ALTER TABLE lignes_devis ADD COLUMN ordre INTEGER NOT NULL DEFAULT 0");
+}
+
+/**
+ * Synchronisation des statuts de facture (0.12.8, 2026-11-27) — jusqu'ici
+ * un passage en "payée livrée" ou le solde d'une réservation restait sur
+ * le poste où il avait été fait (VenteService.changerStatutFacture
+ * n'écrivait que localement). `statut_modifie_le` = date du dernier
+ * changement de statut connu (local ou reçu) : sert de règle "le plus
+ * récent gagne" à la réception (voir FactureRepository.appliquerStatutDepuisServeur).
+ *
+ * Rattrapage UNIQUE, au moment où la colonne est ajoutée : chaque poste
+ * renvoie le statut actuel de ses factures déjà livrées ou payées, marqué
+ * `rattrapage: true`. Côté réception, un rattrapage ne fait QUE faire
+ * avancer un statut (réservation → payée, en attente → livrée), jamais
+ * reculer — un poste dont la copie est restée en retard ne peut donc
+ * jamais écraser la bonne valeur d'un autre.
+ */
+function ajouterStatutModifieLeEtRattraperStatutsSiAbsent(db: Database.Database): void {
+  const colonnes = db.prepare("PRAGMA table_info(factures)").all() as { name: string }[];
+  if (colonnes.length === 0 || colonnes.some((c) => c.name === "statut_modifie_le")) return;
+  db.exec("ALTER TABLE factures ADD COLUMN statut_modifie_le TEXT");
+  const boiteEnvoi = db.prepare("PRAGMA table_info(boite_envoi)").all() as { name: string }[];
+  if (boiteEnvoi.length === 0) return;
+  const factures = db
+    .prepare(
+      `SELECT id, statut_paiement, montant_paye, statut_livraison, livree_le, updated_at FROM factures
+       WHERE annulee_le IS NULL AND (statut_livraison = 'livree' OR statut_paiement = 'payee')`
+    )
+    .all() as { id: string; statut_paiement: string; montant_paye: number; statut_livraison: string; livree_le: string | null; updated_at: string }[];
+  const now = new Date().toISOString();
+  const inserer = db.prepare(
+    `INSERT INTO boite_envoi (id, entity_type, entity_id, payload_json, status, attempts, next_attempt_at, last_error, created_at, updated_at)
+     VALUES (?, 'statut_facture', ?, ?, 'pending', 0, NULL, NULL, ?, ?)`
+  );
+  for (const f of factures) {
+    const payload = {
+      factureId: f.id,
+      statutPaiement: f.statut_paiement,
+      montantPaye: f.montant_paye,
+      statutLivraison: f.statut_livraison,
+      livreeLe: f.livree_le,
+      modifieLe: f.updated_at,
+      rattrapage: true,
+    };
+    inserer.run(randomUUID(), randomUUID(), JSON.stringify(payload), now, now);
+  }
 }

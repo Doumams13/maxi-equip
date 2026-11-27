@@ -47,6 +47,8 @@ const TYPES_SUPPORTES: readonly TypeOperationSync[] = [
   "categorie",
   "sous_categorie",
   "sous_categorie_champ",
+  // 0.12.8 — voir serverStorage.ts (TypeOperationSync).
+  "statut_facture",
 ];
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -1035,11 +1035,17 @@ describe("changerStatutFacture — menu de statut (Réservation / Payée non liv
     const changerStatutAppels: unknown[] = [];
     const factureRepository = {
       findById: (id: string) => (id === facture.id ? facture : null),
-      changerStatut: (id: string, statut: unknown) => { changerStatutAppels.push({ id, statut }); },
+      changerStatut: (id: string, statut: unknown) => {
+        changerStatutAppels.push({ id, statut });
+        return { modifieLe: "2026-11-27T12:00:00.000Z", livreeLe: null };
+      },
     };
     const fauxDb = { transaction: (fn: () => unknown) => () => fn() };
+    // 0.12.8 : chaque changement de statut part aussi vers les autres postes.
+    const envoisStatut: { entityType: string; payload: unknown }[] = [];
+    const boiteEnvoi = { creer: (entityType: string, _id: string, payload: unknown) => { envoisStatut.push({ entityType, payload }); return "x"; } };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = new VenteService(fauxDb as any, {} as any, {} as any, {} as any, factureRepository as any, {} as any);
+    const service = new VenteService(fauxDb as any, {} as any, {} as any, {} as any, factureRepository as any, boiteEnvoi as any);
     return { service, changerStatutAppels };
   }
 

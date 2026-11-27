@@ -24,6 +24,8 @@ import { randomUUID } from "node:crypto";
  */
 export type TypeOperationBoiteEnvoi =
   | "vente"
+  // 0.12.8 — changement de statut d'une facture (un entityId neuf par changement).
+  | "statut_facture"
   | "annulation"
   | "entree"
   | "sortie"

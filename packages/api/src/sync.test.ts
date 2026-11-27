@@ -100,6 +100,27 @@ describe("Routes de synchronisation — Phase 3.6 (stockage SQLite réel en mém
     });
   });
 
+  it("0.12.8 — 'statut_facture' : accepté, journalisé et renvoyé au pull ; deux changements successifs de la même facture coexistent (un entityId neuf par changement)", async () => {
+    const router = createRouter();
+    const push = (entityId: string, statutLivraison: string) =>
+      router.dispatch(
+        req({
+          method: "POST",
+          path: "/v1/sync/push",
+          headers: { authorization: `Bearer ${tokenValide()}` },
+          body: { operations: [{ entityType: "statut_facture", entityId, payload: { factureId: "f1", statutPaiement: "payee", montantPaye: 5000, statutLivraison, modifieLe: new Date().toISOString() } }] },
+        })
+      );
+    expect((await push(UUID_1, "livree")).status).toBe(200);
+    expect((await push(UUID_2, "en_attente")).status).toBe(200);
+    const pullRes = await router.dispatch(req({ path: "/v1/sync/pull", headers: { authorization: `Bearer ${tokenValide()}` } }));
+    const ops = (pullRes.body as { operations: { entityType: string; entityId: string; payload: { statutLivraison: string } }[] }).operations;
+    expect(ops.map((o) => [o.entityType, o.entityId, o.payload.statutLivraison])).toEqual([
+      ["statut_facture", UUID_1, "livree"],
+      ["statut_facture", UUID_2, "en_attente"],
+    ]);
+  });
+
   it("TEST 2 — PUSH sans JWT : 401, aucune donnée enregistrée", async () => {
     const router = createRouter();
     const res = await router.dispatch(

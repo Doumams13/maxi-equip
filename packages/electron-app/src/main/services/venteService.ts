@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { stock as domainStock, invoicing as domainInvoicing, vendeur as domainVendeur, pricing as domainPricing } from "@maxi-equip/domain";
 import type { LigneFacture, LigneReleveInterne } from "@maxi-equip/shared-types";
 import { StockRepository } from "../repositories/stockRepository.js";
@@ -518,11 +519,18 @@ export class VenteService {
     // le solde restant s'il s'agissait d'une réservation — le CGV impose un
     // paiement intégral avant livraison, jamais de livraison partiellement payée.
     const totalNet = domainInvoicing.calculerTotalNet(facture.total, facture.remise);
-    this.factureRepository.changerStatut(factureId, {
-      statutPaiement: "payee",
+    const statut = {
+      statutPaiement: "payee" as const,
       montantPaye: totalNet,
-      statutLivraison: nouveauStatut === "payee_livree" ? "livree" : "en_attente",
-    });
+      statutLivraison: nouveauStatut === "payee_livree" ? ("livree" as const) : ("en_attente" as const),
+    };
+    // 0.12.8 : le changement part aussi vers les autres postes (avant, il
+    // restait sur ce poste). Même transaction que l'écriture locale : jamais
+    // l'un sans l'autre. Un entityId neuf par changement (journal serveur immuable).
+    this.db.transaction(() => {
+      const { modifieLe, livreeLe } = this.factureRepository.changerStatut(factureId, statut);
+      this.boiteEnvoiRepository.creer("statut_facture", randomUUID(), { factureId, ...statut, livreeLe, modifieLe });
+    })();
   }
 
   /**

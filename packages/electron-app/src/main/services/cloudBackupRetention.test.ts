@@ -279,6 +279,30 @@ describe("Rétention cloud, intégrité, espace et verrou — audit stockage B2 
     }, 20_000);
   });
 
+  describe("clé B2 restreinte au préfixe backups/ (incident du 2026-11-26, « not entitled »)", () => {
+    it("le calcul d'espace ne bloque plus la sauvegarde quand lister le bucket entier est refusé", async () => {
+      await injecterSauvegardeCloud("cle-restreinte", 0, 2_000_000);
+      await provider.upload("postgres/maxiequip-postgres-2026-11-26T03-00-00Z.sql.gz", Buffer.alloc(1024, "p"));
+      // Même comportement que B2 avec une clé à namePrefix "backups/" : toute liste hors de ce préfixe est refusée.
+      const appelsListe: string[] = [];
+      const restreint = Object.assign(Object.create(Object.getPrototypeOf(provider)), provider) as S3CloudBackupProvider;
+      restreint.list = async (prefixe: string) => {
+        appelsListe.push(prefixe);
+        if (!prefixe.startsWith("backups/")) throw Object.assign(new Error("not entitled"), { name: "AccessDenied" });
+        return provider.list(prefixe);
+      };
+      const serviceRestreint = new CloudBackupService(restreint);
+
+      const espace = await serviceRestreint.verifierEspaceCloudSuffisant(1_000_000, 1_000_000_000);
+      expect(espace.suffisant).toBe(true);
+      expect(espace.octetsUtilisesActuels).toBeGreaterThanOrEqual(2_000_000);
+      expect(appelsListe).toContain("");
+      expect(appelsListe).toContain("backups/");
+
+      await provider.delete("postgres/maxiequip-postgres-2026-11-26T03-00-00Z.sql.gz");
+    }, 15_000);
+  });
+
   describe("orchestration complète (cloudBackupTrigger) — verrou, espace, échec", () => {
     it("deux déclenchements synchrones ne produisent qu'un seul envoi réel (verrou anti-doublon)", async () => {
       configurerCloudEnv();

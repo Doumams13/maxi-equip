@@ -268,7 +268,18 @@ export class CloudBackupService {
    * le rôle de listerSauvegardesCloudDetaillees, scopé à `backups/`).
    */
   private async calculerUsageTotalBucketOctets(): Promise<number> {
-    const objets = await this.provider.list("");
+    // Incident du 2026-11-26 : la clé B2 des postes est restreinte au
+    // préfixe `backups/` — lister le bucket entier est refusé par B2
+    // ("AccessDenied: not entitled") et bloquait TOUTE sauvegarde cloud
+    // avant l'envoi. Repli : on compte ce que la clé a le droit de voir
+    // (les dumps PostgreSQL du serveur pèsent ~100 Ko, négligeables face
+    // au plafond, qui garde de toute façon une marge sous celui de B2).
+    let objets;
+    try {
+      objets = await this.provider.list("");
+    } catch {
+      objets = await this.provider.list("backups/");
+    }
     return objets.reduce((somme, o) => somme + o.taille, 0);
   }
 
